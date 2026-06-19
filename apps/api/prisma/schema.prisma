@@ -1,0 +1,220 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ── Enums ─────────────────────────────────────────────────────────────────────
+
+enum ReviewArea {
+  USABILITY
+  ACCESSIBILITY
+  CONSISTENCY
+  CONTENT_UX
+  RISK
+  RECOMMENDATIONS
+}
+
+enum Severity {
+  P0
+  P1
+  P2
+}
+
+enum FindingStatus {
+  PROPOSED
+  ACCEPTED
+  EDITED
+  DISMISSED
+  ESCALATED
+}
+
+enum ChecklistStatus {
+  DRAFT
+  APPROVED
+  DEPRECATED
+}
+
+enum PrincipleCategory {
+  NIELSEN_HEURISTICS
+  COGNITIVE_LAWS
+  GESTALT
+  VISUAL_DESIGN
+  ACCESSIBILITY_WCAG
+  CONTENT_MICROCOPY
+  CUSTOM
+}
+
+// ── Models ────────────────────────────────────────────────────────────────────
+
+model Review {
+  id                  String        @id @default(cuid())
+  name                String
+  product             String
+  domain              String        @default("")
+  reviewType          String        @default("full")
+  owner               String        @default("User")
+  status              String        @default("draft")
+  stage               String?
+  uxScore             Int?
+  criteria            String[]      @default([])
+  depth               String        @default("standard")
+  confidenceThreshold Int           @default(75)
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+
+  findings    Finding[]
+  assets      Asset[]
+  reports     Report[]
+
+  @@map("reviews")
+}
+
+model Asset {
+  id          String   @id @default(cuid())
+  reviewId    String
+  name        String
+  mimeType    String
+  base64Data  String?  @db.Text
+  contentText String?  @db.Text
+  sizeBytes   Int?
+  createdAt   DateTime @default(now())
+
+  review Review @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+
+  @@map("assets")
+}
+
+model Report {
+  id               String   @id @default(cuid())
+  reviewId         String
+  name             String
+  template         String   @default("full")
+  executiveSummary String   @default("") @db.Text
+  contentMd        String   @default("") @db.Text
+  status           String   @default("ai_draft")
+  createdBy        String   @default("User")
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  review Review @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+
+  @@map("reports")
+}
+
+model Finding {
+  id               String        @id @default(cuid())
+  reviewId         String
+  title            String
+  description      String        @default("")
+  recommendation   String        @default("")
+  severity         Severity      @default(P2)
+  area             ReviewArea    @default(USABILITY)
+  screen           String?
+  principle        String?
+  observation      String?
+  why              String?
+  businessImpact   String?
+  a11yImpact       String?
+  status           FindingStatus @default(PROPOSED)
+  confidence       Int           @default(80)
+  notes            String?
+  escalationReason String?
+  isAiGenerated    Boolean       @default(true)
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  review      Review           @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+  reviewBasis ReviewBasisItem[]
+
+  @@map("findings")
+}
+
+model ReviewBasisItem {
+  id          String  @id @default(cuid())
+  findingId   String
+  type        String
+  name        String
+  explanation String  @default("")
+
+  finding Finding @relation(fields: [findingId], references: [id], onDelete: Cascade)
+
+  @@map("review_basis_items")
+}
+
+model Checklist {
+  id          String          @id @default(cuid())
+  title       String
+  description String?
+  status      ChecklistStatus @default(DRAFT)
+  version     Int             @default(1)
+  approvedAt  DateTime?
+  approvedBy  String?
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  items   ChecklistItem[]
+  history ChecklistHistory[]
+
+  @@map("checklists")
+}
+
+model ChecklistItem {
+  id          String      @id @default(cuid())
+  checklistId String
+  label       String
+  description String?
+  principleId String?
+  area        ReviewArea?
+  required    Boolean     @default(true)
+  order       Int         @default(0)
+  createdAt   DateTime    @default(now())
+
+  checklist Checklist   @relation(fields: [checklistId], references: [id], onDelete: Cascade)
+  principle UxPrinciple? @relation(fields: [principleId], references: [id])
+
+  @@map("checklist_items")
+}
+
+model ChecklistHistory {
+  id          String   @id @default(cuid())
+  checklistId String
+  action      String
+  performedBy String
+  notes       String?
+  snapshot    Json?
+  createdAt   DateTime @default(now())
+
+  checklist Checklist @relation(fields: [checklistId], references: [id], onDelete: Cascade)
+
+  @@map("checklist_history")
+}
+
+model UxPrinciple {
+  id          String            @id @default(cuid())
+  name        String            @unique
+  description String
+  category    PrincipleCategory
+  source      String?
+  enabled     Boolean           @default(true)
+  isCustom    Boolean           @default(false)
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  checklistItems ChecklistItem[]
+
+  @@map("ux_principles")
+}
+
+model Setting {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     Json
+  updatedAt DateTime @updatedAt
+
+  @@map("settings")
+}
