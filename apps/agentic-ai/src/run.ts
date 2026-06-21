@@ -7,13 +7,17 @@
  * Agents: Grounding → [6 UX Review Agents] in parallel
  *
  * HOW TO USE:
- * 1. Put your screenshots in the samples/ folder:
- * samples/screen1.png
- * 2. Edit REVIEW_CONTEXT below to describe what you are reviewing
+ * 1. Set REVIEW_IMAGE_PATHS with comma-separated local file paths.
+ * 2. Optionally set REVIEW_CONTEXT, REVIEW_SELECTED_AGENTS, REVIEW_SELECTED_PRINCIPLES_JSON.
  * 3. Run: npm start
  */
 
-import "dotenv/config";
+import path from "path";
+import dotenv from "dotenv";
+
+dotenv.config({ path: path.resolve(__dirname, "../../../../.env") });
+dotenv.config({ path: path.resolve(process.cwd(), "../../.env") });
+dotenv.config();
 import { readFileSync, existsSync, mkdirSync, writeFileSync } from "fs";
 import { buildGraph, type ReviewAgentName } from "./graph.js";
 import type { GraphStateType, SelectedPrinciples } from "./state.js";
@@ -35,39 +39,71 @@ import type {
   SynthesisOutput,
 } from "./schemas.js";
 
+const REVIEW_AGENT_NAMES: ReviewAgentName[] = [
+  "usability",
+  "accessibility",
+  "cognitiveInteraction",
+  "contentMicrocopy",
+  "gestalt",
+  "visualDesign",
+];
+
+function parseCsv(value?: string): string[] {
+  return (value ?? "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function parseSelectedAgents(value?: string): ReviewAgentName[] {
+  const requested = parseCsv(value);
+  if (requested.length === 0) {
+    return REVIEW_AGENT_NAMES;
+  }
+
+  return requested.filter((agent): agent is ReviewAgentName =>
+    REVIEW_AGENT_NAMES.includes(agent as ReviewAgentName)
+  );
+}
+
+function parseSelectedPrinciples(value?: string): SelectedPrinciples | null {
+  if (!value?.trim()) return null;
+
+  try {
+    return JSON.parse(value) as SelectedPrinciples;
+  } catch {
+    throw new Error("Invalid REVIEW_SELECTED_PRINCIPLES_JSON. Provide valid JSON.");
+  }
+}
+
 // ─── Your Sample Images ───────────────────────────────────────────────────
 // Paths are relative to the project root (where you run `npm start`)
 // Supported: .png, .jpg, .jpeg, .webp
 
-const IMAGE_PATHS = [
-  "apps/agentic-ai/samples/screen1.png"
-  // "apps/agentic-ai/samples/screen2.png",
-  // "apps/agentic-ai/samples/screen3.png",
-];
+const IMAGE_PATHS = parseCsv(process.env.REVIEW_IMAGE_PATHS);
+
+if (IMAGE_PATHS.length === 0) {
+  throw new Error("Missing REVIEW_IMAGE_PATHS. Provide comma-separated local image paths.");
+}
 
 // ─── Your Context ──────────────────────────────────────────────────────────
 // Tell the agents what they are reviewing. The more specific, the better.
 
-const REVIEW_CONTEXT = `
-This is the "Moods" landing page for a boredom-curing website. The primary user goal is to quickly find an engaging activity without having a specific search term in mind. I want to evaluate if the top navigation clearly communicates the site's offerings and if the "Pick a vibe" categorization (using emojis and descriptive subtext like "Make me think a little") effectively reduces cognitive load for aimless users.
-`.trim();
+const REVIEW_CONTEXT = (process.env.REVIEW_CONTEXT ?? "").trim() ||
+  "Analyze the uploaded UI assets against selected UX and accessibility principles.";
 
 // ─── Agent Selection ───────────────────────────────────────────────────────
 // Pick a subset to run only those reviewers, or include all 6 for a full review.
 
-const SELECTED_REVIEW_AGENTS: ReviewAgentName[] = [
-  "accessibility",
-  "usability",
-];
+const SELECTED_REVIEW_AGENTS: ReviewAgentName[] = parseSelectedAgents(process.env.REVIEW_SELECTED_AGENTS);
 
 // Optional principle filter for synthesis.
 // - null: all principle families are available (backward-compatible default)
 // - set a family to true: allow the full family
 // - set a family to a string[]: allow only those named principles
-const SELECTED_PRINCIPLES: SelectedPrinciples | null = {
-  nielsen: true,
-  pour: true,
-};
+const SELECTED_PRINCIPLES: SelectedPrinciples | null = parseSelectedPrinciples(
+  process.env.REVIEW_SELECTED_PRINCIPLES_JSON
+);
 
 // ─── Run Output ──────────────────────────────────────────────────────────────
 // Each run writes a timestamped JSON file here for later comparison / analysis.

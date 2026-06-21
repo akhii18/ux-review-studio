@@ -17,6 +17,7 @@ const SaveAssetSchema = z.object({
   name:        z.string().min(1),
   mimeType:    z.string().min(1),
   base64Data:  z.string().optional(),
+  blobUrl:     z.string().url().optional(),
   contentText: z.string().optional(),
   sizeBytes:   z.number().int().optional(),
 });

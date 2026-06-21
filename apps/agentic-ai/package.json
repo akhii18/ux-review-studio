@@ -1,0 +1,10 @@
+{
+  "name": "@uxm/agentic-ai",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "tsc -p tsconfig.json --watch",
+    "build": "tsc -p tsconfig.json",
+    "start": "tsx src/run.ts"
+  }
+}

@@ -1,6 +1,6 @@
 import { prisma } from "../config/prisma";
-import type { CreateChecklist, UpdateChecklist } from "@uxm/shared";
-import type { ReviewArea } from "@prisma/client";
+import type { CreateChecklist, ReviewArea, UpdateChecklist } from "@uxm/shared";
+import type { Prisma } from "@prisma/client";
 
 export const ChecklistsRepository = {
   async findAll() {
@@ -47,7 +47,7 @@ export const ChecklistsRepository = {
     const checklist = await prisma.checklist.findUnique({ where: { id } });
     if (!checklist) return null;
 
-    return prisma.$transaction(async (tx) => {
+    return prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       if (data.items !== undefined) {
         await tx.checklistItem.deleteMany({ where: { checklistId: id } });
         await tx.checklistItem.createMany({
@@ -82,7 +82,7 @@ export const ChecklistsRepository = {
   },
 
   async approve(id: string, approvedBy: string) {
-    return prisma.$transaction(async (tx) => {
+    return prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       const updated = await tx.checklist.update({
         where: { id },
         data: {

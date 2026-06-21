@@ -1,4 +1,8 @@
+import path from "path";
 import dotenv from "dotenv";
+
+dotenv.config({ path: path.resolve(__dirname, "../../../../.env") });
+dotenv.config({ path: path.resolve(process.cwd(), "../../.env") });
 dotenv.config();
 
 function required(key: string): string {
@@ -12,9 +16,10 @@ export const config = {
   nodeEnv: process.env.NODE_ENV ?? "development",
   corsOrigin: process.env.CORS_ORIGIN ?? "http://localhost:3000",
   databaseUrl: required("DATABASE_URL"),
-  // Azure OpenAI — validated at pipeline start, not at boot (allows the app to run without AI config)
-  azureOpenAiEndpoint:   process.env.AZURE_OPENAI_ENDPOINT,
-  azureOpenAiKey:        process.env.AZURE_OPENAI_API_KEY,
-  azureOpenAiDeployment: process.env.AZURE_OPENAI_DEPLOYMENT,
+  azureOpenAiEndpoint: required("AZURE_OPENAI_ENDPOINT"),
+  azureOpenAiKey: required("AZURE_OPENAI_API_KEY"),
+  azureOpenAiDeployment: required("AZURE_OPENAI_DEPLOYMENT"),
   azureOpenAiApiVersion: process.env.AZURE_OPENAI_API_VERSION ?? "2024-12-01-preview",
+  azureStorageConnectionString: required("AZURE_STORAGE_CONNECTION_STRING"),
+  azureStorageContainerName: required("AZURE_STORAGE_CONTAINER_NAME"),
 } as const;

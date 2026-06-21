@@ -139,7 +139,11 @@ function WorkspaceContent() {
         return {
           id: asset.id,
           name: stripExtension(asset.name),
-          imageUrl: asset.base64Data ? `data:${asset.mimeType};base64,${asset.base64Data}` : undefined,
+          imageUrl: asset.blobUrl
+            ? asset.blobUrl
+            : asset.base64Data
+            ? `data:${asset.mimeType};base64,${asset.base64Data}`
+            : undefined,
           issues: screenFindings.length,
           p0: screenFindings.filter((f) => f.severity === "P0").length,
         };

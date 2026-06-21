@@ -2,7 +2,6 @@ import type { Metadata } from "next";
 import "./globals.css";
 import { Providers } from "@/lib/providers";
 import { AppSidebar } from "@/components/ui/AppSidebar";
-import { SidebarProvider, SidebarInset } from "@/components/ui/sidebar";
 
 export const metadata: Metadata = {
   title: "UXNavigator — AI-assisted UX governance",
@@ -13,20 +12,16 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
-      <body className="font-sans antialiased">
+      <body>
         <Providers>
-          <SidebarProvider>
+          <div className="flex min-h-dvh w-full bg-background">
             <AppSidebar />
-            <SidebarInset>
-              <main
-                id="main-content"
-                tabIndex={-1}
-                className="flex flex-1 flex-col focus:outline-none"
-              >
+            <div className="flex min-w-0 flex-1 flex-col">
+              <main id="main-content" tabIndex={-1} className="flex flex-1 flex-col focus:outline-none">
                 {children}
               </main>
-            </SidebarInset>
-          </SidebarProvider>
+            </div>
+          </div>
         </Providers>
       </body>
     </html>

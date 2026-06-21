@@ -1,5 +1,5 @@
 import { prisma } from "./config/prisma";
-import { runReviewPipeline } from "./services/ai/orchestrator";
+import { runReviewPipeline } from "./services/ai/agentic";
 
 async function testPipeline() {
   console.log("Creating test review in database...");

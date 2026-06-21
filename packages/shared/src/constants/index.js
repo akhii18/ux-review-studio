@@ -1,14 +1,11 @@
-"use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.DEFAULT_SETTINGS = exports.REVIEW_BASIS_LIBRARY = exports.PRINCIPLE_CATEGORY_LABELS = exports.REVIEW_AREA_LABELS = exports.REVIEW_AREAS = exports.SEVERITY_LABELS = void 0;
 // ── Severity / Priority labels ────────────────────────────────────────────────
-exports.SEVERITY_LABELS = {
+export const SEVERITY_LABELS = {
     P0: "P0 · Blocker",
     P1: "P1 · Important",
     P2: "P2 · Polish",
 };
 // ── Review areas ──────────────────────────────────────────────────────────────
-exports.REVIEW_AREAS = [
+export const REVIEW_AREAS = [
     "USABILITY",
     "ACCESSIBILITY",
     "CONSISTENCY",
@@ -16,7 +13,7 @@ exports.REVIEW_AREAS = [
     "RISK",
     "RECOMMENDATIONS",
 ];
-exports.REVIEW_AREA_LABELS = {
+export const REVIEW_AREA_LABELS = {
     USABILITY: "Usability",
     ACCESSIBILITY: "Accessibility",
     CONSISTENCY: "Consistency",
@@ -25,7 +22,7 @@ exports.REVIEW_AREA_LABELS = {
     RECOMMENDATIONS: "Recommendations",
 };
 // ── Principle categories ──────────────────────────────────────────────────────
-exports.PRINCIPLE_CATEGORY_LABELS = {
+export const PRINCIPLE_CATEGORY_LABELS = {
     NIELSEN_HEURISTICS: "Nielsen Heuristics",
     COGNITIVE_LAWS: "Cognitive Laws",
     GESTALT: "Gestalt Principles",
@@ -34,7 +31,7 @@ exports.PRINCIPLE_CATEGORY_LABELS = {
     CONTENT_MICROCOPY: "Content & Microcopy",
     CUSTOM: "Custom",
 };
-exports.REVIEW_BASIS_LIBRARY = [
+export const REVIEW_BASIS_LIBRARY = [
     // Nielsen Heuristics
     {
         name: "Nielsen — Visibility of system status",
@@ -193,7 +190,7 @@ exports.REVIEW_BASIS_LIBRARY = [
     },
 ];
 // ── Default settings ──────────────────────────────────────────────────────────
-exports.DEFAULT_SETTINGS = {
+export const DEFAULT_SETTINGS = {
     review_depth: "standard",
     review_confidence_threshold: 75,
     checklist_require_approval: true,
