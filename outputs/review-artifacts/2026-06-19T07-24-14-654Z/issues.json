@@ -1,0 +1,286 @@
+{
+  "metadata": {
+    "generatedAt": "2026-06-19T07:24:14.753Z",
+    "runStamp": "2026-06-19T07-24-14-654Z",
+    "imagePaths": [
+      "apps/agentic-ai/samples/screen1.png"
+    ],
+    "screenMetadata": [
+      {
+        "screenIndex": 0,
+        "screenId": "screen-1",
+        "path": "apps/agentic-ai/samples/screen1.png",
+        "width": 1879,
+        "height": 883
+      }
+    ],
+    "artifactSchemaVersion": "1.0.0",
+    "annotationLabelMode": "issue-number"
+  },
+  "summary": "All synthesized findings are covered by grounded elements and measured geometry candidates where available, providing precise review boxes for human assessment.",
+  "coverageNote": "Grounded elements provide exact bounding boxes for all findings except synth-001 where multiple category cards are involved; measured geometry candidates supplement with visual stacks for broader coverage. No fallback to freehand coordinates was needed. Unresolved findings: 0.",
+  "issues": [
+    {
+      "findingId": "synth-001",
+      "severity": "P0",
+      "region": "main content categories",
+      "issue": "The category cards use emojis without accessible text alternatives and lack explicit affordances such as buttons or hover states to indicate they are clickable, which may confuse users and hinder assistive technology interpretation.",
+      "fix": "Provide appropriate aria-labels or aria-hidden attributes with descriptive text for emojis to ensure screen readers convey their meaning or ignore decorative emojis. Add clear visual affordances like button styling, hover effects, or clickable cursor changes to all category cards to signal interactivity.",
+      "selectedElementRefs": [
+        "screen1-el-9",
+        "screen1-el-10",
+        "screen1-el-11",
+        "screen1-el-12",
+        "screen1-el-13",
+        "screen1-el-14"
+      ],
+      "selectedCandidateIds": [
+        "screen1-vision-stack-1",
+        "screen1-vision-stack-2"
+      ],
+      "boxes": [
+        {
+          "screenIndex": 0,
+          "bbox": {
+            "x": 0.09313464608834486,
+            "y": 0.19932049830124576,
+            "width": 0.25705162320383185,
+            "height": 0.09966024915062288
+          },
+          "label": "1",
+          "sourceType": "layout",
+          "sourceConfidence": 0.62,
+          "sourceCandidateId": "screen1-vision-stack-1",
+          "sourceElementId": null,
+          "sourceEvidence": "Stacked nearby visual lines: screen1-vision-line-7, screen1-vision-line-8"
+        },
+        {
+          "screenIndex": 0,
+          "bbox": {
+            "x": 0.09313464608834486,
+            "y": 0.2582106455266138,
+            "width": 0.1335816923895689,
+            "height": 0.10758776896942242
+          },
+          "label": "1",
+          "sourceType": "layout",
+          "sourceConfidence": 0.62,
+          "sourceCandidateId": "screen1-vision-stack-2",
+          "sourceElementId": null,
+          "sourceEvidence": "Stacked nearby visual lines: screen1-vision-line-8, screen1-vision-line-9"
+        },
+        {
+          "screenIndex": 0,
+          "bbox": {
+            "x": 0.098,
+            "y": 0.208,
+            "width": 0.248,
+            "height": 0.032
+          },
+          "label": "1",
+          "sourceType": "element",
+          "sourceConfidence": 0.7,
+          "sourceCandidateId": null,
+          "sourceElementId": "screen1-el-9",
+          "sourceEvidence": "Grounded element screen1-el-9: main content categories left column"
+        },
+        {
+          "screenIndex": 0,
+          "bbox": {
+            "x": 0.097,
+            "y": 0.267,
+            "width": 0.076,
+            "height": 0.023
+          },
+          "label": "1",
+          "sourceType": "element",
+          "sourceConfidence": 0.7,
+          "sourceCandidateId": null,
+          "sourceElementId": "screen1-el-10",
+          "sourceEvidence": "Grounded element screen1-el-10: main content categories left column"
+        },
+        {
+          "screenIndex": 0,
+          "bbox": {
+            "x": 0.393,
+            "y": 0.323,
+            "width": 0.136,
+            "height": 0.034
+          },
+          "label": "1",
+          "sourceType": "element",
+          "sourceConfidence": 0.7,
+          "sourceCandidateId": null,
+          "sourceElementId": "screen1-el-11",
+          "sourceEvidence": "Grounded element screen1-el-11: main content categories center column"
+        },
+        {
+          "screenIndex": 0,
+          "bbox": {
+            "x": 0.379,
+            "y": 0.411,
+            "width": 0.1,
+            "height": 0.034
+          },
+          "label": "1",
+          "sourceType": "element",
+          "sourceConfidence": 0.7,
+          "sourceCandidateId": null,
+          "sourceElementId": "screen1-el-12",
+          "sourceEvidence": "Grounded element screen1-el-12: main content categories center column"
+        },
+        {
+          "screenIndex": 0,
+          "bbox": {
+            "x": 0.664,
+            "y": 0.323,
+            "width": 0.077,
+            "height": 0.028
+          },
+          "label": "1",
+          "sourceType": "element",
+          "sourceConfidence": 0.7,
+          "sourceCandidateId": null,
+          "sourceElementId": "screen1-el-13",
+          "sourceEvidence": "Grounded element screen1-el-13: main content categories right column"
+        },
+        {
+          "screenIndex": 0,
+          "bbox": {
+            "x": 0.665,
+            "y": 0.411,
+            "width": 0.117,
+            "height": 0.034
+          },
+          "label": "1",
+          "sourceType": "element",
+          "sourceConfidence": 0.7,
+          "sourceCandidateId": null,
+          "sourceElementId": "screen1-el-14",
+          "sourceEvidence": "Grounded element screen1-el-14: main content categories right column"
+        }
+      ],
+      "geometryConfidence": 0.68,
+      "humanReviewStatus": "pending",
+      "ambiguityNote": "None",
+      "issueNumber": 1,
+      "displayLabel": "1"
+    },
+    {
+      "findingId": "synth-002",
+      "severity": "P1",
+      "region": "main content categories left column",
+      "issue": "The category card 'Interesting websites' has a very small clickable area compared to other category cards, increasing the chance of user errors or difficulty in selection.",
+      "fix": "Increase the clickable area of the 'Interesting websites' category card to match the size and spacing of other category cards for consistent interaction.",
+      "selectedElementRefs": [
+        "screen1-el-10"
+      ],
+      "selectedCandidateIds": [],
+      "boxes": [
+        {
+          "screenIndex": 0,
+          "bbox": {
+            "x": 0.097,
+            "y": 0.267,
+            "width": 0.076,
+            "height": 0.023
+          },
+          "label": "2",
+          "sourceType": "element",
+          "sourceConfidence": 0.7,
+          "sourceCandidateId": null,
+          "sourceElementId": "screen1-el-10",
+          "sourceEvidence": "Grounded element screen1-el-10: main content categories left column"
+        }
+      ],
+      "geometryConfidence": 0.7,
+      "humanReviewStatus": "pending",
+      "ambiguityNote": "None",
+      "issueNumber": 2,
+      "displayLabel": "2"
+    },
+    {
+      "findingId": "synth-003",
+      "severity": "P1",
+      "region": "top navigation bar center",
+      "issue": "The 'Moods' navigation link uses a very small highlight area that may be difficult for users to notice as the current page indicator, reducing clarity about the user's location.",
+      "fix": "Increase the size and contrast of the highlight background behind the 'Moods' link to make the current page more visually distinct.",
+      "selectedElementRefs": [
+        "screen1-el-4"
+      ],
+      "selectedCandidateIds": [],
+      "boxes": [
+        {
+          "screenIndex": 0,
+          "bbox": {
+            "x": 0.509,
+            "y": 0.06,
+            "width": 0.018,
+            "height": 0.037
+          },
+          "label": "3",
+          "sourceType": "element",
+          "sourceConfidence": 0.7,
+          "sourceCandidateId": null,
+          "sourceElementId": "screen1-el-4",
+          "sourceEvidence": "Grounded element screen1-el-4: top navigation bar center"
+        }
+      ],
+      "geometryConfidence": 0.7,
+      "humanReviewStatus": "pending",
+      "ambiguityNote": "None",
+      "issueNumber": 3,
+      "displayLabel": "3"
+    },
+    {
+      "findingId": "synth-004",
+      "severity": "P1",
+      "region": "top navigation bar right",
+      "issue": "The search input field uses placeholder text 'I'm bored...' as the only label, which is insufficient for screen reader users to understand the input purpose.",
+      "fix": "Add a visible label for the search input or use aria-label or aria-labelledby attributes to provide an accessible name.",
+      "selectedElementRefs": [
+        "screen1-el-6"
+      ],
+      "selectedCandidateIds": [
+        "screen1-vision-component-2"
+      ],
+      "boxes": [
+        {
+          "screenIndex": 0,
+          "bbox": {
+            "x": 0.494944119212347,
+            "y": 0.04190260475651189,
+            "width": 0.41830761043108033,
+            "height": 0.07927519818799547
+          },
+          "label": "4",
+          "sourceType": "layout",
+          "sourceConfidence": 0.5,
+          "sourceCandidateId": "screen1-vision-component-2",
+          "sourceElementId": null,
+          "sourceEvidence": "Dark connected component area=11442"
+        },
+        {
+          "screenIndex": 0,
+          "bbox": {
+            "x": 0.495,
+            "y": 0.042,
+            "width": 0.418,
+            "height": 0.079
+          },
+          "label": "4",
+          "sourceType": "element",
+          "sourceConfidence": 0.7,
+          "sourceCandidateId": null,
+          "sourceElementId": "screen1-el-6",
+          "sourceEvidence": "Grounded element screen1-el-6: top navigation bar right"
+        }
+      ],
+      "geometryConfidence": 0.6,
+      "humanReviewStatus": "pending",
+      "ambiguityNote": "None",
+      "issueNumber": 4,
+      "displayLabel": "4"
+    }
+  ]
+}
