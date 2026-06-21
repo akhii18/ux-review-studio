@@ -279,7 +279,6 @@ export async function runReviewPipeline(reviewId: string): Promise<void> {
     }).then((rows: Array<{ id: string }>) => rows.map((row: { id: string }) => row.id));
 
     await prisma.$transaction([
-      prisma.reviewBasisItem.deleteMany({ where: { findingId: { in: existingFindingIds } } }),
       prisma.finding.deleteMany({ where: { reviewId } }),
       prisma.report.deleteMany({ where: { reviewId } }),
     ]);
