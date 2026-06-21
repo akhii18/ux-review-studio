@@ -69,6 +69,12 @@ export function getSignedBlobReadUrl(blobUrl: string, expiresInMinutes = 60): st
     throw new Error(`Invalid blob URL: ${blobUrl}`);
   }
 
+  if (containerName !== config.azureStorageContainerName) {
+    throw new Error(
+      `Blob URL container mismatch. Expected ${config.azureStorageContainerName}, got ${containerName}`
+    );
+  }
+
   const blobName = blobParts.map((part) => decodeURIComponent(part)).join("/");
   const credential = new StorageSharedKeyCredential(accountName, accountKey);
   const sas = generateBlobSASQueryParameters(
