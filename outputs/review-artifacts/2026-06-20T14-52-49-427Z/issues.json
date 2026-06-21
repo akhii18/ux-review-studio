@@ -1,0 +1,589 @@
+{
+  "metadata": {
+    "generatedAt": "2026-06-20T14:52:59.908Z",
+    "runStamp": "2026-06-20T14-52-49-427Z",
+    "imagePaths": [
+      "apps/agentic-ai/samples/screen1.png"
+    ],
+    "screenMetadata": [
+      {
+        "screenIndex": 0,
+        "screenId": "screen-1",
+        "path": "apps/agentic-ai/samples/screen1.png",
+        "width": 1879,
+        "height": 883
+      }
+    ],
+    "artifactSchemaVersion": "1.0.0",
+    "annotationLabelMode": "issue-number"
+  },
+  "summary": "All synthesized findings are mapped to grounded elements with exact bounding boxes for precise review. The main content grid cards and navigation elements are well covered. The emoji accessibility and toggle labeling issues are clearly localized. The monospace font inconsistency is mapped to the heading text element.",
+  "coverageNote": "Grounded elements provide exact bounding boxes for all findings except the emoji accessibility issue which uses multiple card elements. Measured geometry candidates supplement element boxes for consistent visual reference. No broad region boxes were needed. Unresolved findings: 0.",
+  "issues": [
+    {
+      "findingId": "synth-001",
+      "severity": "P0",
+      "region": "top navigation bar right",
+      "issue": "The shuffle icon button inside the search input field lacks a visible focus indicator and provides no feedback or explanation of its function, making it unclear and inaccessible for keyboard users.",
+      "fix": "Add a tooltip or label explaining the shuffle icon's function, provide immediate visual or textual feedback when it is pressed, and add a visible focus style (such as an outline or border) when it receives keyboard focus.",
+      "selectedElementRefs": [
+        "screen1-el-6",
+        "screen1-el-7"
+      ],
+      "selectedCandidateIds": [
+        "screen1-vision-component-2"
+      ],
+      "boxes": [
+        {
+          "screenIndex": 0,
+          "bbox": {
+            "x": 0.494944119212347,
+            "y": 0.04190260475651189,
+            "width": 0.41830761043108033,
+            "height": 0.07927519818799547
+          },
+          "label": "1",
+          "sourceType": "layout",
+          "sourceConfidence": 0.5,
+          "sourceCandidateId": "screen1-vision-component-2",
+          "sourceElementId": null,
+          "sourceEvidence": "Dark connected component area=11442"
+        },
+        {
+          "screenIndex": 0,
+          "bbox": {
+            "x": 0.495,
+            "y": 0.042,
+            "width": 0.418,
+            "height": 0.079
+          },
+          "label": "1",
+          "sourceType": "element",
+          "sourceConfidence": 0.7,
+          "sourceCandidateId": null,
+          "sourceElementId": "screen1-el-6",
+          "sourceEvidence": "Grounded element screen1-el-6: top navigation bar right"
+        },
+        {
+          "screenIndex": 0,
+          "bbox": {
+            "x": 0.895,
+            "y": 0.042,
+            "width": 0.018,
+            "height": 0.079
+          },
+          "label": "1",
+          "sourceType": "element",
+          "sourceConfidence": 0.7,
+          "sourceCandidateId": null,
+          "sourceElementId": "screen1-el-7",
+          "sourceEvidence": "Grounded element screen1-el-7: top navigation bar right"
+        }
+      ],
+      "geometryConfidence": 0.6333333333333333,
+      "humanReviewStatus": "pending",
+      "ambiguityNote": "None",
+      "issueNumber": 1,
+      "displayLabel": "1"
+    },
+    {
+      "findingId": "synth-002",
+      "severity": "P0",
+      "region": "main content grid",
+      "issue": "The emoji icons used in the category cards lack accessible text alternatives, and the cards have small tap/click targets that may be less than 44x44 pixels, reducing accessibility and operability for users relying on assistive technology or touch input.",
+      "fix": "Provide appropriate aria-labels or alt text for the emojis and increase the clickable area of each card to at least 44x44 pixels to meet WCAG guidelines.",
+      "selectedElementRefs": [
+        "screen1-el-10",
+        "screen1-el-11",
+        "screen1-el-12",
+        "screen1-el-13",
+        "screen1-el-14",
+        "screen1-el-15"
+      ],
+      "selectedCandidateIds": [],
+      "boxes": [
+        {
+          "screenIndex": 0,
+          "bbox": {
+            "x": 0.108,
+            "y": 0.323,
+            "width": 0.114,
+            "height": 0.034
+          },
+          "label": "2",
+          "sourceType": "element",
+          "sourceConfidence": 0.7,
+          "sourceCandidateId": null,
+          "sourceElementId": "screen1-el-10",
+          "sourceEvidence": "Grounded element screen1-el-10: main content grid left column top"
+        },
+        {
+          "screenIndex": 0,
+          "bbox": {
+            "x": 0.123,
+            "y": 0.411,
+            "width": 0.111,
+            "height": 0.034
+          },
+          "label": "2",
+          "sourceType": "element",
+          "sourceConfidence": 0.7,
+          "sourceCandidateId": null,
+          "sourceElementId": "screen1-el-11",
+          "sourceEvidence": "Grounded element screen1-el-11: main content grid left column bottom"
+        },
+        {
+          "screenIndex": 0,
+          "bbox": {
+            "x": 0.393,
+            "y": 0.323,
+            "width": 0.136,
+            "height": 0.034
+          },
+          "label": "2",
+          "sourceType": "element",
+          "sourceConfidence": 0.7,
+          "sourceCandidateId": null,
+          "sourceElementId": "screen1-el-12",
+          "sourceEvidence": "Grounded element screen1-el-12: main content grid center column top"
+        },
+        {
+          "screenIndex": 0,
+          "bbox": {
+            "x": 0.379,
+            "y": 0.411,
+            "width": 0.1,
+            "height": 0.034
+          },
+          "label": "2",
+          "sourceType": "element",
+          "sourceConfidence": 0.7,
+          "sourceCandidateId": null,
+          "sourceElementId": "screen1-el-13",
+          "sourceEvidence": "Grounded element screen1-el-13: main content grid center column bottom"
+        },
+        {
+          "screenIndex": 0,
+          "bbox": {
+            "x": 0.664,
+            "y": 0.323,
+            "width": 0.077,
+            "height": 0.028
+          },
+          "label": "2",
+          "sourceType": "element",
+          "sourceConfidence": 0.7,
+          "sourceCandidateId": null,
+          "sourceElementId": "screen1-el-14",
+          "sourceEvidence": "Grounded element screen1-el-14: main content grid right column top"
+        },
+        {
+          "screenIndex": 0,
+          "bbox": {
+            "x": 0.665,
+            "y": 0.411,
+            "width": 0.117,
+            "height": 0.034
+          },
+          "label": "2",
+          "sourceType": "element",
+          "sourceConfidence": 0.7,
+          "sourceCandidateId": null,
+          "sourceElementId": "screen1-el-15",
+          "sourceEvidence": "Grounded element screen1-el-15: main content grid right column bottom"
+        },
+        {
+          "screenIndex": 0,
+          "bbox": {
+            "x": 0.10803618946248005,
+            "y": 0.32276330690826727,
+            "width": 0.11442256519425226,
+            "height": 0.03397508493771234
+          },
+          "label": "2",
+          "sourceType": "layout",
+          "sourceConfidence": 0.58,
+          "sourceCandidateId": "screen1-vision-line-9",
+          "sourceElementId": null,
+          "sourceEvidence": "Grouped 16 dark connected components into a visual line"
+        },
+        {
+          "screenIndex": 0,
+          "bbox": {
+            "x": 0.12346993081426291,
+            "y": 0.4110985277463194,
+            "width": 0.11069717935071846,
+            "height": 0.03397508493771234
+          },
+          "label": "2",
+          "sourceType": "layout",
+          "sourceConfidence": 0.58,
+          "sourceCandidateId": "screen1-vision-line-12",
+          "sourceElementId": null,
+          "sourceEvidence": "Grouped 19 dark connected components into a visual line"
+        },
+        {
+          "screenIndex": 0,
+          "bbox": {
+            "x": 0.3932943054816392,
+            "y": 0.32276330690826727,
+            "width": 0.13571048430015967,
+            "height": 0.03397508493771234
+          },
+          "label": "2",
+          "sourceType": "layout",
+          "sourceConfidence": 0.58,
+          "sourceCandidateId": "screen1-vision-line-10",
+          "sourceElementId": null,
+          "sourceEvidence": "Grouped 19 dark connected components into a visual line"
+        },
+        {
+          "screenIndex": 0,
+          "bbox": {
+            "x": 0.37945715806279934,
+            "y": 0.4110985277463194,
+            "width": 0.09952102182011709,
+            "height": 0.03397508493771234
+          },
+          "label": "2",
+          "sourceType": "layout",
+          "sourceConfidence": 0.58,
+          "sourceCandidateId": "screen1-vision-line-13",
+          "sourceElementId": null,
+          "sourceEvidence": "Grouped 14 dark connected components into a visual line"
+        },
+        {
+          "screenIndex": 0,
+          "bbox": {
+            "x": 0.6641830761043108,
+            "y": 0.32276330690826727,
+            "width": 0.07663650878126663,
+            "height": 0.028312570781426953
+          },
+          "label": "2",
+          "sourceType": "layout",
+          "sourceConfidence": 0.58,
+          "sourceCandidateId": "screen1-vision-line-11",
+          "sourceElementId": null,
+          "sourceEvidence": "Grouped 12 dark connected components into a visual line"
+        },
+        {
+          "screenIndex": 0,
+          "bbox": {
+            "x": 0.6647152740819585,
+            "y": 0.4110985277463194,
+            "width": 0.116551357104843,
+            "height": 0.03397508493771234
+          },
+          "label": "2",
+          "sourceType": "layout",
+          "sourceConfidence": 0.58,
+          "sourceCandidateId": "screen1-vision-line-14",
+          "sourceElementId": null,
+          "sourceEvidence": "Grouped 17 dark connected components into a visual line"
+        }
+      ],
+      "geometryConfidence": 0.64,
+      "humanReviewStatus": "pending",
+      "ambiguityNote": "None",
+      "issueNumber": 2,
+      "displayLabel": "2"
+    },
+    {
+      "findingId": "synth-003",
+      "severity": "P0",
+      "region": "bottom right corner",
+      "issue": "The 'Lights' toggle switch uses '1' and '0' labels which are not intuitive for indicating on/off states, potentially confusing users about the toggle's current state.",
+      "fix": "Replace '1' and '0' with clear labels such as 'On' and 'Off' or use universally recognized icons for light/dark mode.",
+      "selectedElementRefs": [
+        "screen1-el-16"
+      ],
+      "selectedCandidateIds": [
+        "screen1-vision-line-16"
+      ],
+      "boxes": [
+        {
+          "screenIndex": 0,
+          "bbox": {
+            "x": 0.8467269824374667,
+            "y": 0.5503963759909399,
+            "width": 0.027142096860031932,
+            "height": 0.027180067950169876
+          },
+          "label": "3",
+          "sourceType": "layout",
+          "sourceConfidence": 0.58,
+          "sourceCandidateId": "screen1-vision-line-16",
+          "sourceElementId": null,
+          "sourceEvidence": "Grouped 6 dark connected components into a visual line"
+        },
+        {
+          "screenIndex": 0,
+          "bbox": {
+            "x": 0.847,
+            "y": 0.55,
+            "width": 0.027,
+            "height": 0.027
+          },
+          "label": "3",
+          "sourceType": "element",
+          "sourceConfidence": 0.7,
+          "sourceCandidateId": null,
+          "sourceElementId": "screen1-el-16",
+          "sourceEvidence": "Grounded element screen1-el-16: bottom right corner"
+        }
+      ],
+      "geometryConfidence": 0.6399999999999999,
+      "humanReviewStatus": "pending",
+      "ambiguityNote": "None",
+      "issueNumber": 3,
+      "displayLabel": "3"
+    },
+    {
+      "findingId": "synth-004",
+      "severity": "P2",
+      "region": "top navigation bar center",
+      "issue": "The 'Moods' navigation link has insufficient color contrast between the blue background and black text, reducing readability for users with visual impairments.",
+      "fix": "Increase the contrast by using a darker text color or a lighter background color for the 'Moods' navigation link highlight.",
+      "selectedElementRefs": [
+        "screen1-el-4"
+      ],
+      "selectedCandidateIds": [
+        "screen1-vision-line-5"
+      ],
+      "boxes": [
+        {
+          "screenIndex": 0,
+          "bbox": {
+            "x": 0.5087812666311868,
+            "y": 0.06002265005662514,
+            "width": 0.017562533262373604,
+            "height": 0.03737259343148358
+          },
+          "label": "4",
+          "sourceType": "layout",
+          "sourceConfidence": 0.58,
+          "sourceCandidateId": "screen1-vision-line-5",
+          "sourceElementId": null,
+          "sourceEvidence": "Grouped 3 dark connected components into a visual line"
+        },
+        {
+          "screenIndex": 0,
+          "bbox": {
+            "x": 0.509,
+            "y": 0.06,
+            "width": 0.018,
+            "height": 0.037
+          },
+          "label": "4",
+          "sourceType": "element",
+          "sourceConfidence": 0.7,
+          "sourceCandidateId": null,
+          "sourceElementId": "screen1-el-4",
+          "sourceEvidence": "Grounded element screen1-el-4: top navigation bar center"
+        }
+      ],
+      "geometryConfidence": 0.6399999999999999,
+      "humanReviewStatus": "pending",
+      "ambiguityNote": "None",
+      "issueNumber": 4,
+      "displayLabel": "4"
+    },
+    {
+      "findingId": "synth-005",
+      "severity": "P2",
+      "region": "main content grid right column top",
+      "issue": "The card titled 'Cool websites' uses the phrase 'Show me something I have not seen before' which may be vague or ambiguous to some users.",
+      "fix": "Rephrase the subtext to a clearer, more direct description such as 'Discover new and unique websites'.",
+      "selectedElementRefs": [
+        "screen1-el-14"
+      ],
+      "selectedCandidateIds": [
+        "screen1-vision-line-11"
+      ],
+      "boxes": [
+        {
+          "screenIndex": 0,
+          "bbox": {
+            "x": 0.6641830761043108,
+            "y": 0.32276330690826727,
+            "width": 0.07663650878126663,
+            "height": 0.028312570781426953
+          },
+          "label": "5",
+          "sourceType": "layout",
+          "sourceConfidence": 0.58,
+          "sourceCandidateId": "screen1-vision-line-11",
+          "sourceElementId": null,
+          "sourceEvidence": "Grouped 12 dark connected components into a visual line"
+        },
+        {
+          "screenIndex": 0,
+          "bbox": {
+            "x": 0.664,
+            "y": 0.323,
+            "width": 0.077,
+            "height": 0.028
+          },
+          "label": "5",
+          "sourceType": "element",
+          "sourceConfidence": 0.7,
+          "sourceCandidateId": null,
+          "sourceElementId": "screen1-el-14",
+          "sourceEvidence": "Grounded element screen1-el-14: main content grid right column top"
+        }
+      ],
+      "geometryConfidence": 0.6399999999999999,
+      "humanReviewStatus": "pending",
+      "ambiguityNote": "None",
+      "issueNumber": 5,
+      "displayLabel": "5"
+    },
+    {
+      "findingId": "synth-006",
+      "severity": "P2",
+      "region": "main content grid",
+      "issue": "The 'Pick a vibe' section uses monospace font for the heading which is inconsistent with the rest of the typography and may reduce readability.",
+      "fix": "Use the same font style for the 'Pick a vibe' heading as used in other headings or text elements for consistency.",
+      "selectedElementRefs": [
+        "screen1-el-9",
+        "screen1-el-10",
+        "screen1-el-11",
+        "screen1-el-12",
+        "screen1-el-13",
+        "screen1-el-14",
+        "screen1-el-15"
+      ],
+      "selectedCandidateIds": [
+        "screen1-vision-line-8"
+      ],
+      "boxes": [
+        {
+          "screenIndex": 0,
+          "bbox": {
+            "x": 0.09739222990952634,
+            "y": 0.26727066817667045,
+            "width": 0.07557211282597126,
+            "height": 0.022650056625141562
+          },
+          "label": "6",
+          "sourceType": "layout",
+          "sourceConfidence": 0.58,
+          "sourceCandidateId": "screen1-vision-line-8",
+          "sourceElementId": null,
+          "sourceEvidence": "Grouped 6 dark connected components into a visual line"
+        },
+        {
+          "screenIndex": 0,
+          "bbox": {
+            "x": 0.097,
+            "y": 0.267,
+            "width": 0.076,
+            "height": 0.023
+          },
+          "label": "6",
+          "sourceType": "element",
+          "sourceConfidence": 0.7,
+          "sourceCandidateId": null,
+          "sourceElementId": "screen1-el-9",
+          "sourceEvidence": "Grounded element screen1-el-9: main content top"
+        },
+        {
+          "screenIndex": 0,
+          "bbox": {
+            "x": 0.108,
+            "y": 0.323,
+            "width": 0.114,
+            "height": 0.034
+          },
+          "label": "6",
+          "sourceType": "element",
+          "sourceConfidence": 0.7,
+          "sourceCandidateId": null,
+          "sourceElementId": "screen1-el-10",
+          "sourceEvidence": "Grounded element screen1-el-10: main content grid left column top"
+        },
+        {
+          "screenIndex": 0,
+          "bbox": {
+            "x": 0.123,
+            "y": 0.411,
+            "width": 0.111,
+            "height": 0.034
+          },
+          "label": "6",
+          "sourceType": "element",
+          "sourceConfidence": 0.7,
+          "sourceCandidateId": null,
+          "sourceElementId": "screen1-el-11",
+          "sourceEvidence": "Grounded element screen1-el-11: main content grid left column bottom"
+        },
+        {
+          "screenIndex": 0,
+          "bbox": {
+            "x": 0.393,
+            "y": 0.323,
+            "width": 0.136,
+            "height": 0.034
+          },
+          "label": "6",
+          "sourceType": "element",
+          "sourceConfidence": 0.7,
+          "sourceCandidateId": null,
+          "sourceElementId": "screen1-el-12",
+          "sourceEvidence": "Grounded element screen1-el-12: main content grid center column top"
+        },
+        {
+          "screenIndex": 0,
+          "bbox": {
+            "x": 0.379,
+            "y": 0.411,
+            "width": 0.1,
+            "height": 0.034
+          },
+          "label": "6",
+          "sourceType": "element",
+          "sourceConfidence": 0.7,
+          "sourceCandidateId": null,
+          "sourceElementId": "screen1-el-13",
+          "sourceEvidence": "Grounded element screen1-el-13: main content grid center column bottom"
+        },
+        {
+          "screenIndex": 0,
+          "bbox": {
+            "x": 0.664,
+            "y": 0.323,
+            "width": 0.077,
+            "height": 0.028
+          },
+          "label": "6",
+          "sourceType": "element",
+          "sourceConfidence": 0.7,
+          "sourceCandidateId": null,
+          "sourceElementId": "screen1-el-14",
+          "sourceEvidence": "Grounded element screen1-el-14: main content grid right column top"
+        },
+        {
+          "screenIndex": 0,
+          "bbox": {
+            "x": 0.665,
+            "y": 0.411,
+            "width": 0.117,
+            "height": 0.034
+          },
+          "label": "6",
+          "sourceType": "element",
+          "sourceConfidence": 0.7,
+          "sourceCandidateId": null,
+          "sourceElementId": "screen1-el-15",
+          "sourceEvidence": "Grounded element screen1-el-15: main content grid right column bottom"
+        }
+      ],
+      "geometryConfidence": 0.685,
+      "humanReviewStatus": "pending",
+      "ambiguityNote": "None",
+      "issueNumber": 6,
+      "displayLabel": "6"
+    }
+  ]
+}
