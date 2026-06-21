@@ -23,7 +23,9 @@ export function AppHeader({
       <SidebarTrigger className="-ml-1 h-11 w-11" />
       <Separator orientation="vertical" className="h-6" />
       <div className="flex min-w-0 flex-col leading-tight">
-        <h1 className="truncate text-base font-semibold text-foreground md:text-[17px]">{title}</h1>
+        <h1 className="truncate text-sm font-semibold text-foreground sm:text-base md:text-[17px]">
+          {title}
+        </h1>
         {subtitle && (
           <p className="truncate text-xs text-muted-foreground md:text-[13px]">{subtitle}</p>
         )}
@@ -40,7 +42,11 @@ export function AppHeader({
             <span aria-hidden className="absolute right-2 top-2 h-1.5 w-1.5 rounded-full bg-destructive" />
           )}
         </Button>
-        <Avatar className="h-9 w-9 ring-2 ring-border" aria-label={`Signed in as ${user.name}`}>
+
+        <Avatar
+          className="h-8 w-8 ring-2 ring-border sm:h-9 sm:w-9"
+          aria-label={`Signed in as ${user.name}`}
+        >
           <AvatarFallback className="bg-primary text-[12px] font-semibold text-primary-foreground">
             {user.initials}
           </AvatarFallback>
