@@ -1,6 +1,5 @@
 import { prisma } from "../config/prisma";
-import type { CreatePrinciple, UpdatePrinciple } from "@uxm/shared";
-import type { PrincipleCategory } from "@prisma/client";
+import type { CreatePrinciple, PrincipleCategory, UpdatePrinciple } from "@uxm/shared";
 
 export const PrinciplesRepository = {
   async findAll(category?: string, enabled?: boolean) {

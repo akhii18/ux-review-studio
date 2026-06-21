@@ -28,8 +28,10 @@ export function createReview(data: {
   product: string;
   domain?: string;
   reviewType?: string;
+  owner?: string;
   criteria?: string[];
   depth?: string;
+  confidenceThreshold?: number;
 }) {
   return request<any>("/api/reviews", { method: "POST", body: JSON.stringify(data) });
 }
@@ -42,6 +44,7 @@ export function saveAsset(reviewId: string, asset: {
   name: string;
   mimeType: string;
   base64Data?: string;
+  blobUrl?: string;
   contentText?: string;
   sizeBytes?: number;
 }) {

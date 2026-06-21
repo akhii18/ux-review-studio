@@ -1,6 +1,5 @@
 import { prisma } from "../config/prisma";
-import type { FindingsQuery, UpdateFinding } from "@uxm/shared";
-import type { FindingStatus, ReviewArea, Severity } from "@prisma/client";
+import type { FindingStatus, FindingsQuery, ReviewArea, Severity, UpdateFinding } from "@uxm/shared";
 
 export const FindingsRepository = {
   async findByReview(reviewId: string, query: FindingsQuery) {
@@ -114,7 +113,7 @@ export const FindingsRepository = {
       having: { id: { _count: { gt: 1 } } },
     });
 
-    return results.map((r) => ({
+    return results.map((r: (typeof results)[number]) => ({
       title: r.title,
       area: r.area,
       principle: r.principle ?? "—",

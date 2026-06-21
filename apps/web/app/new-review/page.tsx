@@ -49,14 +49,14 @@ const progressStages = [
 export default function NewReviewPage() {
   const [step, setStep] = useState(0);
   const router = useRouter();
-  const [name, setName] = useState("Onboarding Flow Audit Q4");
-  const [product, setProduct] = useState("Digital Banking App");
+  const [name, setName] = useState("");
+  const [product, setProduct] = useState("");
   const [domain, setDomain] = useState("bfsi");
   const [reviewType, setReviewType] = useState("full");
-  const [owner, setOwner] = useState("User");
-  const [criteria, setCriteria] = useState<string[]>([
-    "Nielsen's 10 heuristics", "WCAG 2.2 AA conformance", "Design system tokens",
-  ]);
+  const [owner, setOwner] = useState("");
+  const [figmaUrl, setFigmaUrl] = useState("");
+  const [designSystemUrl, setDesignSystemUrl] = useState("");
+  const [criteria, setCriteria] = useState<string[]>([]);
   const [files, setFiles] = useState<Array<{ name: string; type: string; status: string; file?: File }>>([]);
   const [contextText, setContextText] = useState("");
   const [depth, setDepth] = useState("standard");
@@ -124,8 +124,10 @@ export default function NewReviewPage() {
         product,
         domain,
         reviewType,
+        owner,
         criteria,
         depth,
+        confidenceThreshold: confidence[0],
       });
       const reviewId = reviewRes.id || reviewRes.reviewId;
 
@@ -146,12 +148,17 @@ export default function NewReviewPage() {
         }
       }
 
-      // Upload context text if provided
-      if (contextText.trim()) {
+      // Upload context text and external references if provided
+      const notes: string[] = [];
+      if (contextText.trim()) notes.push(contextText.trim());
+      if (figmaUrl.trim()) notes.push(`Figma URL: ${figmaUrl.trim()}`);
+      if (designSystemUrl.trim()) notes.push(`Design System URL: ${designSystemUrl.trim()}`);
+
+      if (notes.length > 0) {
         await saveAsset(reviewId, {
           name: "Context notes",
           mimeType: "text/plain",
-          contentText: contextText,
+          contentText: notes.join("\n\n"),
         });
       }
 
@@ -313,13 +320,23 @@ export default function NewReviewPage() {
                     <Field label="Figma prototype URL">
                       <div className="relative">
                         <Figma className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
-                        <Input placeholder="https://figma.com/proto/…" className="pl-9" />
+                        <Input
+                          placeholder="https://figma.com/proto/…"
+                          className="pl-9"
+                          value={figmaUrl}
+                          onChange={(e) => setFigmaUrl(e.target.value)}
+                        />
                       </div>
                     </Field>
                     <Field label="Design system reference">
                       <div className="relative">
                         <LinkIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
-                        <Input placeholder="https://zeroheight.com/…" className="pl-9" />
+                        <Input
+                          placeholder="https://zeroheight.com/…"
+                          className="pl-9"
+                          value={designSystemUrl}
+                          onChange={(e) => setDesignSystemUrl(e.target.value)}
+                        />
                       </div>
                     </Field>
                   </div>

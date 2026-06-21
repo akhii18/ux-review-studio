@@ -49,7 +49,7 @@ export const ReviewsRepository = {
   async saveAsset(reviewId: string, asset: {
     name: string;
     mimeType: string;
-    base64Data?: string;
+    blobUrl?: string;
     contentText?: string;
     sizeBytes?: number;
   }) {
@@ -58,7 +58,7 @@ export const ReviewsRepository = {
         reviewId,
         name:        asset.name,
         mimeType:    asset.mimeType,
-        base64Data:  asset.base64Data ?? null,
+        blobUrl:     asset.blobUrl ?? null,
         contentText: asset.contentText ?? null,
         sizeBytes:   asset.sizeBytes ?? null,
       },

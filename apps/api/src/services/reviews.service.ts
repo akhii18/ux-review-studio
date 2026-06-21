@@ -1,5 +1,30 @@
 import { ReviewsRepository } from "../repositories/reviews.repository";
 import { AppError } from "../middleware/errorHandler";
+import { getSignedBlobReadUrl, uploadReviewAssetToBlob } from "./azureBlob";
+
+type ReviewAssetRecord = {
+  blobUrl: string | null;
+  name: string;
+  mimeType: string;
+  contentText: string | null;
+  sizeBytes: number | null;
+};
+
+type ReviewAnalyticsRecord = {
+  id: string;
+  name: string;
+  product: string;
+  status: string;
+  uxScore: number | null;
+  createdAt: Date;
+  _count: { findings: number };
+};
+
+type FindingAnalyticsRecord = {
+  severity: "P0" | "P1" | "P2";
+  area: string;
+  status: string;
+};
 
 export const ReviewsService = {
   async list() {
@@ -9,7 +34,16 @@ export const ReviewsService = {
   async getById(id: string) {
     const review = await ReviewsRepository.findById(id);
     if (!review) throw new AppError(404, "Review not found");
-    return review;
+
+    return {
+      ...review,
+      assets: await Promise.all(
+        review.assets.map(async (asset: ReviewAssetRecord) => ({
+          ...asset,
+          blobUrl: asset.blobUrl ? getSignedBlobReadUrl(asset.blobUrl) : asset.blobUrl,
+        }))
+      ),
+    };
   },
 
   async create(data: {
@@ -29,12 +63,37 @@ export const ReviewsService = {
     name: string;
     mimeType: string;
     base64Data?: string;
+    blobUrl?: string;
     contentText?: string;
     sizeBytes?: number;
   }) {
     const review = await ReviewsRepository.findById(reviewId);
     if (!review) throw new AppError(404, "Review not found");
-    return ReviewsRepository.saveAsset(reviewId, asset);
+
+    if (asset.base64Data) {
+      const uploaded = await uploadReviewAssetToBlob({
+        reviewId,
+        name: asset.name,
+        mimeType: asset.mimeType,
+        base64Data: asset.base64Data,
+      });
+
+      return ReviewsRepository.saveAsset(reviewId, {
+        name: asset.name,
+        mimeType: asset.mimeType,
+        blobUrl: uploaded.blobUrl,
+        contentText: asset.contentText,
+        sizeBytes: asset.sizeBytes,
+      });
+    }
+
+    return ReviewsRepository.saveAsset(reviewId, {
+      name: asset.name,
+      mimeType: asset.mimeType,
+      blobUrl: asset.blobUrl,
+      contentText: asset.contentText,
+      sizeBytes: asset.sizeBytes,
+    });
   },
 
   async startReview(reviewId: string) {
@@ -47,7 +106,7 @@ export const ReviewsService = {
 
     // Fire pipeline asynchronously — do not await
     setImmediate(() => {
-      import("./ai/orchestrator").then(({ runReviewPipeline }) => {
+      import("./ai/agentic").then(({ runReviewPipeline }) => {
         runReviewPipeline(reviewId).catch((err: unknown) => {
           console.error("Pipeline failed for review", reviewId, err);
         });
@@ -70,7 +129,7 @@ export const ReviewsService = {
   async getAnalytics() {
     const { prisma } = await import("../config/prisma");
 
-    const [reviews, findings] = await Promise.all([
+    const [reviews, findings]: [ReviewAnalyticsRecord[], FindingAnalyticsRecord[]] = await Promise.all([
       prisma.review.findMany({ include: { _count: { select: { findings: true } } } }),
       prisma.finding.findMany({ where: { status: { not: "DISMISSED" } } }),
     ]);
