@@ -46,6 +46,38 @@ const progressStages = [
   "Checking accessibility", "Reviewing consistency", "Generating findings", "Preparing report",
 ];
 
+const backendStageToUiIndex: Record<string, number> = {
+  reading_inputs: 0,
+  analyzing_screens: 2,
+  checking_accessibility: 3,
+  reviewing_content: 4,
+  checking_consistency: 4,
+  mapping_review_basis: 5,
+  prioritizing_findings: 5,
+  generating_report: 6,
+  completed: 6,
+  failed: 6,
+};
+
+function formatBackendStage(stage?: string | null): string {
+  if (!stage) return "Analyzing…";
+
+  const labels: Record<string, string> = {
+    reading_inputs: "Reading inputs",
+    analyzing_screens: "Analyzing screens",
+    checking_accessibility: "Checking accessibility",
+    reviewing_content: "Reviewing content",
+    checking_consistency: "Reviewing consistency",
+    mapping_review_basis: "Mapping requirements",
+    prioritizing_findings: "Generating findings",
+    generating_report: "Preparing report",
+    completed: "Completed",
+    failed: "Failed",
+  };
+
+  return labels[stage] ?? stage.replace(/_/g, " ");
+}
+
 export default function NewReviewPage() {
   const [step, setStep] = useState(0);
   const router = useRouter();
@@ -64,6 +96,7 @@ export default function NewReviewPage() {
   const [running, setRunning] = useState(false);
   const [stageIdx, setStageIdx] = useState(0);
   const [currentStageLabel, setCurrentStageLabel] = useState("");
+  const stageIdxRef = useRef(0);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -169,16 +202,21 @@ export default function NewReviewPage() {
       pollRef.current = setInterval(async () => {
         try {
           const progress = await getReviewProgress(reviewId);
-          
-          // Map stages to indices
-          let idx = progressStages.findIndex(s => s.toLowerCase() === progress.stage?.toLowerCase());
-          if (idx === -1) idx = Math.min(stageIdx + 1, progressStages.length - 1);
-          
+
+          const mappedIdx = backendStageToUiIndex[progress.stage ?? ""];
+          const idx = typeof mappedIdx === "number"
+            ? mappedIdx
+            : stageIdxRef.current;
+
+          stageIdxRef.current = idx;
           setStageIdx(idx);
-          setCurrentStageLabel(progress.stage || "Analyzing...");
+          setCurrentStageLabel(formatBackendStage(progress.stage));
 
           if (progress.status === "completed") {
             if (pollRef.current) clearInterval(pollRef.current);
+            stageIdxRef.current = progressStages.length - 1;
+            setStageIdx(progressStages.length - 1);
+            setCurrentStageLabel("Completed");
             toast.success(`Review complete — ${progress.findingCount || 0} findings generated.`);
             setTimeout(() => {
               router.push(`/workspace?reviewId=${reviewId}`);
@@ -186,6 +224,7 @@ export default function NewReviewPage() {
           } else if (progress.status === "failed") {
             if (pollRef.current) clearInterval(pollRef.current);
             toast.error("Review pipeline failed. Check server logs.");
+            setCurrentStageLabel("Failed");
             setRunning(false);
           }
         } catch (err) {

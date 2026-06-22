@@ -327,11 +327,11 @@ export async function runReviewPipeline(reviewId: string): Promise<void> {
 
   const assets = await prisma.asset.findMany({ where: { reviewId } });
   const assetParts: ContentPart[] = assets.map((a) => {
-    if (a.mimeType.startsWith("image/") && a.base64Data) {
+    if (a.mimeType.startsWith("image/") && a.blobUrl) {
       return {
         type: "image_url" as const,
         image_url: {
-          url: `data:${a.mimeType};base64,${a.base64Data}`,
+          url: a.blobUrl,
         },
       };
     }

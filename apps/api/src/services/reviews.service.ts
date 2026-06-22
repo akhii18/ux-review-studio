@@ -1,6 +1,7 @@
 import { ReviewsRepository } from "../repositories/reviews.repository";
 import { AppError } from "../middleware/errorHandler";
-import { getSignedBlobReadUrl, uploadReviewAssetToBlob } from "./azureBlob";
+import { getSignedStorageReadUrl, uploadReviewAssetToStorage } from "./supabaseStorage";
+import { config } from "../config";
 
 type ReviewAssetRecord = {
   blobUrl: string | null;
@@ -40,7 +41,7 @@ export const ReviewsService = {
       assets: await Promise.all(
         review.assets.map(async (asset: ReviewAssetRecord) => ({
           ...asset,
-          blobUrl: asset.blobUrl ? getSignedBlobReadUrl(asset.blobUrl) : asset.blobUrl,
+          blobUrl: asset.blobUrl ? await getSignedStorageReadUrl(asset.blobUrl) : asset.blobUrl,
         }))
       ),
     };
@@ -71,17 +72,31 @@ export const ReviewsService = {
     if (!review) throw new AppError(404, "Review not found");
 
     if (asset.base64Data) {
-      const uploaded = await uploadReviewAssetToBlob({
-        reviewId,
-        name: asset.name,
-        mimeType: asset.mimeType,
-        base64Data: asset.base64Data,
-      });
+      const hasSupabaseStorageConfig = Boolean(config.supabaseUrl && config.supabaseServiceRoleKey);
+
+      if (hasSupabaseStorageConfig) {
+        const uploaded = await uploadReviewAssetToStorage({
+          reviewId,
+          name: asset.name,
+          mimeType: asset.mimeType,
+          base64Data: asset.base64Data,
+        });
+
+        return ReviewsRepository.saveAsset(reviewId, {
+          name: asset.name,
+          mimeType: asset.mimeType,
+          blobUrl: uploaded.storageRef,
+          contentText: asset.contentText,
+          sizeBytes: asset.sizeBytes,
+        });
+      }
+
+      const inlineDataUrl = `data:${asset.mimeType};base64,${asset.base64Data}`;
 
       return ReviewsRepository.saveAsset(reviewId, {
         name: asset.name,
         mimeType: asset.mimeType,
-        blobUrl: uploaded.blobUrl,
+        blobUrl: inlineDataUrl,
         contentText: asset.contentText,
         sizeBytes: asset.sizeBytes,
       });
@@ -106,7 +121,7 @@ export const ReviewsService = {
 
     // Fire pipeline asynchronously — do not await
     setImmediate(() => {
-      import("./ai/agentic").then(({ runReviewPipeline }) => {
+      import("./ai/orchestrator").then(({ runReviewPipeline }) => {
         runReviewPipeline(reviewId).catch((err: unknown) => {
           console.error("Pipeline failed for review", reviewId, err);
         });
