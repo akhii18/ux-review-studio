@@ -25,9 +25,7 @@
     "openai": "^6.42.0",
     "sharp": "^0.35.1",
     "tesseract.js": "^6.0.1",
-    "zod": "^3.23.0"
-  },
-  "devDependencies": {
+    "zod": "^3.23.0" ,
     "@eslint/js": "^9.32.0",
     "@lovable.dev/vite-tanstack-config": "2.1.1",
     "@types/node": "^22.16.5",
@@ -45,5 +43,8 @@
     "typescript": "^5.8.3",
     "typescript-eslint": "^8.56.1",
     "vite": "^7.3.1"
+  },
+  "devDependencies": {
+    
   }
 }
