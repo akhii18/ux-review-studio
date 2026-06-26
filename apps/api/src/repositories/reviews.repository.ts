@@ -3,7 +3,7 @@ import { prisma } from "../config/prisma";
 export const ReviewsRepository = {
   async list() {
     return prisma.review.findMany({
-      orderBy: { createdAt: "desc" },
+      orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
       include: {
         _count: { select: { findings: true } },
       },

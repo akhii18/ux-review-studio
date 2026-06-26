@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { AppHeader } from "@/components/ui/AppHeader";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -13,6 +14,8 @@ import { listReviews } from "@/lib/api";
 import { toast } from "sonner";
 
 export default function ReportsPage() {
+  const searchParams = useSearchParams();
+  const reviewId = searchParams.get("reviewId");
   const [reviews, setReviews]   = useState<any[]>([]);
   const [loading, setLoading]   = useState(true);
   const [selected, setSelected] = useState<any | null>(null);
@@ -24,6 +27,11 @@ export default function ReportsPage() {
       .catch(() => toast.error("Failed to load reports"))
       .finally(() => setLoading(false));
   }, []);
+
+  useEffect(() => {
+    if (!reviewId) return;
+    openReport(reviewId);
+  }, [reviewId]);
 
   function downloadReport(report: any) {
     const blob = new Blob([report.contentMd], { type: "text/markdown" });
@@ -100,7 +108,7 @@ export default function ReportsPage() {
 
       {/* Report viewer sheet */}
       <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
-        <SheetContent side="right" className="w-full max-w-2xl p-0 flex flex-col">
+        <SheetContent side="right" className="w-[92vw] max-w-none sm:w-[58vw] sm:max-w-[58vw] p-0 flex flex-col">
           <SheetHeader className="px-6 py-4 border-b border-border shrink-0">
             <SheetTitle className="text-base">{selected?.name ?? "Report"}</SheetTitle>
           </SheetHeader>

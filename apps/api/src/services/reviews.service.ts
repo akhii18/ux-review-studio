@@ -145,7 +145,10 @@ export const ReviewsService = {
     const { prisma } = await import("../config/prisma");
 
     const [reviews, findings]: [ReviewAnalyticsRecord[], FindingAnalyticsRecord[]] = await Promise.all([
-      prisma.review.findMany({ include: { _count: { select: { findings: true } } } }),
+      prisma.review.findMany({
+        include: { _count: { select: { findings: true } } },
+        orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
+      }),
       prisma.finding.findMany({ where: { status: { not: "DISMISSED" } } }),
     ]);
 

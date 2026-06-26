@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createReview, saveAsset, startReview, getReviewProgress } from "@/lib/api";
 import { AppHeader } from "@/components/ui/AppHeader";
@@ -14,11 +14,13 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Switch } from "@/components/ui/switch";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Badge } from "@/components/ui/badge";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Sheet, SheetClose, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Progress } from "@/components/ui/progress";
 import { Slider } from "@/components/ui/slider";
 import {
-  Check, Upload, FileText, Figma, Link as LinkIcon, X, ArrowRight, ArrowLeft,
-  Sparkles, Loader2, Save, Info, Video,
+  Check, Upload, FileText, Figma, Link as LinkIcon, X, ArrowRight,
+  Sparkles, Loader2, Save, Info, Video, ChevronLeft, ChevronRight, Trash2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -32,13 +34,91 @@ const criteriaGroups = [
   { group: "Recommendations", items: ["Business impact estimate", "Effort estimate", "Acceptance criteria", "Linked principle"] },
 ] as const;
 
+const REVIEW_TYPE_REQUIRED_CRITERIA: Record<string, string[]> = {
+  full: [
+    "Nielsen's 10 heuristics",
+    "Navigation logic",
+    "Task flow efficiency",
+    "Recognition over recall",
+    "WCAG 2.2 AA conformance",
+    "Keyboard navigation",
+    "Screen reader interpretation",
+    "Touch targets ≥ 44px",
+    "Design system tokens",
+    "Component usage",
+    "Spacing 8pt grid",
+    "Iconography consistency",
+    "Microcopy clarity",
+    "Error message quality",
+    "Label precision",
+    "Tone & voice",
+    "Compliance (Section 508)",
+    "Data privacy disclosures",
+    "Domain regulation (HIPAA, BFSI)",
+    "Destructive action safety",
+    "Business impact estimate",
+    "Effort estimate",
+    "Acceptance criteria",
+    "Linked principle",
+  ],
+  prd: [
+    "Nielsen's 10 heuristics",
+    "Navigation logic",
+    "Task flow efficiency",
+    "Recognition over recall",
+    "Microcopy clarity",
+    "Error message quality",
+    "Label precision",
+    "Domain regulation (HIPAA, BFSI)",
+    "Destructive action safety",
+    "Data privacy disclosures",
+    "Business impact estimate",
+    "Effort estimate",
+    "Acceptance criteria",
+    "Linked principle",
+  ],
+  a11y: [
+    "WCAG 2.2 AA conformance",
+    "Keyboard navigation",
+    "Screen reader interpretation",
+    "Touch targets ≥ 44px",
+    "Error message quality",
+    "Label precision",
+    "Compliance (Section 508)",
+    "Data privacy disclosures",
+    "Effort estimate",
+    "Acceptance criteria",
+    "Linked principle",
+  ],
+  ds: [
+    "Touch targets ≥ 44px",
+    "Design system tokens",
+    "Component usage",
+    "Spacing 8pt grid",
+    "Iconography consistency",
+    "Effort estimate",
+    "Acceptance criteria",
+    "Linked principle",
+  ],
+  content: [
+    "Microcopy clarity",
+    "Error message quality",
+    "Label precision",
+    "Tone & voice",
+    "Data privacy disclosures",
+    "Effort estimate",
+    "Acceptance criteria",
+    "Linked principle",
+  ],
+};
+
 const steps = ["Review Setup", "Add Inputs", "Select Criteria", "Configure AI", "Run Review"];
 const stepHelp = [
   "Tell us what you're reviewing — name, product, domain, and type.",
   "Upload screens, paste a Figma URL, or add PRDs and flow assets.",
   "Pick the governed frameworks the AI should apply.",
   "Tune depth, confidence threshold, and what's included in the output.",
-  "Confirm inputs and start the review. AI proposes; you approve.",
+  "",
 ];
 
 const progressStages = [
@@ -78,18 +158,45 @@ function formatBackendStage(stage?: string | null): string {
   return labels[stage] ?? stage.replace(/_/g, " ");
 }
 
+function toAlphaNumeric(value: string): string {
+  return value.replace(/[^a-zA-Z0-9 ]/g, "").replace(/\s{2,}/g, " ");
+}
+
+function isWordDocument(file: File): boolean {
+  const lowerName = file.name.toLowerCase();
+  return (
+    file.type === "application/msword" ||
+    file.type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
+    lowerName.endsWith(".doc") ||
+    lowerName.endsWith(".docx")
+  );
+}
+
+function isPdfDocument(file: File): boolean {
+  const lowerName = file.name.toLowerCase();
+  return file.type === "application/pdf" || lowerName.endsWith(".pdf");
+}
+
+function isScreenshot(file: File): boolean {
+  return file.type.startsWith("image/");
+}
+
 export default function NewReviewPage() {
   const [step, setStep] = useState(0);
   const router = useRouter();
   const [name, setName] = useState("");
   const [product, setProduct] = useState("");
+  const [touchedFields, setTouchedFields] = useState<{ name: boolean; product: boolean }>({
+    name: false,
+    product: false,
+  });
   const [domain, setDomain] = useState("bfsi");
   const [reviewType, setReviewType] = useState("full");
   const [owner, setOwner] = useState("");
   const [figmaUrl, setFigmaUrl] = useState("");
   const [designSystemUrl, setDesignSystemUrl] = useState("");
   const [criteria, setCriteria] = useState<string[]>([]);
-  const [files, setFiles] = useState<Array<{ name: string; type: string; status: string; file?: File }>>([]);
+  const [files, setFiles] = useState<Array<{ id: string; name: string; type: string; status: string; file?: File; previewUrl?: string }>>([]);
   const [contextText, setContextText] = useState("");
   const [depth, setDepth] = useState("standard");
   const [confidence, setConfidence] = useState([75]);
@@ -99,7 +206,120 @@ export default function NewReviewPage() {
   const stageIdxRef = useRef(0);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const filesRef = useRef<Array<{ id: string; name: string; type: string; status: string; file?: File; previewUrl?: string }>>([]);
   const [isDragging, setIsDragging] = useState(false);
+  const [isScreenshotModalOpen, setIsScreenshotModalOpen] = useState(false);
+  const [activeScreenshotIndex, setActiveScreenshotIndex] = useState(0);
+  const [isPdfModalOpen, setIsPdfModalOpen] = useState(false);
+  const [activePdfIndex, setActivePdfIndex] = useState(0);
+
+  const screenshotFiles = useMemo(
+    () => files.filter((file) => file.type === "Screenshot" && Boolean(file.previewUrl)),
+    [files]
+  );
+
+  const pdfFiles = useMemo(
+    () => files.filter((file) => file.type === "PDF" && Boolean(file.previewUrl)),
+    [files]
+  );
+
+  useEffect(() => {
+    const requiredForType = REVIEW_TYPE_REQUIRED_CRITERIA[reviewType] ?? [];
+    setCriteria(requiredForType);
+  }, [reviewType]);
+
+  useEffect(() => {
+    filesRef.current = files;
+  }, [files]);
+
+  useEffect(() => {
+    return () => {
+      filesRef.current.forEach((file) => {
+        if (file.previewUrl) {
+          URL.revokeObjectURL(file.previewUrl);
+        }
+      });
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isScreenshotModalOpen) return;
+    if (screenshotFiles.length === 0) {
+      setIsScreenshotModalOpen(false);
+      return;
+    }
+    if (activeScreenshotIndex > screenshotFiles.length - 1) {
+      setActiveScreenshotIndex(screenshotFiles.length - 1);
+    }
+  }, [activeScreenshotIndex, isScreenshotModalOpen, screenshotFiles]);
+
+  useEffect(() => {
+    if (!isPdfModalOpen) return;
+    if (pdfFiles.length === 0) {
+      setIsPdfModalOpen(false);
+      return;
+    }
+    if (activePdfIndex > pdfFiles.length - 1) {
+      setActivePdfIndex(pdfFiles.length - 1);
+    }
+  }, [activePdfIndex, isPdfModalOpen, pdfFiles]);
+
+  const mapPickedFiles = (picked: File[]) => {
+    const allowedFiles = picked.filter((file) => isScreenshot(file) || isPdfDocument(file) || isWordDocument(file));
+    if (allowedFiles.length !== picked.length) {
+      toast.error("Only screenshots, PDFs, and Word documents are allowed.");
+    }
+
+    return allowedFiles.map((file) => {
+      const screenshot = isScreenshot(file);
+      const pdf = isPdfDocument(file);
+      const word = isWordDocument(file);
+      return {
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+        name: file.name,
+        type: screenshot ? "Screenshot" : pdf ? "PDF" : word ? "Word" : "PRD",
+        status: "Ready",
+        file,
+        previewUrl: screenshot || pdf ? URL.createObjectURL(file) : undefined,
+      };
+    });
+  };
+
+  const removeFile = (fileId: string) => {
+    setFiles((current) => {
+      const fileToRemove = current.find((file) => file.id === fileId);
+      if (fileToRemove?.previewUrl) {
+        URL.revokeObjectURL(fileToRemove.previewUrl);
+      }
+      return current.filter((file) => file.id !== fileId);
+    });
+  };
+
+  const openScreenshotModal = (fileId: string) => {
+    const index = screenshotFiles.findIndex((file) => file.id === fileId);
+    if (index < 0) return;
+    setActiveScreenshotIndex(index);
+    setIsScreenshotModalOpen(true);
+  };
+
+  const openPdfModal = (fileId: string) => {
+    const index = pdfFiles.findIndex((file) => file.id === fileId);
+    if (index < 0) return;
+    setActivePdfIndex(index);
+    setIsPdfModalOpen(true);
+  };
+
+  const removeActiveScreenshotFromModal = () => {
+    const activeScreenshot = screenshotFiles[activeScreenshotIndex];
+    if (!activeScreenshot) return;
+    removeFile(activeScreenshot.id);
+  };
+
+  const removeActivePdfFromModal = () => {
+    const activePdf = pdfFiles[activePdfIndex];
+    if (!activePdf) return;
+    removeFile(activePdf.id);
+  };
 
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
@@ -114,12 +334,7 @@ export default function NewReviewPage() {
     e.preventDefault();
     setIsDragging(false);
     const picked = Array.from(e.dataTransfer.files ?? []);
-    const mapped = picked.map((f) => ({
-      name: f.name,
-      type: f.type.startsWith("image/") ? "Screenshot" : "PRD",
-      status: "Ready",
-      file: f,
-    }));
+    const mapped = mapPickedFiles(picked);
     setFiles((cur) => [...cur, ...mapped]);
   };
 
@@ -128,12 +343,7 @@ export default function NewReviewPage() {
 
   const handleFilePick = (e: React.ChangeEvent<HTMLInputElement>) => {
     const picked = Array.from(e.target.files ?? []);
-    const mapped = picked.map((f) => ({
-      name: f.name,
-      type: f.type.startsWith("image/") ? "Screenshot" : "PRD",
-      status: "Ready",
-      file: f,
-    }));
+    const mapped = mapPickedFiles(picked);
     setFiles((cur) => [...cur, ...mapped]);
   };
 
@@ -241,57 +451,77 @@ export default function NewReviewPage() {
   const validStep0 = name.trim().length > 0 && product.trim().length > 0;
   const validStep1 = files.length > 0;
   const validStep2 = criteria.length > 0;
+  const progressPercent = Math.round(((stageIdx + 1) / progressStages.length) * 100);
+  const hasNameError = touchedFields.name && name.trim().length === 0;
+  const hasProductError = touchedFields.product && product.trim().length === 0;
 
   return (
     <>
       <AppHeader title="New Review" subtitle="Set up an AI-assisted UX review in 5 guided steps" />
-      <div className="flex-1 p-4 md:p-6">
+      <div className="flex-1 p-4 pb-28 md:p-6 md:pb-28">
         {/* Stepper */}
-        <ol className="mb-6 flex flex-wrap items-center gap-2" role="list" aria-label="Wizard progress">
-          {steps.map((s, i) => (
-            <li key={s} className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => !running && setStep(i)}
-                aria-current={i === step ? "step" : undefined}
-                className={cn(
-                  "flex min-h-9 items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium transition",
-                  i === step ? "border-primary bg-primary text-primary-foreground"
-                  : i < step ? "border-success/40 bg-success/10 text-success"
-                  : "border-border bg-card text-muted-foreground hover:bg-secondary",
-                )}
-              >
-                <span className={cn("flex h-5 w-5 items-center justify-center rounded-full text-[10px]",
-                  i === step ? "bg-primary-foreground/20" : i < step ? "bg-success/20" : "bg-secondary")}>
-                  {i < step ? <Check className="h-3 w-3" aria-hidden="true" /> : i + 1}
-                </span>
-                {s}
-              </button>
-              {i < steps.length - 1 && <span className="text-muted-foreground/40" aria-hidden="true">›</span>}
-            </li>
-          ))}
-        </ol>
+        <div className="sticky top-16 z-20 -mx-4 bg-background/90 px-4 py-3 backdrop-blur-lg supports-[backdrop-filter]:bg-background/75 md:-mx-6 md:px-6">
+          <ol className="flex flex-nowrap items-center gap-2 overflow-x-auto whitespace-nowrap [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" role="list" aria-label="Wizard progress">
+            {steps.map((s, i) => (
+              <li key={s} className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => !running && setStep(i)}
+                  aria-current={i === step ? "step" : undefined}
+                  className={cn(
+                    "flex min-h-9 items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium transition",
+                    i === step ? "border-primary bg-primary text-primary-foreground"
+                    : i < step ? "border-success/40 bg-success/10 text-success"
+                    : "border-border bg-card text-muted-foreground hover:bg-secondary",
+                  )}
+                >
+                  <span className={cn("flex h-5 w-5 items-center justify-center rounded-full text-[10px]",
+                    i === step ? "bg-primary-foreground/20" : i < step ? "bg-success/20" : "bg-secondary")}>
+                    {i < step ? <Check className="h-3 w-3" aria-hidden="true" /> : i + 1}
+                  </span>
+                  {s}
+                </button>
+                {i < steps.length - 1 && <span className="text-muted-foreground/40" aria-hidden="true">›</span>}
+              </li>
+            ))}
+          </ol>
+        </div>
 
         <div className="grid gap-4 lg:grid-cols-[1fr_280px]">
           <Card className="shadow-card">
             <CardHeader>
               <CardTitle className="text-lg">{steps[step]}</CardTitle>
-              <p className="text-sm text-muted-foreground">{stepHelp[step]}</p>
+              {stepHelp[step] && <p className="text-sm text-muted-foreground">{stepHelp[step]}</p>}
             </CardHeader>
             <CardContent className="space-y-6">
               {step === 0 && (
                 <div className="grid gap-5 md:grid-cols-2">
                   <Field label="Review name" required help="Use a descriptive, scannable name.">
-                    <Input value={name} onChange={(e) => setName(e.target.value)} aria-required />
-                    {name.trim().length === 0 && <p className="mt-1 text-xs text-destructive">Required.</p>}
+                    <Input
+                      value={name}
+                      onChange={(e) => setName(toAlphaNumeric(e.target.value))}
+                      onBlur={() => setTouchedFields((current) => ({ ...current, name: true }))}
+                      className={cn(hasNameError && "border-red-500 focus-visible:ring-red-500")}
+                      aria-invalid={hasNameError}
+                      aria-required
+                    />
+                    {hasNameError && <p className="mt-1 text-xs text-red-600">Required</p>}
                   </Field>
                   <Field label="Product / application" required>
-                    <Input value={product} onChange={(e) => setProduct(e.target.value)} aria-required />
+                    <Input
+                      value={product}
+                      onChange={(e) => setProduct(toAlphaNumeric(e.target.value))}
+                      onBlur={() => setTouchedFields((current) => ({ ...current, product: true }))}
+                      className={cn(hasProductError && "border-red-500 focus-visible:ring-red-500")}
+                      aria-invalid={hasProductError}
+                      aria-required
+                    />
+                    {hasProductError && <p className="mt-1 text-xs text-red-600">Required</p>}
                   </Field>
                   <Field label="Business domain">
                     <Select value={domain} onValueChange={setDomain}>
-                      <SelectTrigger><SelectValue /></SelectTrigger>
-                      <SelectContent>
+                      <SelectTrigger className="bg-background"><SelectValue /></SelectTrigger>
+                      <SelectContent className="bg-popover text-popover-foreground">
                         <SelectItem value="bfsi">Banking & Financial Services</SelectItem>
                         <SelectItem value="insurance">Insurance</SelectItem>
                         <SelectItem value="healthcare">Healthcare</SelectItem>
@@ -302,8 +532,8 @@ export default function NewReviewPage() {
                   </Field>
                   <Field label="Platform">
                     <Select defaultValue="responsive">
-                      <SelectTrigger><SelectValue /></SelectTrigger>
-                      <SelectContent>
+                      <SelectTrigger className="bg-background"><SelectValue /></SelectTrigger>
+                      <SelectContent className="bg-popover text-popover-foreground">
                         <SelectItem value="web">Web</SelectItem>
                         <SelectItem value="mobile">Mobile</SelectItem>
                         <SelectItem value="responsive">Responsive web</SelectItem>
@@ -312,8 +542,8 @@ export default function NewReviewPage() {
                   </Field>
                   <Field label="Review type">
                     <Select value={reviewType} onValueChange={setReviewType}>
-                      <SelectTrigger><SelectValue /></SelectTrigger>
-                      <SelectContent>
+                      <SelectTrigger className="bg-background"><SelectValue /></SelectTrigger>
+                      <SelectContent className="bg-popover text-popover-foreground">
                         <SelectItem value="full">Full UX Review</SelectItem>
                         <SelectItem value="prd">PRD Alignment Review</SelectItem>
                         <SelectItem value="a11y">Accessibility Review</SelectItem>
@@ -323,7 +553,7 @@ export default function NewReviewPage() {
                     </Select>
                   </Field>
                   <Field label="Reviewer / owner" className="md:col-span-2">
-                    <Input value={owner} onChange={(e) => setOwner(e.target.value)} />
+                    <Input value={owner} onChange={(e) => setOwner(toAlphaNumeric(e.target.value))} />
                   </Field>
                 </div>
               )}
@@ -344,13 +574,13 @@ export default function NewReviewPage() {
                   >
                     <Upload className="mx-auto h-7 w-7 text-muted-foreground" aria-hidden="true" />
                     <p className="mt-3 text-sm font-medium">Drag & drop screens, flows or PRDs</p>
-                    <p className="text-xs text-muted-foreground">PNG, JPG, PDF, DOCX — up to 20 MB each</p>
+                    <p className="text-xs text-muted-foreground">PNG, JPG, PDF, DOC, DOCX — up to 20 MB each</p>
                     <Button variant="outline" size="sm" className="mt-3 min-h-9" type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); fileInputRef.current?.click(); }}>Browse files</Button>
                     <input
                       ref={fileInputRef}
                       type="file"
                       multiple
-                      accept="image/*,.pdf,.doc,.docx,.txt"
+                      accept="image/*,.pdf,.doc,.docx"
                       className="hidden"
                       onChange={handleFilePick}
                     />
@@ -397,13 +627,33 @@ export default function NewReviewPage() {
                       <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">Uploaded assets ({files.length})</p>
                       <div className="grid gap-2 md:grid-cols-2">
                         {files.map((f) => (
-                          <div key={f.name} className="flex items-center gap-3 rounded-lg border border-border bg-card p-3">
-                            <div className="flex h-9 w-9 items-center justify-center rounded-md bg-secondary text-primary"><FileText className="h-4 w-4" aria-hidden="true" /></div>
+                          <div key={f.id} className="flex items-center gap-3 rounded-lg border border-border bg-card p-3">
+                            {f.type === "Screenshot" && f.previewUrl ? (
+                              <button
+                                type="button"
+                                onClick={() => openScreenshotModal(f.id)}
+                                className="h-12 w-12 shrink-0 overflow-hidden rounded-md border border-border"
+                                aria-label={`Open screenshot preview for ${f.name}`}
+                              >
+                                <img src={f.previewUrl} alt={f.name} className="h-full w-full object-cover" />
+                              </button>
+                            ) : f.type === "PDF" && f.previewUrl ? (
+                              <button
+                                type="button"
+                                onClick={() => openPdfModal(f.id)}
+                                className="flex h-12 w-12 shrink-0 items-center justify-center rounded-md border border-border bg-secondary/60 text-[10px] font-semibold text-primary"
+                                aria-label={`Open PDF preview for ${f.name}`}
+                              >
+                                PDF
+                              </button>
+                            ) : (
+                              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-secondary text-primary"><FileText className="h-4 w-4" aria-hidden="true" /></div>
+                            )}
                             <div className="min-w-0 flex-1">
                               <p className="truncate text-sm font-medium">{f.name}</p>
                               <p className="text-[11px] text-muted-foreground">{f.type} · {f.status}</p>
                             </div>
-                            <button type="button" onClick={() => setFiles(files.filter((x) => x.name !== f.name))} className="rounded p-1 text-muted-foreground hover:text-destructive" aria-label={`Remove ${f.name}`}>
+                            <button type="button" onClick={() => removeFile(f.id)} className="rounded p-1 text-muted-foreground hover:text-destructive" aria-label={`Remove ${f.name}`}>
                               <X className="h-4 w-4" />
                             </button>
                           </div>
@@ -461,7 +711,7 @@ export default function NewReviewPage() {
                     <RadioGroup value={depth} onValueChange={setDepth} className="grid grid-cols-3 gap-2">
                       {["quick", "standard", "deep"].map((v) => (
                         <Label key={v} className="flex min-h-[44px] cursor-pointer items-center gap-2 rounded-lg border border-border bg-card p-3 capitalize has-[:checked]:border-primary has-[:checked]:bg-primary/5">
-                          <RadioGroupItem value={v} />
+                          <RadioGroupItem value={v} className="-translate-x-0.5" />
                           <span className="text-sm">{v}</span>
                         </Label>
                       ))}
@@ -510,17 +760,25 @@ export default function NewReviewPage() {
                       </div>
                       <h3 className="mt-3 text-base font-semibold">Ready to run AI review</h3>
                       <p className="mt-1 text-sm text-muted-foreground">{files.length} inputs · {criteria.length} criteria · {depth} depth · ~2–4 min estimated</p>
-                      <Button size="lg" className="mt-4 min-h-11" onClick={runReview}>
-                        <Sparkles className="mr-1.5 h-4 w-4" aria-hidden="true" />Run analysis
-                      </Button>
+                      <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+                        <Button size="lg" variant="outline" className="min-h-11 bg-card hover:bg-card/90" onClick={() => toast.success("Draft saved")}>
+                          <Save className="mr-1.5 h-4 w-4" aria-hidden="true" />Save draft
+                        </Button>
+                        <Button size="lg" className="min-h-11" onClick={runReview}>
+                          <Sparkles className="mr-1.5 h-4 w-4" aria-hidden="true" />Run analysis
+                        </Button>
+                      </div>
                     </div>
                   ) : (
                     <div className="space-y-3 rounded-xl border border-border bg-card p-5" role="status" aria-live="polite">
-                      <div className="flex items-center gap-2">
-                        <Loader2 className="h-4 w-4 animate-spin text-primary" aria-hidden="true" />
-                        <p className="text-sm font-medium">{currentStageLabel || "AI agent at work…"}</p>
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <Loader2 className="h-4 w-4 animate-spin text-primary" aria-hidden="true" />
+                          <p className="text-sm font-medium">{currentStageLabel || "AI agent at work…"}</p>
+                        </div>
+                        <p className="text-xs font-medium text-muted-foreground">{progressPercent}%</p>
                       </div>
-                      <Progress value={((stageIdx + 1) / progressStages.length) * 100} className="h-1.5" />
+                      <Progress value={progressPercent} className="h-1.5" />
                       <ul className="mt-2 space-y-1.5">
                         {progressStages.map((s, i) => (
                           <li key={s} className="flex items-center gap-2 text-sm">
@@ -572,30 +830,202 @@ export default function NewReviewPage() {
         </div>
 
         {/* Navigation */}
-        {!running && (
-          <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
-            <Button variant="ghost" className="min-h-10" disabled={step === 0} onClick={() => setStep((s) => Math.max(0, s - 1))}>
-              <ArrowLeft className="mr-1.5 h-4 w-4" aria-hidden="true" />Back
-            </Button>
-            <div className="flex gap-2">
+        {!running && step < steps.length - 1 && (
+          <div className="fixed bottom-0 left-0 right-0 z-20 flex items-end px-4 pb-2 pt-1 md:left-[var(--sidebar-width)] md:px-6 md:peer-data-[state=collapsed]:left-[var(--sidebar-width-icon)]">
+            <div className="flex w-full translate-y-3 justify-end gap-2 rounded-xl border border-border bg-card p-2 shadow-card">
               <Button variant="outline" className="min-h-10" onClick={() => toast.success("Draft saved")}>
                 <Save className="mr-1.5 h-4 w-4" aria-hidden="true" />Save draft
               </Button>
-              {step < steps.length - 1 ? (
-                <Button
-                  className="min-h-10"
-                  disabled={(step === 0 && !validStep0) || (step === 1 && !validStep1) || (step === 2 && !validStep2)}
-                  onClick={() => setStep((s) => Math.min(steps.length - 1, s + 1))}
-                >
-                  Continue<ArrowRight className="ml-1.5 h-4 w-4" aria-hidden="true" />
-                </Button>
-              ) : (
-                <Button className="min-h-10" onClick={runReview}><Sparkles className="mr-1.5 h-4 w-4" aria-hidden="true" />Run review</Button>
-              )}
+              <Button
+                className="min-h-10"
+                disabled={(step === 0 && !validStep0) || (step === 1 && !validStep1) || (step === 2 && !validStep2)}
+                onClick={() => setStep((s) => Math.min(steps.length - 1, s + 1))}
+              >
+                Continue<ArrowRight className="ml-1.5 h-4 w-4" aria-hidden="true" />
+              </Button>
             </div>
           </div>
         )}
       </div>
+
+      <Sheet open={isScreenshotModalOpen} onOpenChange={setIsScreenshotModalOpen}>
+        <SheetContent side="right" className="w-[92vw] max-w-none sm:w-[58vw] sm:max-w-[58vw] p-0 [&>button]:hidden">
+          <SheetHeader className="border-b border-border px-4 py-3">
+            <div className="flex items-center justify-between gap-3">
+              <SheetTitle className="text-sm font-medium">
+                Screenshots ({screenshotFiles.length})
+              </SheetTitle>
+              <div className="flex items-center gap-2">
+                {screenshotFiles.length > 0 && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="border-destructive/30 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                    onClick={removeActiveScreenshotFromModal}
+                  >
+                    <Trash2 className="mr-1.5 h-4 w-4" />Remove
+                  </Button>
+                )}
+                <SheetClose asChild>
+                  <Button type="button" variant="ghost" size="icon" className="h-8 w-8" aria-label="Close screenshots preview">
+                    <X className="h-4 w-4" />
+                  </Button>
+                </SheetClose>
+              </div>
+            </div>
+          </SheetHeader>
+
+          {screenshotFiles.length > 0 && (
+            <div className="space-y-3 p-4">
+              <div className="relative flex items-center justify-center rounded-lg border border-border bg-secondary/30 p-2">
+                <img
+                  src={screenshotFiles[activeScreenshotIndex]?.previewUrl}
+                  alt={screenshotFiles[activeScreenshotIndex]?.name}
+                  className="max-h-[65vh] w-auto rounded object-contain"
+                />
+
+                {screenshotFiles.length > 1 && (
+                  <>
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant="secondary"
+                      className="absolute left-3"
+                      onClick={() => setActiveScreenshotIndex((idx) => (idx === 0 ? screenshotFiles.length - 1 : idx - 1))}
+                      aria-label="Previous screenshot"
+                    >
+                      <ChevronLeft className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant="secondary"
+                      className="absolute right-3"
+                      onClick={() => setActiveScreenshotIndex((idx) => (idx === screenshotFiles.length - 1 ? 0 : idx + 1))}
+                      aria-label="Next screenshot"
+                    >
+                      <ChevronRight className="h-4 w-4" />
+                    </Button>
+                  </>
+                )}
+              </div>
+
+              <div className="flex items-center justify-between gap-2">
+                <p className="truncate text-sm text-muted-foreground">{screenshotFiles[activeScreenshotIndex]?.name}</p>
+                <p className="text-xs text-muted-foreground">
+                  {activeScreenshotIndex + 1} / {screenshotFiles.length}
+                </p>
+              </div>
+
+              {screenshotFiles.length > 1 && (
+                <div className="flex gap-2 overflow-x-auto pb-1">
+                  {screenshotFiles.map((file, idx) => (
+                    <button
+                      key={file.id}
+                      type="button"
+                      onClick={() => setActiveScreenshotIndex(idx)}
+                      className={cn(
+                        "h-14 w-20 shrink-0 overflow-hidden rounded border",
+                        idx === activeScreenshotIndex ? "border-primary" : "border-border"
+                      )}
+                      aria-label={`Open screenshot ${idx + 1}`}
+                    >
+                      <img src={file.previewUrl} alt={file.name} className="h-full w-full object-cover" />
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </SheetContent>
+      </Sheet>
+
+      <Dialog open={isPdfModalOpen} onOpenChange={setIsPdfModalOpen}>
+        <DialogContent className="max-w-5xl p-0 overflow-hidden">
+          <DialogHeader className="px-4 py-3 border-b border-border">
+            <div className="flex items-center justify-between gap-3">
+              <DialogTitle className="text-sm font-medium">
+                PDFs ({pdfFiles.length})
+              </DialogTitle>
+              {pdfFiles.length > 0 && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="border-destructive/30 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                  onClick={removeActivePdfFromModal}
+                >
+                  <Trash2 className="mr-1.5 h-4 w-4" />Remove
+                </Button>
+              )}
+            </div>
+          </DialogHeader>
+
+          {pdfFiles.length > 0 && (
+            <div className="space-y-3 p-4">
+              <div className="relative rounded-lg border border-border bg-secondary/20">
+                <iframe
+                  title={pdfFiles[activePdfIndex]?.name}
+                  src={pdfFiles[activePdfIndex]?.previewUrl}
+                  className="h-[65vh] w-full rounded"
+                />
+
+                {pdfFiles.length > 1 && (
+                  <>
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant="secondary"
+                      className="absolute left-3 top-1/2 -translate-y-1/2"
+                      onClick={() => setActivePdfIndex((idx) => (idx === 0 ? pdfFiles.length - 1 : idx - 1))}
+                      aria-label="Previous PDF"
+                    >
+                      <ChevronLeft className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant="secondary"
+                      className="absolute right-3 top-1/2 -translate-y-1/2"
+                      onClick={() => setActivePdfIndex((idx) => (idx === pdfFiles.length - 1 ? 0 : idx + 1))}
+                      aria-label="Next PDF"
+                    >
+                      <ChevronRight className="h-4 w-4" />
+                    </Button>
+                  </>
+                )}
+              </div>
+
+              <div className="flex items-center justify-between gap-2">
+                <p className="truncate text-sm text-muted-foreground">{pdfFiles[activePdfIndex]?.name}</p>
+                <p className="text-xs text-muted-foreground">
+                  {activePdfIndex + 1} / {pdfFiles.length}
+                </p>
+              </div>
+
+              {pdfFiles.length > 1 && (
+                <div className="flex gap-2 overflow-x-auto pb-1">
+                  {pdfFiles.map((file, idx) => (
+                    <button
+                      key={file.id}
+                      type="button"
+                      onClick={() => setActivePdfIndex(idx)}
+                      className={cn(
+                        "flex h-12 w-20 shrink-0 items-center justify-center rounded border text-xs font-semibold",
+                        idx === activePdfIndex ? "border-primary text-primary" : "border-border text-muted-foreground"
+                      )}
+                      aria-label={`Open PDF ${idx + 1}`}
+                    >
+                      PDF {idx + 1}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </>
   );
 }
@@ -604,7 +1034,7 @@ function Field({ label, children, className, required, help }: { label: string; 
   return (
     <div className={cn("space-y-1.5", className)}>
       <Label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-        {label}{required && <span className="ml-0.5 text-destructive" aria-hidden="true">*</span>}
+        {label}{required && <span className="ml-0.5 text-red-500" aria-hidden="true">*</span>}
       </Label>
       {children}
       {help && <p className="text-[11px] text-muted-foreground">{help}</p>}
@@ -615,7 +1045,7 @@ function Field({ label, children, className, required, help }: { label: string; 
 function SumRow({ label, value, capitalize }: { label: string; value: string; capitalize?: boolean }) {
   return (
     <div className="flex justify-between gap-2">
-      <span className="text-muted-foreground">{label}</span>
+      <span className="font-semibold text-foreground">{label}</span>
       <span className={`font-medium text-right ${capitalize ? "capitalize" : ""}`}>{value}</span>
     </div>
   );
