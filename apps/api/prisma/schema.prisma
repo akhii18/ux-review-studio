@@ -5,6 +5,7 @@ generator client {
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 // ── Enums ─────────────────────────────────────────────────────────────────────
@@ -78,7 +79,7 @@ model Asset {
   reviewId    String
   name        String
   mimeType    String
-  blobUrl     String?  // Azure Blob Storage URL for image/file assets
+  blobUrl     String?  @map("base64Data") // Legacy column; stores Supabase ref/URL or inline data URL
   contentText String?  @db.Text // Inline text for PRD/context text assets
   sizeBytes   Int?
   createdAt   DateTime @default(now())

@@ -8,13 +8,170 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { SheetClose } from "@/components/ui/sheet";
+import {
+  Pagination,
+  PaginationContent,
+  PaginationItem,
+  PaginationNext,
+  PaginationPrevious,
+} from "@/components/ui/pagination";
 import { PriorityBadge } from "@/components/ui/PriorityBadge";
-import { Search, FileBarChart, ExternalLink } from "lucide-react";
-import { listReviews } from "@/lib/api";
+import { Search, FileBarChart, ExternalLink, Trash2, X } from "lucide-react";
+import { deleteReview, getReview, listReviews } from "@/lib/api";
 import { toast } from "sonner";
 
 const STATUS_OPTIONS = ["all", "draft", "in_progress", "completed", "failed", "archived"];
+const PAGE_SIZE = 10;
+
+function formatReviewDate(value?: string | null) {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+  return date.toLocaleDateString("en-US", {
+    month: "short",
+    day: "2-digit",
+    year: "numeric",
+  });
+}
+
+function escapeHtml(input: string) {
+  return input
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+function markdownToHtml(markdown: string) {
+  const escaped = escapeHtml(markdown ?? "").replaceAll("\r\n", "\n");
+  const lines = escaped.split("\n");
+  const html: string[] = [];
+
+  let inCodeBlock = false;
+  let inUl = false;
+  let inOl = false;
+
+  const closeLists = () => {
+    if (inUl) {
+      html.push("</ul>");
+      inUl = false;
+    }
+    if (inOl) {
+      html.push("</ol>");
+      inOl = false;
+    }
+  };
+
+  const inline = (value: string) =>
+    value
+      .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+      .replace(/\*(.+?)\*/g, "<em>$1</em>")
+      .replace(/`([^`]+)`/g, "<code>$1</code>");
+
+  for (const line of lines) {
+    if (line.trim().startsWith("```")) {
+      closeLists();
+      if (!inCodeBlock) {
+        html.push("<pre><code>");
+      } else {
+        html.push("</code></pre>");
+      }
+      inCodeBlock = !inCodeBlock;
+      continue;
+    }
+
+    if (inCodeBlock) {
+      html.push(`${line}\n`);
+      continue;
+    }
+
+    if (!line.trim()) {
+      closeLists();
+      continue;
+    }
+
+    const hMatch = line.match(/^(#{1,6})\s+(.+)$/);
+    if (hMatch) {
+      closeLists();
+      const level = hMatch[1].length;
+      html.push(`<h${level}>${inline(hMatch[2].trim())}</h${level}>`);
+      continue;
+    }
+
+    const ulMatch = line.match(/^\s*[-*]\s+(.+)$/);
+    if (ulMatch) {
+      if (inOl) {
+        html.push("</ol>");
+        inOl = false;
+      }
+      if (!inUl) {
+        html.push("<ul>");
+        inUl = true;
+      }
+      html.push(`<li>${inline(ulMatch[1].trim())}</li>`);
+      continue;
+    }
+
+    const olMatch = line.match(/^\s*\d+\.\s+(.+)$/);
+    if (olMatch) {
+      if (inUl) {
+        html.push("</ul>");
+        inUl = false;
+      }
+      if (!inOl) {
+        html.push("<ol>");
+        inOl = true;
+      }
+      html.push(`<li>${inline(olMatch[1].trim())}</li>`);
+      continue;
+    }
+
+    closeLists();
+    html.push(`<p>${inline(line.trim())}</p>`);
+  }
+
+  closeLists();
+  if (inCodeBlock) html.push("</code></pre>");
+
+  return html.join("\n");
+}
+
+function buildReportHtmlDocument(title: string, markdown: string) {
+  const content = markdownToHtml(markdown);
+  return `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>${escapeHtml(title)}</title>
+  <style>
+    :root { color-scheme: light; }
+    body { font-family: Inter, Segoe UI, Arial, sans-serif; margin: 0; padding: 20px; line-height: 1.6; background: #ffffff; color: #111827; }
+    h1, h2, h3, h4, h5, h6 { margin: 1.1em 0 0.5em; line-height: 1.25; }
+    p { margin: 0.5em 0; }
+    ul, ol { margin: 0.5em 0; padding-left: 1.25rem; }
+    pre { overflow: auto; padding: 12px; border-radius: 8px; background: rgba(127,127,127,0.12); }
+    code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  </style>
+</head>
+<body>
+  ${content}
+</body>
+</html>`;
+}
 
 export default function HistoryPage() {
   const [q, setQ] = useState("");
@@ -22,6 +179,12 @@ export default function HistoryPage() {
   const [domain, setDomain] = useState("all");
   const [reviews, setReviews] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [deletingReviewId, setDeletingReviewId] = useState<string | null>(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [reportSheetOpen, setReportSheetOpen] = useState(false);
+  const [loadingReportReviewId, setLoadingReportReviewId] = useState<string | null>(null);
+  const [reportPreview, setReportPreview] = useState<{ title: string; html: string } | null>(null);
+  const [pendingDeleteReview, setPendingDeleteReview] = useState<{ id: string; name: string } | null>(null);
 
   useEffect(() => {
     setIsLoading(true);
@@ -51,13 +214,70 @@ export default function HistoryPage() {
     });
   }, [reviews, q, status, domain]);
 
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [q, status, domain]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const paginated = useMemo(() => {
+    const start = (currentPage - 1) * PAGE_SIZE;
+    return filtered.slice(start, start + PAGE_SIZE);
+  }, [filtered, currentPage]);
+
+  const canGoPrevious = currentPage > 1;
+  const canGoNext = currentPage < totalPages;
+
+  async function handleDelete(reviewId: string, reviewName: string) {
+    if (deletingReviewId) return;
+
+    setDeletingReviewId(reviewId);
+    try {
+      await deleteReview(reviewId);
+      setReviews((prev) => prev.filter((review) => review.id !== reviewId));
+      toast.success("Review deleted");
+    } catch (err) {
+      console.error(err);
+      toast.error("Failed to delete review");
+    } finally {
+      setDeletingReviewId(null);
+      setPendingDeleteReview(null);
+    }
+  }
+
+  async function handleOpenReport(reviewId: string, reviewName: string) {
+    if (loadingReportReviewId) return;
+
+    setLoadingReportReviewId(reviewId);
+    try {
+      const review = await getReview(reviewId);
+      const report = review?.reports?.[0];
+
+      if (!report?.contentMd) {
+        toast.error("No report found for this review");
+        return;
+      }
+
+      setReportPreview({
+        title: report.name || `${reviewName} report`,
+        html: buildReportHtmlDocument(report.name || reviewName || "UX Report", report.contentMd),
+      });
+      setReportSheetOpen(true);
+    } catch (err) {
+      console.error(err);
+      toast.error("Failed to load report");
+    } finally {
+      setLoadingReportReviewId(null);
+    }
+  }
+
   return (
     <>
       <AppHeader title="Review History" subtitle="Search, filter, and compare reviews across products and domains" />
-      <div className="flex-1 space-y-4 p-4 md:p-6">
+      <div className="flex-1 space-y-0 p-4 md:p-6">
 
         {/* Filters */}
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="sticky top-16 z-20 -mx-4 border-b border-border bg-background px-4 py-3 md:-mx-6 md:px-6">
+          <div className="flex flex-wrap items-center gap-2">
           <div className="relative flex-1 min-w-[200px]">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
             <Input
@@ -88,93 +308,198 @@ export default function HistoryPage() {
               ))}
             </SelectContent>
           </Select>
+          </div>
+
         </div>
 
         {/* Table */}
-        <div className="rounded-xl border border-border bg-card shadow-card overflow-x-auto">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Review</TableHead>
-                <TableHead className="hidden md:table-cell">Product</TableHead>
-                <TableHead className="hidden lg:table-cell">Domain</TableHead>
-                <TableHead className="hidden lg:table-cell">Type</TableHead>
-                <TableHead className="text-right">UX Score</TableHead>
-                <TableHead className="hidden sm:table-cell">Priority breakdown</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead className="hidden xl:table-cell">Owner</TableHead>
-                <TableHead className="hidden xl:table-cell">Created</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
+        <div className="rounded-xl border border-border bg-card shadow-card overflow-hidden">
+          <div className="max-h-[calc(100vh-12rem)] overflow-auto">
+            <table className="w-full border-collapse text-sm">
+              <thead className="sticky top-0 z-10 bg-foreground">
+                <tr className="border-0">
+                  <th className="h-12 px-4 text-left align-middle text-[12px] font-semibold uppercase tracking-wide text-background">Review</th>
+                  <th className="hidden h-12 px-4 text-left align-middle text-[12px] font-semibold uppercase tracking-wide text-background md:table-cell">Product</th>
+                  <th className="hidden h-12 px-4 text-left align-middle text-[12px] font-semibold uppercase tracking-wide text-background lg:table-cell">Domain</th>
+                  <th className="hidden h-12 px-4 text-left align-middle text-[12px] font-semibold uppercase tracking-wide text-background lg:table-cell">Type</th>
+                  <th className="h-12 px-4 text-right align-middle text-[12px] font-semibold uppercase tracking-wide text-background">UX Score</th>
+                  <th className="hidden h-12 px-4 text-left align-middle text-[12px] font-semibold uppercase tracking-wide text-background sm:table-cell">Priority breakdown</th>
+                  <th className="h-12 px-4 text-left align-middle text-[12px] font-semibold uppercase tracking-wide text-background">Status</th>
+                  <th className="hidden h-12 px-4 text-left align-middle text-[12px] font-semibold uppercase tracking-wide text-background xl:table-cell">Owner</th>
+                  <th className="hidden h-12 px-4 text-left align-middle text-[12px] font-semibold uppercase tracking-wide text-background xl:table-cell">Created</th>
+                  <th className="h-12 px-2 text-right align-middle text-[12px] font-semibold uppercase tracking-wide text-background">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="[&_tr:nth-child(even)]:bg-muted/40 [&_tr:last-child]:border-0">
               {isLoading ? (
-                Array.from({ length: 5 }).map((_, i) => (
-                  <TableRow key={i}>
+                Array.from({ length: PAGE_SIZE }).map((_, i) => (
+                  <tr key={i} className="border-b border-border/60">
                     {Array.from({ length: 10 }).map((_, j) => (
-                      <TableCell key={j}><Skeleton className="h-4 w-full" /></TableCell>
+                      <td key={j} className="px-4 py-3 align-middle"><Skeleton className="h-4 w-full" /></td>
                     ))}
-                  </TableRow>
+                  </tr>
                 ))
               ) : filtered.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={10} className="p-8 text-center text-sm text-muted-foreground">
+                <tr className="border-b border-border/60">
+                  <td colSpan={10} className="p-8 text-center text-sm text-muted-foreground">
                     {reviews.length === 0
                       ? "No reviews yet. Start your first review."
                       : "No reviews match your filters."}
-                  </TableCell>
-                </TableRow>
-              ) : filtered.map((r) => (
-                <TableRow key={r.id}>
-                  <TableCell>
+                  </td>
+                </tr>
+              ) : paginated.map((r) => (
+                <tr key={r.id} className="border-b border-border/60 transition-colors hover:bg-secondary/60">
+                  <td className="px-4 py-3 align-middle">
                     <Link
                       href={{ pathname: "/workspace", query: { reviewId: r.id } }}
                       className="font-medium text-foreground hover:text-primary"
                     >
                       {r.name}
                     </Link>
-                    <p className="text-[11px] text-muted-foreground mt-0.5">{r.createdAt?.slice(0, 10)}</p>
-                  </TableCell>
-                  <TableCell className="hidden text-sm md:table-cell">{r.product}</TableCell>
-                  <TableCell className="hidden text-xs text-muted-foreground lg:table-cell">{r.domain || "—"}</TableCell>
-                  <TableCell className="hidden text-xs text-muted-foreground lg:table-cell">{r.reviewType}</TableCell>
-                  <TableCell className="text-right font-medium tabular-nums">
+                    <p className="mt-0.5 text-[11px] text-muted-foreground">{formatReviewDate(r.createdAt)}</p>
+                  </td>
+                  <td className="hidden px-4 py-3 align-middle text-sm md:table-cell">{r.product}</td>
+                  <td className="hidden px-4 py-3 align-middle text-xs text-muted-foreground lg:table-cell">{r.domain || "—"}</td>
+                  <td className="hidden px-4 py-3 align-middle text-xs text-muted-foreground lg:table-cell">{r.reviewType}</td>
+                  <td className="px-4 py-3 align-middle text-right font-medium tabular-nums">
                     {r.uxScore ?? <span className="text-muted-foreground">—</span>}
-                  </TableCell>
-                  <TableCell className="hidden sm:table-cell">
+                  </td>
+                  <td className="hidden px-4 py-3 align-middle sm:table-cell">
                     <div className="flex gap-1">
                       <PriorityBadge priority="P0" compact /><span className="text-xs tabular-nums text-muted-foreground">—</span>
                       <PriorityBadge priority="P1" compact /><span className="text-xs tabular-nums text-muted-foreground">—</span>
-                      <PriorityBadge priority="P2" compact /><span className="text-xs tabular-nums text-muted-foreground">—</span>
+                      <PriorityBadge priority="P2" compact />
                     </div>
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant="secondary" className="capitalize">{r.status?.replace("_", " ")}</Badge>
-                  </TableCell>
-                  <TableCell className="hidden text-xs xl:table-cell">{r.owner || "User"}</TableCell>
-                  <TableCell className="hidden text-xs text-muted-foreground xl:table-cell">{r.updatedAt?.slice(0, 10)}</TableCell>
-                  <TableCell className="text-right">
+                  </td>
+                  <td className="px-4 py-3 align-middle">
+                    <Badge variant="secondary" className="capitalize whitespace-nowrap">{r.status?.replace("_", " ")}</Badge>
+                  </td>
+                  <td className="hidden px-4 py-3 align-middle text-xs xl:table-cell">{r.owner || "User"}</td>
+                  <td className="hidden px-4 py-3 align-middle text-xs text-muted-foreground xl:table-cell">{formatReviewDate(r.updatedAt)}</td>
+                  <td className="px-1 py-3 align-middle text-right">
                     <div className="flex justify-end gap-1">
                       <Button asChild size="icon" variant="ghost" aria-label="Open workspace" className="h-9 w-9">
                         <Link href={{ pathname: "/workspace", query: { reviewId: r.id } }}><ExternalLink className="h-4 w-4" /></Link>
                       </Button>
-                      <Button asChild size="icon" variant="ghost" aria-label="Generate report" className="h-9 w-9">
-                        <Link href="/reports"><FileBarChart className="h-4 w-4" /></Link>
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        aria-label={`Open report for ${r.name || "review"}`}
+                        className="h-9 w-9"
+                        disabled={loadingReportReviewId === r.id}
+                        onClick={() => handleOpenReport(r.id, r.name || "Untitled review")}
+                      >
+                        <FileBarChart className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        aria-label={`Delete ${r.name}`}
+                        className="h-9 w-9 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                        disabled={deletingReviewId === r.id}
+                        onClick={() => setPendingDeleteReview({ id: r.id, name: r.name || "Untitled review" })}
+                      >
+                        <Trash2 className="h-4 w-4" />
                       </Button>
                     </div>
-                  </TableCell>
-                </TableRow>
+                  </td>
+                </tr>
               ))}
-            </TableBody>
-          </Table>
+              </tbody>
+            </table>
+          </div>
         </div>
 
         {!isLoading && filtered.length > 0 && (
-          <p className="text-xs text-muted-foreground">
-            Showing {filtered.length} of {reviews.length} review{reviews.length !== 1 ? "s" : ""}
-          </p>
+          <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-xs text-muted-foreground">
+              Showing {(currentPage - 1) * PAGE_SIZE + 1} to {Math.min(currentPage * PAGE_SIZE, filtered.length)} of {filtered.length} filtered review{filtered.length !== 1 ? "s" : ""}
+            </p>
+            <Pagination className="mx-0 w-auto justify-start sm:justify-end">
+              <PaginationContent>
+                <PaginationItem>
+                  <PaginationPrevious
+                    href="#"
+                    onClick={(event) => {
+                      event.preventDefault();
+                      if (canGoPrevious) setCurrentPage((page) => page - 1);
+                    }}
+                    aria-disabled={!canGoPrevious}
+                    className={!canGoPrevious ? "pointer-events-none opacity-50" : undefined}
+                  />
+                </PaginationItem>
+                <PaginationItem>
+                  <span className="px-2 text-sm text-muted-foreground" aria-live="polite">
+                    Page {currentPage} of {totalPages}
+                  </span>
+                </PaginationItem>
+                <PaginationItem>
+                  <PaginationNext
+                    href="#"
+                    onClick={(event) => {
+                      event.preventDefault();
+                      if (canGoNext) setCurrentPage((page) => page + 1);
+                    }}
+                    aria-disabled={!canGoNext}
+                    className={!canGoNext ? "pointer-events-none opacity-50" : undefined}
+                  />
+                </PaginationItem>
+              </PaginationContent>
+            </Pagination>
+          </div>
         )}
       </div>
+
+      <AlertDialog open={Boolean(pendingDeleteReview)} onOpenChange={(open) => !open && setPendingDeleteReview(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete review?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Delete review "{pendingDeleteReview?.name}"? This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="!bg-destructive !text-destructive-foreground hover:!bg-destructive/90"
+              onClick={() => {
+                if (!pendingDeleteReview) return;
+                void handleDelete(pendingDeleteReview.id, pendingDeleteReview.name);
+              }}
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <Sheet open={reportSheetOpen} onOpenChange={setReportSheetOpen}>
+        <SheetContent side="right" className="w-[92vw] max-w-none sm:w-[58vw] sm:max-w-[58vw] p-0 [&>button]:hidden">
+          <SheetHeader className="border-b border-border px-6 py-4">
+            <div className="flex items-center justify-between gap-3">
+              <SheetTitle className="text-base">{reportPreview?.title ?? "Report"}</SheetTitle>
+              <SheetClose asChild>
+                <Button type="button" variant="ghost" size="icon" className="h-8 w-8" aria-label="Close report preview">
+                  <X className="h-4 w-4" />
+                </Button>
+              </SheetClose>
+            </div>
+          </SheetHeader>
+          <div className="h-[calc(100vh-73px)]">
+            {reportPreview ? (
+              <iframe
+                title={reportPreview.title}
+                className="h-full w-full border-0"
+                srcDoc={reportPreview.html}
+              />
+            ) : (
+              <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+                No report content.
+              </div>
+            )}
+          </div>
+        </SheetContent>
+      </Sheet>
     </>
   );
 }

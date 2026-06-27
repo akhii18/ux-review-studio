@@ -18,5 +18,4 @@ export const llm = new AzureChatOpenAI({
   azureOpenAIEndpoint: process.env.AZURE_OPENAI_ENDPOINT,
   azureOpenAIApiDeploymentName: process.env.AZURE_OPENAI_DEPLOYMENT,
   azureOpenAIApiVersion: process.env.AZURE_OPENAI_API_VERSION ?? "2024-12-01-preview",
-  temperature: 0.1,
 });

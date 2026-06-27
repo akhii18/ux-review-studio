@@ -39,7 +39,7 @@ export function AppHeader({
         <Button variant="ghost" size="icon" aria-label={notificationCount > 0 ? `Notifications, ${notificationCount} unread` : "Notifications"} className="relative h-11 w-11">
           <Bell className="h-4 w-4" aria-hidden />
           {notificationCount > 0 && (
-            <span aria-hidden className="absolute right-2 top-2 h-1.5 w-1.5 rounded-full bg-destructive" />
+            <span aria-hidden className="absolute right-2 top-2 h-1.5 w-1.5 rounded-full bg-red-500" />
           )}
         </Button>
 

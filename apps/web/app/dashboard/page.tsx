@@ -1,69 +1,204 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { AppHeader } from "@/components/ui/AppHeader";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { ReviewHistoryModal } from "@/components/dashboard/ReviewHistoryModal";
+import type { ReviewHistoryItem } from "@/components/dashboard/ReviewHistoryModal";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import { PriorityBadge } from "@/components/ui/PriorityBadge";
 import {
-  ArrowRight, ArrowUpRight, CheckCircle2, AlertOctagon, Clock,
-  FileText, Upload, Figma, GitCompare, Sparkles, Plus, AlertTriangle,
-  Accessibility, FileWarning, MoreHorizontal,
+  ArrowRight, ArrowUpRight, CheckCircle2, AlertOctagon,
+  FileText, Plus, AlertTriangle,
+  MoreHorizontal,
 } from "lucide-react";
-import { getAnalytics, listReviews } from "@/lib/api";
+import { deleteReview, getAnalytics, listReviews } from "@/lib/api";
 import { toast } from "sonner";
+
+function toTitleCase(value: string) {
+  return value
+    .replaceAll("_", " ")
+    .trim()
+    .toLowerCase()
+    .split(" ")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
 
 export default function DashboardPage() {
   const [analytics, setAnalytics] = useState<any>(null);
   const [reviews, setReviews] = useState<any[]>([]);
   const [analyticsLoading, setAnalyticsLoading] = useState(true);
   const [reviewsLoading, setReviewsLoading] = useState(true);
+  const [isReviewHistoryOpen, setIsReviewHistoryOpen] = useState(false);
 
-  useEffect(() => {
-    getAnalytics()
-      .then((data) => {
-        setAnalytics(data);
-      })
-      .catch((err) => {
-        console.error(err);
-        toast.error("Failed to load analytics");
-      })
-      .finally(() => setAnalyticsLoading(false));
+  const loadAnalytics = useCallback(async (showLoader = false) => {
+    if (showLoader) setAnalyticsLoading(true);
 
-    listReviews()
-      .then((data) => {
-        setReviews(data);
-      })
-      .catch((err) => {
-        console.error(err);
-        toast.error("Failed to load reviews");
-      })
-      .finally(() => setReviewsLoading(false));
+    try {
+      const data = await getAnalytics();
+      setAnalytics(data);
+    } catch (err) {
+      console.error(err);
+      toast.error("Failed to load analytics");
+    } finally {
+      if (showLoader) setAnalyticsLoading(false);
+    }
   }, []);
 
-  const na = analytics?.needsAttention;
-  const kpis = analytics ? [
-    { label: "Reviews completed", value: String(analytics.kpis.totalReviews || analytics.kpis.completedReviews || 0), icon: CheckCircle2, tone: "text-success" },
-    { label: "Issues identified", value: String(analytics.kpis.totalFindings || 0), icon: AlertTriangle, tone: "text-warning" },
-    { label: "P0 blockers", value: String(analytics.kpis.p0Count || 0), icon: AlertOctagon, tone: "text-destructive" },
-    { label: "Average UX score", value: String(analytics.kpis.avgUxScore || "—"), icon: ArrowUpRight, tone: "text-primary" },
-    { label: "Acceptance rate", value: `${analytics.kpis.acceptanceRate || 0}%`, icon: CheckCircle2, tone: "text-info" },
-    { label: "Reports generated", value: "—", icon: FileText, tone: "text-accent-foreground" },
-  ] : [];
+  const loadReviews = useCallback(async (showLoader = false) => {
+    if (showLoader) setReviewsLoading(true);
 
-  const p0Count = analytics?.kpis.p0Count ?? 0;
-  const p1Count = analytics?.kpis.totalFindings
-    ? Math.round(analytics.kpis.totalFindings * 0.38)
-    : 0;
-  const p2Count = analytics?.kpis.totalFindings
-    ? analytics.kpis.totalFindings - p0Count - p1Count
-    : 0;
+    try {
+      const data = await listReviews();
+      setReviews(data);
+    } catch (err) {
+      console.error(err);
+      toast.error("Failed to load reviews");
+    } finally {
+      if (showLoader) setReviewsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadAnalytics(true);
+    loadReviews(true);
+  }, [loadAnalytics, loadReviews]);
+
+  useEffect(() => {
+    if (!isReviewHistoryOpen) return;
+
+    loadReviews();
+    const intervalId = setInterval(() => {
+      loadReviews();
+    }, 15000);
+
+    return () => {
+      clearInterval(intervalId);
+    };
+  }, [isReviewHistoryOpen, loadReviews]);
+
+  const handleDeleteReview = useCallback(async (reviewId: string) => {
+    try {
+      await deleteReview(reviewId);
+      toast.success("Review deleted");
+      await Promise.all([loadReviews(), loadAnalytics()]);
+    } catch (err) {
+      console.error(err);
+      toast.error("Failed to delete review");
+    }
+  }, [loadAnalytics, loadReviews]);
+
+  const analyticsKpis = analytics?.kpis ?? {};
+  const totalReviews = analyticsKpis.totalReviews ?? reviews.length;
+  const completedReviews = analyticsKpis.completedReviews ?? reviews.filter((r) => r.status === "completed").length;
+  const totalFindings = analyticsKpis.totalFindings ?? 0;
+  const avgUxScore = analyticsKpis.avgUxScore ?? 0;
+  const p0Count = analyticsKpis.p0Count ?? 0;
+  const p1Count = analyticsKpis.p1Count ?? 0;
+  const p2Count = analyticsKpis.p2Count ?? 0;
   const total = p0Count + p1Count + p2Count || 1;
+
+  const inProgressReviews = reviews.filter((r) => ["in_progress", "running", "queued"].includes((r.status ?? "").toLowerCase())).length;
+  const failedReviews = reviews.filter((r) => (r.status ?? "").toLowerCase() === "failed").length;
+  const lowScoreReviews = reviews.filter((r) => typeof r.uxScore === "number" && r.uxScore < 70).length;
+  const needsAttentionCount = typeof analytics?.needsAttention === "number"
+    ? analytics.needsAttention
+    : Number(analytics?.needsAttention?.untriagedP0 ?? 0);
+  const acceptanceRate = totalReviews > 0 ? Math.round((completedReviews / totalReviews) * 100) : 0;
+  const reportsGenerated = completedReviews;
+
+  const kpis = [
+    { label: "Total reviews", value: String(totalReviews), icon: CheckCircle2, tone: "text-success" },
+    { label: "Issues identified", value: String(totalFindings), icon: AlertTriangle, tone: "text-warning" },
+    { label: "P0 blockers", value: String(p0Count), icon: AlertOctagon, tone: "text-destructive" },
+    { label: "Average UX score", value: String(avgUxScore || 0), icon: ArrowUpRight, tone: "text-primary" },
+    { label: "Acceptance rate", value: `${acceptanceRate}%`, icon: CheckCircle2, tone: "text-info" },
+    { label: "Reports generated", value: String(reportsGenerated), icon: FileText, tone: "text-accent-foreground" },
+  ];
+
+  const quickActions = useMemo(() => {
+    const items = [
+      {
+        icon: Plus,
+        label: totalReviews === 0 ? "Start first UX review" : "Start new UX review",
+        to: "/new-review",
+        hint: totalReviews === 0 ? "No reviews available" : `${totalReviews} reviews in workspace`,
+      },
+      {
+        icon: ArrowRight,
+        label: "Open workspace",
+        to: "/workspace",
+        hint: `${inProgressReviews} in progress`,
+      },
+      {
+        icon: AlertOctagon,
+        label: "Open triage",
+        to: "/workspace",
+        hint: `${needsAttentionCount} need attention`,
+      },
+      {
+        icon: FileText,
+        label: "View reports",
+        to: "/reports",
+        hint: `${reportsGenerated} generated`,
+      },
+      {
+        icon: ArrowRight,
+        label: "Review history",
+        to: "/history",
+        hint: `${totalReviews} total reviews`,
+      },
+      {
+        icon: ArrowRight,
+        label: "Prompt library",
+        to: "/prompts",
+        hint: `${totalFindings} findings tracked`,
+      },
+    ];
+
+    return items;
+  }, [inProgressReviews, needsAttentionCount, reportsGenerated, totalFindings, totalReviews]);
+
+  const recurringIssues = useMemo(() => {
+    const byArea = analytics?.findingsByArea ?? {};
+    return Object.entries(byArea)
+      .map(([title, count]) => ({ title: toTitleCase(String(title)), count: Number(count), principle: "—" }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 5);
+  }, [analytics]);
+
+  const reviewHistoryItems: ReviewHistoryItem[] = useMemo(() => {
+    return reviews.map((review) => {
+      return {
+        id: String(review.id),
+        productName: review.product || "Unknown product",
+        reviewName: review.name || "Untitled review",
+        ownerName: review.owner || "Unassigned",
+        status: String(review.status || "unknown"),
+        reviewDateTime: review.updatedAt || review.createdAt || new Date().toISOString(),
+        summary: `${review.reviewType || "ux"} review for ${review.domain || "general"} domain`,
+        uxScore: typeof review.uxScore === "number" ? review.uxScore : null,
+        findingCount: review?._count?.findings,
+      };
+    });
+  }, [reviews]);
+
+  const recentReviews = useMemo(() => {
+    return [...reviews]
+      .sort((a, b) => {
+        const aTime = new Date(a.updatedAt || a.createdAt || 0).getTime();
+        const bTime = new Date(b.updatedAt || b.createdAt || 0).getTime();
+        return bTime - aTime;
+      })
+      .slice(0, 5);
+  }, [reviews]);
 
   return (
     <>
@@ -81,10 +216,10 @@ export default function DashboardPage() {
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
-              <Button asChild size="lg" className="min-h-11 bg-card text-primary hover:bg-card/90">
+              <Button asChild size="lg" className="min-h-11 w-[220px] justify-center bg-card text-primary hover:bg-card/90">
                 <Link href="/new-review"><Plus className="mr-1.5 h-4 w-4" aria-hidden="true" />Start new UX review</Link>
               </Button>
-              <Button asChild size="lg" variant="outline" className="min-h-11 border-primary-foreground/30 bg-transparent text-primary-foreground hover:bg-primary-foreground/10 hover:text-primary-foreground">
+              <Button asChild size="lg" variant="outline" className="min-h-11 w-[220px] justify-center border-primary-foreground/30 bg-transparent text-primary-foreground hover:bg-primary-foreground/10 hover:text-primary-foreground">
                 <Link href="/workspace">Open workspace<ArrowRight className="ml-1.5 h-4 w-4" aria-hidden="true" /></Link>
               </Button>
             </div>
@@ -107,10 +242,10 @@ export default function DashboardPage() {
               Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-16 rounded-lg" />)
             ) : (
               <>
-                <AttentionTile icon={AlertOctagon} label="Untriaged P0 findings" value={na?.untriagedP0 ?? 0} tone="text-destructive" to="/workspace" />
-                <AttentionTile icon={CheckCircle2} label="Proposed findings" value={na?.awaitingApproval ?? 0} tone="text-warning" to="/workspace" />
-                <AttentionTile icon={Accessibility} label="Accessibility blockers" value={na?.a11yBlockers ?? 0} tone="text-destructive" to="/accessibility" />
-                <AttentionTile icon={FileWarning} label="Failed reviews" value={na?.failedReviews ?? 0} tone="text-warning" to="/history" />
+                <AttentionTile icon={AlertOctagon} label="Untriaged P0 findings" value={needsAttentionCount} tone="text-destructive" to="/workspace" />
+                <AttentionTile icon={ArrowRight} label="Reviews in progress" value={inProgressReviews} tone="text-warning" to="/workspace" />
+                <AttentionTile icon={AlertTriangle} label="Low-score reviews (<70)" value={lowScoreReviews} tone="text-warning" to="/history" />
+                <AttentionTile icon={FileText} label="Failed reviews" value={failedReviews} tone="text-destructive" to="/history" />
               </>
             )}
           </CardContent>
@@ -173,17 +308,10 @@ export default function DashboardPage() {
           <Card className="shadow-card lg:col-span-2">
             <CardHeader className="pb-3">
               <CardTitle className="text-base">Quick actions</CardTitle>
-              <p className="text-xs text-muted-foreground">Start common tasks in one click</p>
+              <p className="text-xs text-muted-foreground">Actions adapt to current review state</p>
             </CardHeader>
             <CardContent className="grid grid-cols-2 gap-3 md:grid-cols-3">
-              {[
-                { icon: Upload, label: "Upload screens", to: "/new-review" },
-                { icon: Figma, label: "Review Figma prototype", to: "/new-review" },
-                { icon: FileText, label: "Compare with PRD", to: "/workspace" },
-                { icon: FileText, label: "Generate report", to: "/reports" },
-                { icon: Sparkles, label: "Open prompt library", to: "/prompts" },
-                { icon: GitCompare, label: "Compare reviews", to: "/history" },
-              ].map((a) => (
+              {quickActions.map((a) => (
                 <Link
                   key={a.label}
                   href={a.to}
@@ -194,7 +322,7 @@ export default function DashboardPage() {
                   </div>
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-medium leading-snug">{a.label}</p>
-                    <p className="text-[11px] text-muted-foreground">Get started</p>
+                    <p className="text-[11px] text-muted-foreground">{a.hint}</p>
                   </div>
                 </Link>
               ))}
@@ -210,8 +338,8 @@ export default function DashboardPage() {
                 <CardTitle className="text-base">Recent reviews</CardTitle>
                 <p className="text-xs text-muted-foreground">Latest activity across your workspace</p>
               </div>
-              <Button asChild variant="ghost" size="sm" className="min-h-9">
-                <Link href="/history">View all<ArrowRight className="ml-1 h-3.5 w-3.5" /></Link>
+              <Button variant="ghost" size="sm" className="min-h-9" onClick={() => setIsReviewHistoryOpen(true)}>
+                Review History<ArrowRight className="ml-1 h-3.5 w-3.5" />
               </Button>
             </CardHeader>
             <CardContent className="px-4 pb-4 pt-0 sm:px-6 sm:pb-6">
@@ -236,7 +364,7 @@ export default function DashboardPage() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {reviews.slice(0, 5).map((r) => (
+                      {recentReviews.map((r) => (
                         <TableRow key={r.id}>
                           <TableCell>
                             <Link href={{ pathname: "/workspace", query: { reviewId: r.id } }} className="font-medium text-foreground hover:text-primary">{r.name}</Link>
@@ -246,7 +374,7 @@ export default function DashboardPage() {
                           <TableCell className="hidden text-xs text-muted-foreground lg:table-cell">{r.reviewType}</TableCell>
                           <TableCell className="text-right font-medium tabular-nums">{r.uxScore ?? "—"}</TableCell>
                           <TableCell className="text-right">
-                            <Badge variant="secondary" className="capitalize">{r.status.replace("_", " ")}</Badge>
+                            <Badge variant="secondary" className="capitalize">{String(r.status || "unknown").replaceAll("_", " ")}</Badge>
                           </TableCell>
                           <TableCell className="hidden text-xs xl:table-cell">{r.owner || "User"}</TableCell>
                           <TableCell className="hidden text-right sm:table-cell">
@@ -272,9 +400,9 @@ export default function DashboardPage() {
             <CardContent className="space-y-2">
               {analyticsLoading ? (
                 Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-16 rounded-lg" />)
-              ) : !analytics?.recurringIssues?.length ? (
+              ) : recurringIssues.length === 0 ? (
                 <p className="py-4 text-center text-sm text-muted-foreground">No recurring issues yet.</p>
-              ) : analytics.recurringIssues.map((t: any, i: number) => (
+              ) : recurringIssues.map((t: any, i: number) => (
                 <div key={t.title} className="flex items-start gap-3 rounded-lg border border-border bg-secondary/40 p-3">
                   <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-card text-xs font-semibold text-primary ring-1 ring-border">{i + 1}</div>
                   <div className="min-w-0 flex-1">
@@ -290,6 +418,14 @@ export default function DashboardPage() {
           </Card>
         </div>
       </div>
+
+      <ReviewHistoryModal
+        open={isReviewHistoryOpen}
+        onOpenChange={setIsReviewHistoryOpen}
+        items={reviewHistoryItems}
+        isLoading={reviewsLoading}
+        onDeleteReview={handleDeleteReview}
+      />
     </>
   );
 }

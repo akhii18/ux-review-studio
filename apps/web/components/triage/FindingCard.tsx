@@ -177,8 +177,8 @@ export function FindingCard({ finding, open, onClose }: FindingCardProps) {
           </div>
 
           {showEscalate && (
-            <div className="rounded-lg border border-red-200 bg-red-50 p-3 space-y-2">
-              <p className="text-xs font-medium text-red-700">Escalation reason</p>
+            <div className="rounded-lg border border-border bg-secondary/40 p-3 space-y-2">
+              <p className="text-xs font-medium text-foreground">Escalation reason</p>
               <Textarea
                 value={escalateReason}
                 onChange={(e) => setEscalateReason(e.target.value)}

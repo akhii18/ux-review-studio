@@ -20,6 +20,9 @@ Thumbs.db
 # uploads
 apps/api/uploads/
 
+# API logs
+apps/api/*.log
+
 
 
 # Agentic part
