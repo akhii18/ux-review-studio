@@ -7,9 +7,11 @@ const router = Router();
 // Review CRUD
 router.get(    "/",                       ReviewsController.list);
 router.post(   "/",                       ReviewsController.create);
+router.post(   "/draft",                  ReviewsController.saveDraft);
 router.get(    "/analytics",              ReviewsController.getAnalytics);
 router.get(    "/:id",                    ReviewsController.getById);
 router.delete( "/:id",                    ReviewsController.delete);
+router.post(   "/:id/export",             ReviewsController.export);
 
 // Asset upload
 router.post(   "/:id/assets",             ReviewsController.saveAsset);

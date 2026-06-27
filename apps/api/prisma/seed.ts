@@ -1,10 +1,22 @@
 import { PrismaClient } from "@prisma/client";
 import { REVIEW_BASIS_LIBRARY, DEFAULT_SETTINGS } from "../../../packages/shared/src/constants";
+import bcrypt from "bcryptjs";
 
 const prisma = new PrismaClient();
 
 async function main() {
   console.log("🌱 Seeding database…");
+
+  const seedUserEmail = "default.user@uxreview.local";
+  const seedUser = await prisma.user.upsert({
+    where: { email: seedUserEmail },
+    update: {},
+    create: {
+      name: "Default User",
+      email: seedUserEmail,
+      passwordHash: await bcrypt.hash("ChangeMe123!", 12),
+    },
+  });
 
   // ── UX Principles ──────────────────────────────────────────────────────────
   console.log("  → Seeding UX principles…");
@@ -27,18 +39,21 @@ async function main() {
   console.log("  → Seeding default settings…");
   for (const [key, value] of Object.entries(DEFAULT_SETTINGS)) {
     await prisma.setting.upsert({
-      where: { key },
+      where: { userId_key: { userId: seedUser.id, key } },
       update: {},
-      create: { key, value },
+      create: { userId: seedUser.id, key, value },
     });
   }
 
   // ── Sample Checklist ───────────────────────────────────────────────────────
   console.log("  → Seeding sample checklist…");
-  const existing = await prisma.checklist.findFirst({ where: { title: "Baseline UX Governance" } });
+  const existing = await prisma.checklist.findFirst({
+    where: { userId: seedUser.id, title: "Baseline UX Governance" },
+  });
   if (!existing) {
     await prisma.checklist.create({
       data: {
+        userId: seedUser.id,
         title: "Baseline UX Governance",
         description: "Standard checklist applied to every review. Covers heuristics, accessibility, and content quality.",
         status: "APPROVED",

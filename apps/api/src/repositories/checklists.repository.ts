@@ -3,16 +3,17 @@ import type { CreateChecklist, ReviewArea, UpdateChecklist } from "@uxm/shared";
 import type { Prisma } from "@prisma/client";
 
 export const ChecklistsRepository = {
-  async findAll() {
+  async findAll(userId: string) {
     return prisma.checklist.findMany({
+      where: { userId },
       include: { items: { orderBy: { order: "asc" } } },
       orderBy: { createdAt: "desc" },
     });
   },
 
-  async findById(id: string) {
-    return prisma.checklist.findUnique({
-      where: { id },
+  async findById(id: string, userId: string) {
+    return prisma.checklist.findFirst({
+      where: { id, userId },
       include: {
         items: { orderBy: { order: "asc" } },
         history: { orderBy: { createdAt: "desc" } },
@@ -20,9 +21,10 @@ export const ChecklistsRepository = {
     });
   },
 
-  async create(data: CreateChecklist) {
+  async create(userId: string, data: CreateChecklist) {
     return prisma.checklist.create({
       data: {
+        userId,
         title: data.title,
         description: data.description,
         items: {
@@ -43,8 +45,8 @@ export const ChecklistsRepository = {
     });
   },
 
-  async update(id: string, data: UpdateChecklist, performedBy: string) {
-    const checklist = await prisma.checklist.findUnique({ where: { id } });
+  async update(id: string, userId: string, data: UpdateChecklist, performedBy: string) {
+    const checklist = await prisma.checklist.findFirst({ where: { id, userId } });
     if (!checklist) return null;
 
     return prisma.$transaction(async (tx: Prisma.TransactionClient) => {
@@ -64,7 +66,7 @@ export const ChecklistsRepository = {
       }
 
       const updated = await tx.checklist.update({
-        where: { id },
+        where: { id: checklist.id },
         data: {
           ...(data.title && { title: data.title }),
           ...(data.description !== undefined && { description: data.description }),
@@ -81,10 +83,13 @@ export const ChecklistsRepository = {
     });
   },
 
-  async approve(id: string, approvedBy: string) {
+  async approve(id: string, userId: string, approvedBy: string) {
+    const checklist = await prisma.checklist.findFirst({ where: { id, userId }, select: { id: true } });
+    if (!checklist) return null;
+
     return prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       const updated = await tx.checklist.update({
-        where: { id },
+        where: { id: checklist.id },
         data: {
           status: "APPROVED",
           approvedAt: new Date(),
@@ -94,7 +99,7 @@ export const ChecklistsRepository = {
       });
 
       await tx.checklistHistory.create({
-        data: { checklistId: id, action: "APPROVED", performedBy: approvedBy },
+        data: { checklistId: checklist.id, action: "APPROVED", performedBy: approvedBy },
       });
 
       return updated;

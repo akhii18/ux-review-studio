@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import {
   LayoutDashboard,
   Plus,
@@ -14,6 +14,7 @@ import {
   BarChart3,
   Settings,
   BookOpen,
+  LogOut,
   Sparkles,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -63,6 +64,7 @@ const navGroups = [
 
 export function AppSidebar() {
   const pathname = usePathname();
+  const router = useRouter();
   const { isMobile, setOpenMobile } = useSidebar();
 
   const handleNavClick = () => {
@@ -75,6 +77,16 @@ export function AppSidebar() {
     if (url === "/dashboard") return pathname === "/dashboard";
     if (url === "/workspace") return pathname.startsWith("/workspace") || pathname.startsWith("/reviews/");
     return pathname.startsWith(url);
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem("token");
+    localStorage.removeItem("current_user");
+    document.cookie = "token=; Path=/; Max-Age=0; SameSite=Lax";
+    if (isMobile) {
+      setOpenMobile(false);
+    }
+    router.replace("/auth");
   };
 
   return (
@@ -130,6 +142,16 @@ export function AppSidebar() {
                 <BookOpen className="h-4 w-4 shrink-0" aria-hidden />
                 <span>Documentation</span>
               </Link>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              tooltip="Log out"
+              onClick={handleLogout}
+              className="text-sidebar-foreground/70 hover:bg-sidebar-accent/60 hover:text-sidebar-foreground"
+            >
+              <LogOut className="h-4 w-4 shrink-0" aria-hidden />
+              <span>Log out</span>
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>

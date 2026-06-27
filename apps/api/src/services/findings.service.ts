@@ -3,22 +3,22 @@ import { AppError } from "../middleware/errorHandler";
 import type { FindingsQuery, UpdateFinding, TriageFinding } from "@uxm/shared";
 
 export const FindingsService = {
-  async getByReview(reviewId: string, query: FindingsQuery) {
-    return FindingsRepository.findByReview(reviewId, query);
+  async getByReview(reviewId: string, userId: string, query: FindingsQuery) {
+    return FindingsRepository.findByReview(reviewId, userId, query);
   },
 
-  async getGroupedByArea(reviewId: string) {
-    return FindingsRepository.findGroupedByArea(reviewId);
+  async getGroupedByArea(reviewId: string, userId: string) {
+    return FindingsRepository.findGroupedByArea(reviewId, userId);
   },
 
-  async getNextUntriaged(reviewId: string) {
-    const finding = await FindingsRepository.findNextUntriaged(reviewId);
+  async getNextUntriaged(reviewId: string, userId: string) {
+    const finding = await FindingsRepository.findNextUntriaged(reviewId, userId);
     if (!finding) return null;
     return finding;
   },
 
-  async triage(id: string, payload: TriageFinding) {
-    const finding = await FindingsRepository.findById(id);
+  async triage(id: string, userId: string, payload: TriageFinding) {
+    const finding = await FindingsRepository.findById(id, userId);
     if (!finding) throw new AppError(404, "Finding not found");
 
     const statusMap = {
@@ -42,20 +42,20 @@ export const FindingsService = {
 
   },
 
-  async update(id: string, data: UpdateFinding) {
-    const finding = await FindingsRepository.findById(id);
+  async update(id: string, userId: string, data: UpdateFinding) {
+    const finding = await FindingsRepository.findById(id, userId);
     if (!finding) throw new AppError(404, "Finding not found");
     return FindingsRepository.update(id, data);
   },
 
-  async escalate(id: string, reason: string) {
-    const finding = await FindingsRepository.findById(id);
+  async escalate(id: string, userId: string, reason: string) {
+    const finding = await FindingsRepository.findById(id, userId);
     if (!finding) throw new AppError(404, "Finding not found");
     if (finding.status === "ESCALATED") throw new AppError(409, "Finding is already escalated");
     return FindingsRepository.escalate(id, reason);
   },
 
-  async getRecurring() {
-    return FindingsRepository.findRecurring();
+  async getRecurring(userId: string) {
+    return FindingsRepository.findRecurring(userId);
   },
 };
