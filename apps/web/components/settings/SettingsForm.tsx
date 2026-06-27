@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Save, Info } from "lucide-react";
@@ -19,11 +19,16 @@ import { useGetSettingsQuery, useUpdateSettingsMutation } from "@/store/api/sett
 import { useDispatch } from "react-redux";
 import { markSaved } from "@/store/slices/settingsSlice";
 import { toast } from "sonner";
+import { me as apiMe, updateMe } from "@/lib/api";
 
 export function SettingsForm() {
   const dispatch = useDispatch();
   const { data: settings, isLoading } = useGetSettingsQuery();
   const [updateSettings, { isLoading: isSaving }] = useUpdateSettingsMutation();
+  const [profileName, setProfileName] = useState("");
+  const [profileEmail, setProfileEmail] = useState("");
+  const [profileLoading, setProfileLoading] = useState(true);
+  const [isSavingProfile, setIsSavingProfile] = useState(false);
 
   const { register, handleSubmit, setValue, watch, reset } = useForm<UpdateSettings>({
     resolver: zodResolver(UpdateSettingsSchema),
@@ -35,6 +40,29 @@ export function SettingsForm() {
     }
   }, [settings, reset]);
 
+  useEffect(() => {
+    let active = true;
+
+    apiMe()
+      .then((user) => {
+        if (!active) return;
+        setProfileName(user.name ?? "");
+        setProfileEmail(user.email ?? "");
+      })
+      .catch(() => {
+        if (active) {
+          toast.error("Failed to load profile");
+        }
+      })
+      .finally(() => {
+        if (active) setProfileLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
   const onSubmit = async (data: UpdateSettings) => {
     try {
       await updateSettings(data).unwrap();
@@ -42,6 +70,29 @@ export function SettingsForm() {
       toast.success("Settings saved");
     } catch {
       toast.error("Failed to save settings");
+    }
+  };
+
+  const saveProfile = async () => {
+    const trimmedName = profileName.trim();
+    if (!trimmedName) {
+      toast.error("Enter your name");
+      return;
+    }
+
+    try {
+      setIsSavingProfile(true);
+      const result = await updateMe({ name: trimmedName });
+      localStorage.setItem("token", result.token);
+      localStorage.setItem("current_user", JSON.stringify(result.user));
+      document.cookie = `token=${result.token}; Path=/; Max-Age=${result.expiresInSeconds}; SameSite=Lax`;
+      window.dispatchEvent(new Event("uxm:user-updated"));
+      dispatch(markSaved(new Date().toISOString()));
+      toast.success("Profile updated");
+    } catch {
+      toast.error("Failed to update profile");
+    } finally {
+      setIsSavingProfile(false);
     }
   };
 
@@ -57,6 +108,45 @@ export function SettingsForm() {
 
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Profile</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {profileLoading ? (
+            <div className="space-y-3">
+              <Skeleton className="h-10 rounded-md" />
+              <Skeleton className="h-10 rounded-md" />
+            </div>
+          ) : (
+            <>
+              <div className="space-y-1.5">
+                <Label htmlFor="profile-name">Name</Label>
+                <Input
+                  id="profile-name"
+                  value={profileName}
+                  onChange={(e) => setProfileName(e.target.value)}
+                  placeholder="Your name"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="profile-email">Email</Label>
+                <Input
+                  id="profile-email"
+                  value={profileEmail}
+                  readOnly
+                  className="bg-muted/40"
+                />
+              </div>
+              <Button type="button" variant="outline" onClick={saveProfile} disabled={isSavingProfile}>
+                <Save className="h-4 w-4" />
+                {isSavingProfile ? "Saving…" : "Save profile"}
+              </Button>
+            </>
+          )}
+        </CardContent>
+      </Card>
+
       {/* Review defaults */}
       <Card>
         <CardHeader>

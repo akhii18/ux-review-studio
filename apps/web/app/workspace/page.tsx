@@ -20,7 +20,7 @@ import {
 import { PriorityBadge } from "@/components/ui/PriorityBadge";
 import { FindingStatusBadge } from "@/components/ui/FindingStatusBadge";
 import { cn } from "@/lib/utils";
-import { getReview, updateFinding, triageFinding } from "@/lib/api";
+import { exportReviewReport, getReview, updateFinding, triageFinding } from "@/lib/api";
 import { REVIEW_BASIS_LIBRARY } from "@uxm/shared";
 import { toast } from "sonner";
 import Link from "next/link";
@@ -215,6 +215,23 @@ function WorkspaceContent() {
 
   const exportable = triage.proposed === 0 && allAcceptedHaveBasis && (triage.accepted + triage.edited > 0);
 
+  const handleExport = useCallback(async () => {
+    if (!reviewId) return;
+    try {
+      const report = await exportReviewReport(reviewId);
+      const blob = new Blob([report.contentMd], { type: "text/markdown" });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `${report.name ?? "ux-review-report"}.md`;
+      anchor.click();
+      URL.revokeObjectURL(url);
+      toast.success("Report exported");
+    } catch (error: any) {
+      toast.error(error?.message ?? "Triage or review the findings for report export");
+    }
+  }, [reviewId]);
+
   const handleFindingAction = useCallback(
     (findingId: string, actionStatus: TriageStatus) => {
       updateFinding(findingId, { status: actionStatus })
@@ -298,7 +315,7 @@ function WorkspaceContent() {
             <Tooltip>
               <TooltipTrigger asChild>
                 <span tabIndex={0} className="flex-1 sm:flex-none">
-                  <Button variant="outline" size="sm" className="min-h-9 w-full sm:w-auto" disabled={!exportable}>
+                  <Button variant="outline" size="sm" className="min-h-9 w-full sm:w-auto" disabled={!exportable} onClick={handleExport}>
                     <Download className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />Export
                   </Button>
                 </span>

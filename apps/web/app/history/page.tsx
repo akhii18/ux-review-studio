@@ -29,7 +29,7 @@ import {
 } from "@/components/ui/pagination";
 import { PriorityBadge } from "@/components/ui/PriorityBadge";
 import { Search, FileBarChart, ExternalLink, Trash2, X } from "lucide-react";
-import { deleteReview, getReview, listReviews } from "@/lib/api";
+import { deleteReview, exportReviewReport, getReview, listReviews } from "@/lib/api";
 import { toast } from "sonner";
 
 const STATUS_OPTIONS = ["all", "draft", "in_progress", "completed", "failed", "archived"];
@@ -249,13 +249,7 @@ export default function HistoryPage() {
 
     setLoadingReportReviewId(reviewId);
     try {
-      const review = await getReview(reviewId);
-      const report = review?.reports?.[0];
-
-      if (!report?.contentMd) {
-        toast.error("No report found for this review");
-        return;
-      }
+      const report = await exportReviewReport(reviewId);
 
       setReportPreview({
         title: report.name || `${reviewName} report`,
@@ -351,7 +345,7 @@ export default function HistoryPage() {
                 <tr key={r.id} className="border-b border-border/60 transition-colors hover:bg-secondary/60">
                   <td className="px-4 py-3 align-middle">
                     <Link
-                      href={{ pathname: "/workspace", query: { reviewId: r.id } }}
+                      href={r.status === "draft" ? { pathname: "/new-review", query: { reviewId: r.id } } : { pathname: "/workspace", query: { reviewId: r.id } }}
                       className="font-medium text-foreground hover:text-primary"
                     >
                       {r.name}
@@ -378,15 +372,17 @@ export default function HistoryPage() {
                   <td className="hidden px-4 py-3 align-middle text-xs text-muted-foreground xl:table-cell">{formatReviewDate(r.updatedAt)}</td>
                   <td className="px-1 py-3 align-middle text-right">
                     <div className="flex justify-end gap-1">
-                      <Button asChild size="icon" variant="ghost" aria-label="Open workspace" className="h-9 w-9">
-                        <Link href={{ pathname: "/workspace", query: { reviewId: r.id } }}><ExternalLink className="h-4 w-4" /></Link>
+                      <Button asChild size="icon" variant="ghost" aria-label={r.status === "draft" ? "Resume draft" : "Open workspace"} className="h-9 w-9">
+                        <Link href={r.status === "draft" ? { pathname: "/new-review", query: { reviewId: r.id } } : { pathname: "/workspace", query: { reviewId: r.id } }}>
+                          <ExternalLink className="h-4 w-4" />
+                        </Link>
                       </Button>
                       <Button
                         size="icon"
                         variant="ghost"
                         aria-label={`Open report for ${r.name || "review"}`}
                         className="h-9 w-9"
-                        disabled={loadingReportReviewId === r.id}
+                        disabled={loadingReportReviewId === r.id || r.status === "draft"}
                         onClick={() => handleOpenReport(r.id, r.name || "Untitled review")}
                       >
                         <FileBarChart className="h-4 w-4" />

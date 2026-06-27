@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { AppHeader } from "@/components/ui/AppHeader";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -10,10 +10,10 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { FileText, Download, Eye } from "lucide-react";
-import { listReviews } from "@/lib/api";
+import { exportReviewReport, listReviews } from "@/lib/api";
 import { toast } from "sonner";
 
-export default function ReportsPage() {
+function ReportsPageContent() {
   const searchParams = useSearchParams();
   const reviewId = searchParams.get("reviewId");
   const [reviews, setReviews]   = useState<any[]>([]);
@@ -45,13 +45,12 @@ export default function ReportsPage() {
 
   async function openReport(reviewId: string) {
     try {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000"}/api/reviews/${reviewId}`);
-      const json = await res.json();
-      const report = json.data?.reports?.[0];
-      if (!report) { toast.error("No report found for this review"); return; }
+      const report = await exportReviewReport(reviewId);
       setSelected(report);
       setSheetOpen(true);
-    } catch { toast.error("Failed to load report"); }
+    } catch (error: any) {
+      toast.error(error?.message ?? "Failed to load report");
+    }
   }
 
   return (
@@ -91,10 +90,12 @@ export default function ReportsPage() {
                       <Eye className="mr-1.5 h-3.5 w-3.5" /> View
                     </Button>
                     <Button size="sm" variant="outline" onClick={async () => {
-                      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000"}/api/reviews/${r.id}`);
-                      const json = await res.json();
-                      const report = json.data?.reports?.[0];
-                      if (report) downloadReport(report);
+                      try {
+                        const report = await exportReviewReport(r.id);
+                        downloadReport(report);
+                      } catch (error: any) {
+                        toast.error(error?.message ?? "Failed to export report");
+                      }
                     }}>
                       <Download className="h-3.5 w-3.5" />
                     </Button>
@@ -127,5 +128,13 @@ export default function ReportsPage() {
         </SheetContent>
       </Sheet>
     </>
+  );
+}
+
+export default function ReportsPage() {
+  return (
+    <Suspense fallback={<div className="flex-1 flex items-center justify-center"><p className="text-muted-foreground text-sm">Loading…</p></div>}>
+      <ReportsPageContent />
+    </Suspense>
   );
 }

@@ -1,9 +1,10 @@
 import path from "path";
 import dotenv from "dotenv";
 
-dotenv.config({ path: path.resolve(__dirname, "../../../../.env") });
-dotenv.config({ path: path.resolve(process.cwd(), "../../.env") });
-dotenv.config();
+const repoRoot = path.resolve(__dirname, "../../../../");
+dotenv.config({ path: path.join(repoRoot, ".env") });
+dotenv.config({ path: path.join(repoRoot, "apps/api/.env") });
+dotenv.config({ path: path.resolve(process.cwd(), ".env") });
 
 function required(key: string): string {
   const val = process.env[key];
@@ -15,6 +16,15 @@ export const config = {
   port: parseInt(process.env.PORT ?? "4000", 10),
   nodeEnv: process.env.NODE_ENV ?? "development",
   corsOrigin: process.env.CORS_ORIGIN ?? "http://localhost:3000",
+  webAppUrl: process.env.WEB_APP_URL ?? process.env.CORS_ORIGIN ?? "http://localhost:3000",
+  smtpHost: process.env.SMTP_HOST,
+  smtpPort: parseInt(process.env.SMTP_PORT ?? "587", 10),
+  smtpSecure: process.env.SMTP_SECURE === "true",
+  smtpUser: process.env.SMTP_USER,
+  smtpPass: process.env.SMTP_PASS,
+  smtpFrom: process.env.SMTP_FROM,
+  jwtSecret: required("JWT_SECRET"),
+  jwtExpiresInSeconds: parseInt(process.env.JWT_EXPIRES_IN_SECONDS ?? "604800", 10),
   databaseUrl: required("DATABASE_URL"),
   directUrl: process.env.DIRECT_URL ?? process.env.DATABASE_URL,
   azureOpenAiEndpoint: process.env.AZURE_OPENAI_ENDPOINT,

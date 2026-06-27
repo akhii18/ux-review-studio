@@ -1,10 +1,22 @@
 import { prisma } from "./config/prisma";
 import { runReviewPipeline } from "./services/ai/agentic";
+import bcrypt from "bcryptjs";
 
 async function testPipeline() {
+  const testUser = await prisma.user.upsert({
+    where: { email: "pipeline.test@uxreview.local" },
+    update: {},
+    create: {
+      name: "Pipeline Test",
+      email: "pipeline.test@uxreview.local",
+      passwordHash: await bcrypt.hash("ChangeMe123!", 12),
+    },
+  });
+
   console.log("Creating test review in database...");
   const review = await prisma.review.create({
     data: {
+      userId: testUser.id,
       name: "Diagnostics Test Review",
       product: "Test Portal",
       domain: "bfsi",

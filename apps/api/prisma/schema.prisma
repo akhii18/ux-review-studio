@@ -51,8 +51,29 @@ enum PrincipleCategory {
 
 // ── Models ────────────────────────────────────────────────────────────────────
 
+model User {
+  id                  String    @id @default(cuid())
+  name                String
+  email               String    @unique
+  passwordHash        String
+  isEmailVerified     Boolean   @default(false)
+  emailVerificationToken  String?
+  emailVerificationExpiry DateTime?
+  resetPasswordToken  String?
+  resetPasswordExpiry DateTime?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  reviews    Review[]
+  checklists Checklist[]
+  settings   Setting[]
+
+  @@map("users")
+}
+
 model Review {
   id                  String        @id @default(cuid())
+  userId              String
   name                String
   product             String
   domain              String        @default("")
@@ -70,6 +91,9 @@ model Review {
   findings    Finding[]
   assets      Asset[]
   reports     Report[]
+  user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
 
   @@map("reviews")
 }
@@ -148,6 +172,7 @@ model ReviewBasisItem {
 
 model Checklist {
   id          String          @id @default(cuid())
+  userId      String
   title       String
   description String?
   status      ChecklistStatus @default(DRAFT)
@@ -159,6 +184,9 @@ model Checklist {
 
   items   ChecklistItem[]
   history ChecklistHistory[]
+  user    User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
 
   @@map("checklists")
 }
@@ -212,9 +240,15 @@ model UxPrinciple {
 
 model Setting {
   id        String   @id @default(cuid())
-  key       String   @unique
+  userId    String
+  key       String
   value     Json
   updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, key])
+  @@index([userId])
 
   @@map("settings")
 }

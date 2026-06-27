@@ -2,11 +2,12 @@ import { prisma } from "../config/prisma";
 import type { FindingStatus, FindingsQuery, ReviewArea, Severity, UpdateFinding } from "@uxm/shared";
 
 export const FindingsRepository = {
-  async findByReview(reviewId: string, query: FindingsQuery) {
+  async findByReview(reviewId: string, userId: string, query: FindingsQuery) {
     const { area, status, severity, page, pageSize, sortBy, sortOrder } = query;
 
     const where = {
       reviewId,
+      review: { userId },
       ...(area && { area: area as ReviewArea }),
       ...(status && { status: status as FindingStatus }),
       ...(severity && { severity: severity as Severity }),
@@ -39,9 +40,9 @@ export const FindingsRepository = {
     };
   },
 
-  async findGroupedByArea(reviewId: string) {
+  async findGroupedByArea(reviewId: string, userId: string) {
     const findings = await prisma.finding.findMany({
-      where: { reviewId },
+      where: { reviewId, review: { userId } },
       include: { reviewBasis: true },
       orderBy: [{ severity: "asc" }, { confidence: "desc" }],
     });
@@ -54,17 +55,17 @@ export const FindingsRepository = {
     return grouped;
   },
 
-  async findNextUntriaged(reviewId: string) {
+  async findNextUntriaged(reviewId: string, userId: string) {
     return prisma.finding.findFirst({
-      where: { reviewId, status: "PROPOSED" },
+      where: { reviewId, status: "PROPOSED", review: { userId } },
       include: { reviewBasis: true },
       orderBy: [{ severity: "asc" }, { confidence: "desc" }],
     });
   },
 
-  async findById(id: string) {
-    return prisma.finding.findUnique({
-      where: { id },
+  async findById(id: string, userId: string) {
+    return prisma.finding.findFirst({
+      where: { id, review: { userId } },
       include: { reviewBasis: true },
     });
   },
@@ -104,10 +105,10 @@ export const FindingsRepository = {
     });
   },
 
-  async findRecurring() {
+  async findRecurring(userId: string) {
     const results = await prisma.finding.groupBy({
       by: ["title", "area", "principle"],
-      where: { status: { not: "DISMISSED" } },
+      where: { status: { not: "DISMISSED" }, review: { userId } },
       _count: { id: true },
       orderBy: { _count: { id: "desc" } },
       having: { id: { _count: { gt: 1 } } },
