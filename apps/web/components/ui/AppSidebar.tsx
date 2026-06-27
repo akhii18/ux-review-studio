@@ -1,13 +1,37 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import {
-  LayoutDashboard, Plus, MonitorPlay, Clock, FileText,
-  BookMarked, Layers, Accessibility, BarChart3, Settings,
-  BookOpen, ListChecks, Sparkles,
+  LayoutDashboard,
+  Plus,
+  MonitorPlay,
+  Clock,
+  FileText,
+  BookMarked,
+  Layers,
+  Accessibility,
+  BarChart3,
+  Settings,
+  BookOpen,
+  LogOut,
+  Sparkles,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import {
+  Sidebar,
+  SidebarContent,
+  SidebarFooter,
+  SidebarGroup,
+  SidebarGroupContent,
+  SidebarGroupLabel,
+  SidebarHeader,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  SidebarRail,
+  useSidebar,
+} from "@/components/ui/sidebar";
 
 const navGroups = [
   {
@@ -40,6 +64,14 @@ const navGroups = [
 
 export function AppSidebar() {
   const pathname = usePathname();
+  const router = useRouter();
+  const { isMobile, setOpenMobile } = useSidebar();
+
+  const handleNavClick = () => {
+    if (isMobile) {
+      setOpenMobile(false);
+    }
+  };
 
   const isActive = (url: string) => {
     if (url === "/dashboard") return pathname === "/dashboard";
@@ -47,56 +79,84 @@ export function AppSidebar() {
     return pathname.startsWith(url);
   };
 
+  const handleLogout = () => {
+    localStorage.removeItem("token");
+    localStorage.removeItem("current_user");
+    document.cookie = "token=; Path=/; Max-Age=0; SameSite=Lax";
+    if (isMobile) {
+      setOpenMobile(false);
+    }
+    router.replace("/auth");
+  };
+
   return (
-    <aside className="flex w-60 shrink-0 flex-col border-r border-border bg-sidebar">
-      {/* Logo */}
-      <div className="flex h-16 items-center gap-3 border-b border-sidebar-border px-4">
-        <img src="/logo.png" alt="UXNavigator" width={56} height={56} className="h-14 w-14 shrink-0 object-contain" />
-        <div className="flex flex-col leading-tight">
-          <span className="text-[13px] font-semibold text-sidebar-foreground">UXNavigator</span>
-          <span className="text-[11px] text-sidebar-foreground/60 leading-tight">AI-assisted UX governance</span>
-        </div>
-      </div>
-
-      {/* Nav */}
-      <nav className="flex-1 overflow-y-auto p-2">
-        {navGroups.map((group) => (
-          <div key={group.group} className="mb-4">
-            <p className="px-2 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70">
-              {group.group}
-            </p>
-            <ul className="space-y-0.5">
-              {group.items.map((item) => (
-                <li key={item.url}>
-                  <Link
-                    href={item.url}
-                    className={cn(
-                      "flex min-h-[36px] items-center gap-3 rounded-md px-2 text-sm transition-colors",
-                      isActive(item.url)
-                        ? "bg-sidebar-accent text-sidebar-foreground font-medium"
-                        : "text-sidebar-foreground/70 hover:bg-sidebar-accent/60 hover:text-sidebar-foreground"
-                    )}
-                  >
-                    <item.icon className="h-4 w-4 shrink-0" aria-hidden />
-                    {item.title}
-                  </Link>
-                </li>
-              ))}
-            </ul>
+    <Sidebar collapsible="icon">
+      <SidebarHeader className="h-16 border-b border-sidebar-border p-2">
+        <div className="flex h-full items-center gap-2 overflow-hidden px-2 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0">
+          <img src="/logo.png" alt="UXNavigator" width={40} height={40} className="h-10 w-10 shrink-0 object-contain" />
+          <div className="flex min-w-0 flex-col leading-tight group-data-[collapsible=icon]:hidden">
+            <span className="truncate text-[13px] font-semibold text-sidebar-foreground">UXNavigator</span>
+            <span className="truncate text-[11px] leading-tight text-sidebar-foreground/60">AI-assisted UX governance</span>
           </div>
-        ))}
-      </nav>
+        </div>
+      </SidebarHeader>
 
-      {/* Footer */}
-      <div className="border-t border-sidebar-border p-2">
-        <Link
-          href="/settings"
-          className="flex min-h-[36px] items-center gap-3 rounded-md px-2 text-sm text-sidebar-foreground/70 hover:bg-sidebar-accent/60 hover:text-sidebar-foreground transition-colors"
-        >
-          <BookOpen className="h-4 w-4 shrink-0" aria-hidden />
-          Documentation
-        </Link>
-      </div>
-    </aside>
+      <SidebarContent className="gap-1 p-2">
+        {navGroups.map((group) => (
+          <SidebarGroup key={group.group} className="p-0">
+            <SidebarGroupLabel className="px-2 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70">
+              {group.group}
+            </SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu className="gap-0.5">
+                {group.items.map((item) => (
+                  <SidebarMenuItem key={item.url}>
+                    <SidebarMenuButton
+                      asChild
+                      isActive={isActive(item.url)}
+                      tooltip={item.title}
+                      className={cn(
+                        isActive(item.url)
+                          ? "bg-sidebar-accent text-sidebar-foreground"
+                          : "text-sidebar-foreground/70 hover:bg-sidebar-accent/60 hover:text-sidebar-foreground",
+                      )}
+                    >
+                      <Link href={item.url} onClick={handleNavClick}>
+                        <item.icon className="h-4 w-4 shrink-0" aria-hidden />
+                        <span>{item.title}</span>
+                      </Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                ))}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        ))}
+      </SidebarContent>
+
+      <SidebarFooter className="border-t border-sidebar-border p-2">
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarMenuButton asChild tooltip="Documentation" className="text-sidebar-foreground/70 hover:bg-sidebar-accent/60 hover:text-sidebar-foreground">
+              <Link href="/settings" onClick={handleNavClick}>
+                <BookOpen className="h-4 w-4 shrink-0" aria-hidden />
+                <span>Documentation</span>
+              </Link>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              tooltip="Log out"
+              onClick={handleLogout}
+              className="text-sidebar-foreground/70 hover:bg-sidebar-accent/60 hover:text-sidebar-foreground"
+            >
+              <LogOut className="h-4 w-4 shrink-0" aria-hidden />
+              <span>Log out</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </SidebarMenu>
+      </SidebarFooter>
+      <SidebarRail />
+    </Sidebar>
   );
 }

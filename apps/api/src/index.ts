@@ -32,7 +32,9 @@ console.warn = (...args) => {
 
 import { config } from "./config";
 import { errorHandler } from "./middleware/errorHandler";
+import { requireAuth } from "./middleware/auth";
 
+import authRouter from "./routes/auth.routes";
 import reviewsRouter from "./routes/reviews.routes";
 import findingsRouter from "./routes/findings.routes";
 import checklistsRouter from "./routes/checklists.routes";
@@ -43,9 +45,14 @@ const app = express();
 
 // ── Middleware ─────────────────────────────────────────────────────────────────
 app.use(helmet());
-app.use(cors({ origin: config.corsOrigin, credentials: true }));
+app.use(
+  cors({
+    origin: config.nodeEnv === "development" ? true : config.corsOrigin,
+    credentials: true,
+  })
+);
 app.use(compression());
-app.use(express.json({ limit: "10mb" }));
+app.use(express.json({ limit: "50mb" }));
 
 app.use(morgan(config.nodeEnv === "production" ? "combined" : "dev", {
   stream: {
@@ -62,6 +69,9 @@ app.get("/health", (_req, res) => {
 });
 
 // ── API Routes ─────────────────────────────────────────────────────────────────
+app.use("/api/auth", authRouter);
+
+app.use("/api", requireAuth);
 app.use("/api/reviews", reviewsRouter);
 app.use("/api/findings", findingsRouter);
 app.use("/api/checklists", checklistsRouter);

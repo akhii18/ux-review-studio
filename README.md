@@ -38,7 +38,7 @@ npm install
 ```bash
 # API
 cp apps/api/.env.example apps/api/.env
-# Fill in your Supabase DATABASE_URL and DIRECT_URL
+# Fill in your Supabase DATABASE_URL, DIRECT_URL, and storage credentials
 
 # Web
 cp apps/web/.env.local.example apps/web/.env.local
@@ -69,10 +69,13 @@ npm run dev
 
 ```bash
 # Copy and fill in env
-cp .env.example apps/api/.env
+cp apps/api/.env.example apps/api/.env
+cp apps/web/.env.local.example apps/web/.env.local
 
 docker-compose up --build
 ```
+
+> Note: Docker is optional. The main development flow is still `npm run dev` against your Supabase project.
 
 ---
 
@@ -121,6 +124,7 @@ docker-compose up --build
 | Frontend | Next.js 14, App Router, TypeScript, Tailwind CSS, Redux Toolkit, RTK Query, React Hook Form, Zod |
 | Backend | Express.js, TypeScript, Prisma ORM |
 | Database | Supabase PostgreSQL |
+| File storage | Supabase Storage |
 | Shared | `@uxm/shared` — types, Zod schemas, constants |
 | Monorepo | Turborepo |
 
@@ -143,8 +147,10 @@ The following were **not** migrated (intentional — excluded from Phase 1):
 - LibSQL/SQLite → replaced by Supabase PostgreSQL + Prisma
 - TanStack Router → replaced by Next.js App Router
 - TanStack Query → replaced by RTK Query
+
+The following capabilities are included in this repo and wired into the dev flow:
 - AI orchestrator and agent pipeline
-- File upload and report generation
+- Screenshot upload and report generation
 
 ---
 

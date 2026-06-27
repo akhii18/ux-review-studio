@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { Providers } from "@/lib/providers";
-import { AppSidebar } from "@/components/ui/AppSidebar";
+import { AppShell } from "@/components/ui/AppShell";
 
 export const metadata: Metadata = {
   title: "UXNavigator — AI-assisted UX governance",
@@ -14,14 +14,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en">
       <body>
         <Providers>
-          <div className="flex min-h-dvh w-full bg-background">
-            <AppSidebar />
-            <div className="flex min-w-0 flex-1 flex-col">
-              <main id="main-content" tabIndex={-1} className="flex flex-1 flex-col focus:outline-none">
-                {children}
-              </main>
-            </div>
-          </div>
+          <AppShell>{children}</AppShell>
         </Providers>
       </body>
     </html>

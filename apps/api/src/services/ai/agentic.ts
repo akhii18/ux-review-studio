@@ -1,7 +1,7 @@
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { prisma } from "../../config/prisma";
-import { getSignedBlobReadUrl } from "../azureBlob";
+import { getSignedStorageReadUrl } from "../supabaseStorage";
 
 type SynthesizedFinding = {
   id: string;
@@ -236,7 +236,7 @@ export async function runReviewPipeline(reviewId: string): Promise<void> {
             throw new Error(`Asset ${asset.name} is missing a blobUrl`);
           }
 
-          return getSignedBlobReadUrl(asset.blobUrl);
+          return getSignedStorageReadUrl(asset.blobUrl);
         })
     );
 

@@ -2,7 +2,7 @@ import { cn } from "@/lib/utils";
 import type { Severity } from "@uxm/shared";
 
 const tones: Record<Severity, string> = {
-  P0: "bg-red-100 text-red-700 border-red-200 dark:bg-red-900/30 dark:text-red-400",
+  P0: "bg-slate-200 text-slate-800 border-slate-300 dark:bg-slate-800 dark:text-slate-300",
   P1: "bg-amber-100 text-amber-700 border-amber-200 dark:bg-amber-900/30 dark:text-amber-400",
   P2: "bg-blue-100 text-blue-700 border-blue-200 dark:bg-blue-900/30 dark:text-blue-400",
 };
