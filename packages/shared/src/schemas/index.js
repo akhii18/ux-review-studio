@@ -1,6 +1,9 @@
-import { z } from "zod";
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.UpdateSettingsSchema = exports.UpdatePrincipleSchema = exports.CreatePrincipleSchema = exports.ApproveChecklistSchema = exports.UpdateChecklistSchema = exports.CreateChecklistSchema = exports.ChecklistItemSchema = exports.FindingsQuerySchema = exports.EscalateFindingSchema = exports.TriageFindingSchema = exports.UpdateFindingSchema = exports.ReviewBasisItemSchema = exports.PrincipleCategorySchema = exports.ChecklistStatusSchema = exports.FindingStatusSchema = exports.SeveritySchema = exports.ReviewAreaSchema = void 0;
+const zod_1 = require("zod");
 // ── Enums ─────────────────────────────────────────────────────────────────────
-export const ReviewAreaSchema = z.enum([
+exports.ReviewAreaSchema = zod_1.z.enum([
     "USABILITY",
     "ACCESSIBILITY",
     "CONSISTENCY",
@@ -8,16 +11,16 @@ export const ReviewAreaSchema = z.enum([
     "RISK",
     "RECOMMENDATIONS",
 ]);
-export const SeveritySchema = z.enum(["P0", "P1", "P2"]);
-export const FindingStatusSchema = z.enum([
+exports.SeveritySchema = zod_1.z.enum(["P0", "P1", "P2"]);
+exports.FindingStatusSchema = zod_1.z.enum([
     "PROPOSED",
     "ACCEPTED",
     "EDITED",
     "DISMISSED",
     "ESCALATED",
 ]);
-export const ChecklistStatusSchema = z.enum(["DRAFT", "APPROVED", "DEPRECATED"]);
-export const PrincipleCategorySchema = z.enum([
+exports.ChecklistStatusSchema = zod_1.z.enum(["DRAFT", "APPROVED", "DEPRECATED"]);
+exports.PrincipleCategorySchema = zod_1.z.enum([
     "NIELSEN_HEURISTICS",
     "COGNITIVE_LAWS",
     "GESTALT",
@@ -26,93 +29,93 @@ export const PrincipleCategorySchema = z.enum([
     "CONTENT_MICROCOPY",
     "CUSTOM",
 ]);
-export const ReviewBasisItemSchema = z.object({
-    id: z.string().optional(),
-    type: z.string(),
-    name: z.string(),
-    explanation: z.string().default(""),
+exports.ReviewBasisItemSchema = zod_1.z.object({
+    id: zod_1.z.string().optional(),
+    type: zod_1.z.string(),
+    name: zod_1.z.string(),
+    explanation: zod_1.z.string().default(""),
 });
 // ── Findings ──────────────────────────────────────────────────────────────────
-export const UpdateFindingSchema = z.object({
-    title: z.string().min(1).optional(),
-    description: z.string().optional(),
-    recommendation: z.string().optional(),
-    severity: SeveritySchema.optional(),
-    notes: z.string().optional(),
-    status: FindingStatusSchema.optional(),
-    reviewBasis: z.array(ReviewBasisItemSchema).optional(),
+exports.UpdateFindingSchema = zod_1.z.object({
+    title: zod_1.z.string().min(1).optional(),
+    description: zod_1.z.string().optional(),
+    recommendation: zod_1.z.string().optional(),
+    severity: exports.SeveritySchema.optional(),
+    notes: zod_1.z.string().optional(),
+    status: exports.FindingStatusSchema.optional(),
+    reviewBasis: zod_1.z.array(exports.ReviewBasisItemSchema).optional(),
 });
-export const TriageFindingSchema = z.object({
-    action: z.enum(["ACCEPT", "EDIT", "DISMISS", "ESCALATE"]),
-    title: z.string().min(1).optional(),
-    description: z.string().optional(),
-    recommendation: z.string().optional(),
-    severity: SeveritySchema.optional(),
-    notes: z.string().optional(),
-    reviewBasis: z.array(ReviewBasisItemSchema).optional(),
+exports.TriageFindingSchema = zod_1.z.object({
+    action: zod_1.z.enum(["ACCEPT", "EDIT", "DISMISS", "ESCALATE"]),
+    title: zod_1.z.string().min(1).optional(),
+    description: zod_1.z.string().optional(),
+    recommendation: zod_1.z.string().optional(),
+    severity: exports.SeveritySchema.optional(),
+    notes: zod_1.z.string().optional(),
+    reviewBasis: zod_1.z.array(exports.ReviewBasisItemSchema).optional(),
 });
-export const EscalateFindingSchema = z.object({
-    reason: z.string().min(1, "Escalation reason is required"),
+exports.EscalateFindingSchema = zod_1.z.object({
+    reason: zod_1.z.string().min(1, "Escalation reason is required"),
 });
-export const FindingsQuerySchema = z.object({
-    area: ReviewAreaSchema.optional(),
-    status: FindingStatusSchema.optional(),
-    severity: SeveritySchema.optional(),
-    page: z.coerce.number().int().min(1).default(1),
-    pageSize: z.coerce.number().int().min(1).max(100).default(20),
-    sortBy: z.enum(["severity", "confidence", "createdAt"]).default("severity"),
-    sortOrder: z.enum(["asc", "desc"]).default("desc"),
+exports.FindingsQuerySchema = zod_1.z.object({
+    area: exports.ReviewAreaSchema.optional(),
+    status: exports.FindingStatusSchema.optional(),
+    severity: exports.SeveritySchema.optional(),
+    page: zod_1.z.coerce.number().int().min(1).default(1),
+    pageSize: zod_1.z.coerce.number().int().min(1).max(100).default(20),
+    sortBy: zod_1.z.enum(["severity", "confidence", "createdAt"]).default("severity"),
+    sortOrder: zod_1.z.enum(["asc", "desc"]).default("desc"),
 });
 // ── Checklists ────────────────────────────────────────────────────────────────
-export const ChecklistItemSchema = z.object({
-    label: z.string().min(1),
-    description: z.string().optional(),
-    principleId: z.string().optional(),
-    area: ReviewAreaSchema.optional(),
-    required: z.boolean().default(true),
-    order: z.number().int().min(0).default(0),
+exports.ChecklistItemSchema = zod_1.z.object({
+    label: zod_1.z.string().min(1),
+    description: zod_1.z.string().optional(),
+    principleId: zod_1.z.string().optional(),
+    area: exports.ReviewAreaSchema.optional(),
+    required: zod_1.z.boolean().default(true),
+    order: zod_1.z.number().int().min(0).default(0),
 });
-export const CreateChecklistSchema = z.object({
-    title: z.string().min(1),
-    description: z.string().optional(),
-    items: z.array(ChecklistItemSchema).default([]),
+exports.CreateChecklistSchema = zod_1.z.object({
+    title: zod_1.z.string().min(1),
+    description: zod_1.z.string().optional(),
+    items: zod_1.z.array(exports.ChecklistItemSchema).default([]),
 });
-export const UpdateChecklistSchema = z.object({
-    title: z.string().min(1).optional(),
-    description: z.string().optional(),
-    items: z
-        .array(ChecklistItemSchema.extend({
-        id: z.string().optional(),
+exports.UpdateChecklistSchema = zod_1.z.object({
+    title: zod_1.z.string().min(1).optional(),
+    description: zod_1.z.string().optional(),
+    items: zod_1.z
+        .array(exports.ChecklistItemSchema.extend({
+        id: zod_1.z.string().optional(),
     }))
         .optional(),
 });
-export const ApproveChecklistSchema = z.object({
-    approvedBy: z.string().min(1),
+exports.ApproveChecklistSchema = zod_1.z.object({
+    approvedBy: zod_1.z.string().min(1),
 });
 // ── Principles ────────────────────────────────────────────────────────────────
-export const CreatePrincipleSchema = z.object({
-    name: z.string().min(1),
-    description: z.string().min(1),
-    category: PrincipleCategorySchema,
-    source: z.string().optional(),
-    enabled: z.boolean().default(true),
+exports.CreatePrincipleSchema = zod_1.z.object({
+    name: zod_1.z.string().min(1),
+    description: zod_1.z.string().min(1),
+    category: exports.PrincipleCategorySchema,
+    source: zod_1.z.string().optional(),
+    enabled: zod_1.z.boolean().default(true),
 });
-export const UpdatePrincipleSchema = z.object({
-    name: z.string().min(1).optional(),
-    description: z.string().optional(),
-    category: PrincipleCategorySchema.optional(),
-    source: z.string().optional(),
-    enabled: z.boolean().optional(),
+exports.UpdatePrincipleSchema = zod_1.z.object({
+    name: zod_1.z.string().min(1).optional(),
+    description: zod_1.z.string().optional(),
+    category: exports.PrincipleCategorySchema.optional(),
+    source: zod_1.z.string().optional(),
+    enabled: zod_1.z.boolean().optional(),
 });
 // ── Settings ──────────────────────────────────────────────────────────────────
-export const UpdateSettingsSchema = z.object({
-    review_depth: z.enum(["quick", "standard", "deep"]).optional(),
-    review_confidence_threshold: z.number().int().min(50).max(99).optional(),
-    checklist_require_approval: z.boolean().optional(),
-    show_ai_confidence: z.boolean().optional(),
-    default_review_owner: z.string().optional(),
-    enable_usability_checks: z.boolean().optional(),
-    enable_accessibility_checks: z.boolean().optional(),
-    enable_content_checks: z.boolean().optional(),
-    enable_consistency_checks: z.boolean().optional(),
+exports.UpdateSettingsSchema = zod_1.z.object({
+    review_depth: zod_1.z.enum(["quick", "standard", "deep"]).optional(),
+    review_confidence_threshold: zod_1.z.number().int().min(50).max(99).optional(),
+    checklist_require_approval: zod_1.z.boolean().optional(),
+    show_ai_confidence: zod_1.z.boolean().optional(),
+    default_review_owner: zod_1.z.string().optional(),
+    enable_usability_checks: zod_1.z.boolean().optional(),
+    enable_accessibility_checks: zod_1.z.boolean().optional(),
+    enable_content_checks: zod_1.z.boolean().optional(),
+    enable_consistency_checks: zod_1.z.boolean().optional(),
 });

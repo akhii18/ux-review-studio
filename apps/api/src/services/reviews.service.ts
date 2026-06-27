@@ -253,7 +253,7 @@ export const ReviewsService = {
 
     // Fire pipeline asynchronously — do not await
     setImmediate(() => {
-      import("./ai/orchestrator").then(({ runReviewPipeline }) => {
+      import("./ai/orchestrator.js").then(({ runReviewPipeline }) => {
         runReviewPipeline(reviewId).catch((err: unknown) => {
           console.error("Pipeline failed for review", reviewId, err);
         });
@@ -312,7 +312,7 @@ export const ReviewsService = {
   },
 
   async getAnalytics(userId: string) {
-    const { prisma } = await import("../config/prisma");
+    const { prisma } = await import("../config/prisma.js");
 
     const [reviews, findings]: [ReviewAnalyticsRecord[], FindingAnalyticsRecord[]] = await Promise.all([
       prisma.review.findMany({
