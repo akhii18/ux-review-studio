@@ -45,6 +45,7 @@ jobs:
         run: npm run db:migrate:prod --workspace @uxm/api
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DIRECT_URL: ${{ secrets.DIRECT_URL }}
 
       - name: Create web deployment package
         run: |
