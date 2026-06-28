@@ -38,7 +38,9 @@ npm install
 ```bash
 # API
 cp apps/api/.env.example apps/api/.env
-# Fill in your Supabase DATABASE_URL, DIRECT_URL, and storage credentials
+# Fill in DATABASE_URL, DIRECT_URL, JWT_SECRET, CORS_ORIGIN, WEB_APP_URL,
+# and Azure OpenAI values if you are using the AI pipeline.
+# Supabase Storage vars are optional unless you want screenshot uploads.
 
 # Web
 cp apps/web/.env.local.example apps/web/.env.local
@@ -78,6 +80,22 @@ docker-compose up --build
 > Note: Docker is optional. The main development flow is still `npm run dev` against your Supabase project.
 
 ---
+
+## Azure production
+
+This repo is split into two separate apps:
+- `apps/api` runs the Express API
+- `apps/web` runs the Next.js frontend
+
+That means a normal single Azure App Service can only host one of them unless you change the deployment model to a custom container or multi-container setup.
+
+If you want the current code to work in production without changing the app architecture, the clean setup is:
+1. Deploy the API to one Azure App Service or container.
+2. Deploy the web app to a second host.
+3. Point `NEXT_PUBLIC_API_URL` at the API URL.
+4. Put the API secrets only in the API host configuration.
+
+If you are not using screenshot uploads, you do not need the Supabase Storage vars.
 
 ## API Endpoints
 
