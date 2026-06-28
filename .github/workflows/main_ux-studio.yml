@@ -28,16 +28,14 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '24.x'
-          cache: npm
+          node-version: "24.x"
+          cache: "npm"
 
       - name: Install dependencies
         run: npm ci
 
-      - name: Verify Prisma is installed
-        run: |
-          npm ls prisma --workspace @uxm/api
-          ls -la node_modules/.bin/prisma
+      - name: Verify Prisma
+        run: npm ls prisma --workspace @uxm/api
 
       - name: Build web app
         run: npm run build --workspace @uxm/web
@@ -48,7 +46,6 @@ jobs:
       - name: Create web deployment package
         run: |
           mkdir -p web-deploy
-
           cp -a apps/web/.next/standalone/. web-deploy/
 
           if [ -d "web-deploy/apps/web" ]; then
@@ -81,9 +78,9 @@ jobs:
           name: node-app
           path: |
             .
-            !node_modules
             !web-deploy
             !apps/web/.next
+          include-hidden-files: true
 
       - name: Upload web artifact
         uses: actions/upload-artifact@v4
