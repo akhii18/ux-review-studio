@@ -45,12 +45,38 @@ const app = express();
 
 // ── Middleware ─────────────────────────────────────────────────────────────────
 app.use(helmet());
+const allowedOrigins = [
+  "https://app.uxnavigator.org",
+  "https://uxnavigator.org",
+  config.corsOrigin,
+].filter(Boolean);
+
 app.use(
   cors({
-    origin: config.nodeEnv === "development" ? true : config.corsOrigin,
+    origin: (origin, callback) => {
+      // Allow non-browser requests like Postman, health checks, Azure probes
+      if (!origin) {
+        return callback(null, true);
+      }
+
+      if (config.nodeEnv === "development") {
+        return callback(null, true);
+      }
+
+      if (allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+
+      console.warn(`CORS blocked for origin: ${origin}`);
+      return callback(null, false);
+    },
     credentials: true,
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
   })
 );
+
+app.options("*", cors());
 app.use(compression());
 app.use(express.json({ limit: "50mb" }));
 
