@@ -34,8 +34,16 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Verify Prisma is installed
+        run: |
+          npm ls prisma --workspace @uxm/api
+          ls -la node_modules/.bin/prisma
+
       - name: Build web app
         run: npm run build --workspace @uxm/web
+
+      - name: Build API app
+        run: npm run build --workspace @uxm/api
 
       - name: Create web deployment package
         run: |
