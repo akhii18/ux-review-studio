@@ -21,7 +21,6 @@ function AuthPageContent() {
   const [signupPassword, setSignupPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [showPasswordRules, setShowPasswordRules] = useState(false);
-  const [showConfirmPasswordRules, setShowConfirmPasswordRules] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [didTrySigninSubmit, setDidTrySigninSubmit] = useState(false);
@@ -32,7 +31,9 @@ function AuthPageContent() {
   const isSignupNameValid = signupName.length > 0 && fullNamePattern.test(signupName);
   const signupEmailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/i;
   const isSignupEmailValid = signupEmail.length > 0 && signupEmailPattern.test(signupEmail.trim());
+  const isSignupEmailInvalid = signupEmail.length > 0 && !isSignupEmailValid;
   const isSigninEmailValid = email.length > 0 && signupEmailPattern.test(email.trim());
+  const isSigninEmailInvalid = email.length > 0 && !isSigninEmailValid;
   const isSigninPasswordValid = password.length > 0;
 
   useEffect(() => {
@@ -60,18 +61,8 @@ function AuthPageContent() {
     { label: "At least one special character", passed: /[^A-Za-z0-9]/.test(signupPassword) },
   ];
 
-  const confirmPasswordRules = [
-    { label: "At least 10 characters", passed: confirmPassword.length >= 10 },
-    { label: "At least one capital letter", passed: /[A-Z]/.test(confirmPassword) },
-    { label: "At least one lowercase letter", passed: /[a-z]/.test(confirmPassword) },
-    { label: "At least one numeric character", passed: /[0-9]/.test(confirmPassword) },
-    { label: "At least one special character", passed: /[^A-Za-z0-9]/.test(confirmPassword) },
-  ];
-
   const isPasswordReady = signupPassword.length > 0 && passwordRules.every((rule) => rule.passed);
-  const isConfirmPasswordStrong = confirmPassword.length > 0 && confirmPasswordRules.every((rule) => rule.passed);
-  const isConfirmPasswordReady =
-    confirmPassword.length > 0 && confirmPassword === signupPassword && isPasswordReady && isConfirmPasswordStrong;
+  const isConfirmPasswordReady = confirmPassword.length > 0 && confirmPassword === signupPassword && isPasswordReady;
   const passwordsMismatch = (signupPassword.length > 0 || confirmPassword.length > 0) && signupPassword !== confirmPassword;
   const canCreateAccount =
     isSignupNameValid &&
@@ -85,12 +76,6 @@ function AuthPageContent() {
       setShowPasswordRules(false);
     }
   }, [isPasswordReady]);
-
-  useEffect(() => {
-    if (isConfirmPasswordReady) {
-      setShowConfirmPasswordRules(false);
-    }
-  }, [isConfirmPasswordReady]);
 
   useEffect(() => {
     if (tab === "signup" && isPasswordReady && !confirmPassword) {
@@ -303,7 +288,9 @@ function AuthPageContent() {
               <div>
                 <label className="text-sm font-medium">Email</label>
                 <input
-                  type="email"
+                  type="text"
+                  inputMode="email"
+                  autoComplete="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value.replace(/^\s+/, ""))}
                   className={`w-full mt-1 border rounded-lg px-3 py-2 shadow-sm focus:outline-none focus:ring-2 ${email.length === 0 && !didTrySigninSubmit
@@ -313,6 +300,21 @@ function AuthPageContent() {
                       : "border-red-500 focus:ring-red-500"
                     }`}
                 />
+                <div className="mt-1 flex items-center gap-2 text-xs font-medium">
+                  {email.length === 0 ? (
+                    <span className="text-gray-400"></span>
+                  ) : isSigninEmailValid ? (
+                    <>
+                      <Check className="h-4 w-4 text-green-600" aria-hidden="true" />
+                      <span className="text-green-700">Email format looks good.</span>
+                    </>
+                  ) : (
+                    <>
+                      <X className="h-4 w-4 text-red-600" aria-hidden="true" />
+                      <span className="text-red-600">Enter a valid email address.</span>
+                    </>
+                  )}
+                </div>
               </div>
 
               <div>
@@ -350,7 +352,6 @@ function AuthPageContent() {
               <div>
                 <label className="text-sm font-medium">Full name</label>
                 <input
-                  placeholder="Jane Doe"
                   value={signupName}
                   onChange={(e) => {
                     const sanitized = e.target.value
@@ -366,17 +367,31 @@ function AuthPageContent() {
                       : "border-red-500 focus:ring-red-500"
                     }`}
                 />
-                {isSignupNameInvalid && (
-                  <p className="mt-1 text-xs text-red-600">Format not supported.</p>
-                )}
+                <div className="mt-1 flex items-center gap-2 text-xs font-medium">
+                  {signupName.length === 0 ? (
+                    <span className="text-gray-400">Enter your full name.</span>
+                  ) : isSignupNameValid ? (
+                    <>
+                      <Check className="h-4 w-4 text-green-600" aria-hidden="true" />
+                      <span className="text-green-700">Full name looks good.</span>
+                    </>
+                  ) : (
+                    <>
+                      <X className="h-4 w-4 text-red-600" aria-hidden="true" />
+                      <span className="text-red-600">Use letters only, like Jane Doe.</span>
+                    </>
+                  )}
+                </div>
               </div>
 
               <div>
-                <label className="text-sm font-medium">Work email</label>
+                <label className="text-sm font-medium">Email</label>
                 <div className="relative mt-1">
                   <Mail className="absolute left-3 top-2.5 w-4 h-4 text-gray-400" />
                   <input
-                    type="email"
+                    type="text"
+                    inputMode="email"
+                    autoComplete="email"
                     value={signupEmail}
                     onChange={(e) => setSignupEmail(e.target.value.replace(/^\s+/, ""))}
                     className={`w-full border rounded-lg pl-9 py-2 shadow-sm focus:outline-none focus:ring-2 ${signupEmail.length === 0 && !didTrySignupSubmit
@@ -386,6 +401,21 @@ function AuthPageContent() {
                         : "border-red-500 focus:ring-red-500"
                       }`}
                   />
+                </div>
+                <div className="mt-1 flex items-center gap-2 text-xs font-medium">
+                  {signupEmail.length === 0 ? (
+                    <span className="text-gray-400">Enter your email.</span>
+                  ) : isSignupEmailValid ? (
+                    <>
+                      <Check className="h-4 w-4 text-green-600" aria-hidden="true" />
+                      <span className="text-green-700">Email format looks good.</span>
+                    </>
+                  ) : (
+                    <>
+                      <X className="h-4 w-4 text-red-600" aria-hidden="true" />
+                      <span className="text-red-600">Enter a valid email address.</span>
+                    </>
+                  )}
                 </div>
               </div>
 
@@ -453,11 +483,6 @@ function AuthPageContent() {
                     value={confirmPassword}
                     onChange={(e) => {
                       setConfirmPassword(e.target.value);
-                      if (e.target.value.length > 0) {
-                        setShowConfirmPasswordRules(true);
-                      } else {
-                        setShowConfirmPasswordRules(false);
-                      }
                     }}
                     className={`w-full border rounded-lg pl-9 py-2 shadow-sm focus:outline-none focus:ring-2 ${confirmPassword.length === 0 && !didTrySignupSubmit
                       ? "border-gray-300 focus:ring-gray-300"
@@ -467,45 +492,21 @@ function AuthPageContent() {
                       }`}
                   />
                 </div>
-                {passwordsMismatch && (
-                  <p className="mt-1 text-xs text-red-600">Passwords not matched</p>
-                )}
-                {confirmPassword.length > 0 && !isConfirmPasswordReady && (
-                  <div className="mt-3 rounded-lg border border-gray-200 bg-gray-50">
-                    <button
-                      type="button"
-                      onClick={() => setShowConfirmPasswordRules((prev) => !prev)}
-                      className="flex w-full items-center justify-between px-3 py-2 text-xs font-semibold text-gray-700"
-                    >
-                      Confirm password characteristics
-                      <ChevronDown className={`h-4 w-4 transition ${showConfirmPasswordRules ? "rotate-180" : ""}`} aria-hidden="true" />
-                    </button>
-                    {showConfirmPasswordRules && (
-                      <div className="space-y-2 border-t border-gray-200 p-3">
-                        {confirmPasswordRules.map((rule) => (
-                          <div key={`confirm-${rule.label}`} className="flex items-center gap-2 text-xs font-medium">
-                            {rule.passed ? (
-                              <Check className="h-4 w-4 text-green-600" aria-hidden="true" />
-                            ) : (
-                              <X className="h-4 w-4 text-gray-400" aria-hidden="true" />
-                            )}
-                            <span className={rule.passed ? "text-green-700" : "text-gray-500"}>{rule.label}</span>
-                          </div>
-                        ))}
-                        <div className="flex items-center gap-2 text-xs font-medium">
-                          {confirmPassword === signupPassword && confirmPassword.length > 0 ? (
-                            <Check className="h-4 w-4 text-green-600" aria-hidden="true" />
-                          ) : (
-                            <X className="h-4 w-4 text-gray-400" aria-hidden="true" />
-                          )}
-                          <span className={confirmPassword === signupPassword && confirmPassword.length > 0 ? "text-green-700" : "text-gray-500"}>
-                            Passwords must match
-                          </span>
-                        </div>
-                      </div>
+                  <div className="mt-1 flex items-center gap-2 text-xs font-medium">
+                    {confirmPassword.length === 0 ? (
+                      <span className="text-gray-400">Re-enter your password to confirm it.</span>
+                    ) : isConfirmPasswordReady ? (
+                      <>
+                        <Check className="h-4 w-4 text-green-600" aria-hidden="true" />
+                        <span className="text-green-700">Passwords match.</span>
+                      </>
+                    ) : (
+                      <>
+                        <X className="h-4 w-4 text-red-600" aria-hidden="true" />
+                        <span className="text-red-600">Passwords must match.</span>
+                      </>
                     )}
                   </div>
-                )}
               </div>
 
               {error && <p className="text-sm text-red-600">{error}</p>}
