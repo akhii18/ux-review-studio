@@ -20,6 +20,9 @@ jobs:
       NODE_ENV: production
       NPM_CONFIG_PRODUCTION: false
       NEXT_PUBLIC_API_URL: ${{ secrets.NEXT_PUBLIC_API_URL }}
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      DIRECT_URL: ${{ secrets.DIRECT_URL }}
+
 
     steps:
       - name: Checkout code
@@ -39,12 +42,6 @@ jobs:
 
       - name: Build API app
         run: npm run build --workspace @uxm/api
-
-      - name: Run API database migrations
-        run: npm run db:migrate:prod --workspace @uxm/api
-        env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          DIRECT_URL: ${{ secrets.DIRECT_URL }}
 
       - name: Create web deployment package
         run: |
