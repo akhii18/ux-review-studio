@@ -1,6 +1,3 @@
-# Docs for the Azure Web Apps Deploy action: https://github.com/Azure/webapps-deploy
-# More GitHub Actions for Azure: https://github.com/Azure/actions
-
 name: Build and deploy Node.js app to Azure Web App - ux-studio
 
 on:
@@ -15,49 +12,93 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+
     permissions:
-      contents: read #This is required for actions/checkout
+      contents: read
+
     env:
       NODE_ENV: production
       NPM_CONFIG_PRODUCTION: false
       NEXT_PUBLIC_API_URL: ${{ secrets.NEXT_PUBLIC_API_URL }}
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-      - name: Set up Node.js version
-        uses: actions/setup-node@v3
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
         with:
-          node-version: '20.x'
+          node-version: '24.x'
           cache: npm
 
-      - name: npm install, build, and test
-        run: |
-          npm ci --include=dev
-          npm run build --if-present
-          npm run test --if-present
+      - name: Install dependencies
+        run: npm ci
 
-      - name: Upload artifact for deployment job
+      - name: Build web app
+        run: npm run build --workspace @uxm/web
+
+      - name: Create web deployment package
+        run: |
+          mkdir -p web-deploy
+
+          cp -a apps/web/.next/standalone/. web-deploy/
+
+          if [ -d "web-deploy/apps/web" ]; then
+            mkdir -p web-deploy/apps/web/.next
+            cp -a apps/web/.next/static web-deploy/apps/web/.next/static
+
+            if [ -d "apps/web/public" ]; then
+              cp -a apps/web/public web-deploy/apps/web/public
+            fi
+
+            cd web-deploy
+            npm pkg set scripts.start="node apps/web/server.js"
+            cd ..
+          else
+            mkdir -p web-deploy/.next
+            cp -a apps/web/.next/static web-deploy/.next/static
+
+            if [ -d "apps/web/public" ]; then
+              cp -a apps/web/public web-deploy/public
+            fi
+
+            cd web-deploy
+            npm pkg set scripts.start="node server.js"
+            cd ..
+          fi
+
+      - name: Upload API artifact
         uses: actions/upload-artifact@v4
         with:
           name: node-app
-          path: .
+          path: |
+            .
+            !node_modules
+            !web-deploy
+            !apps/web/.next
 
-  deploy:
+      - name: Upload web artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-app
+          path: web-deploy
+          include-hidden-files: true
+
+  deploy-api:
     runs-on: ubuntu-latest
     needs: build
     if: github.event_name == 'push'
+
     permissions:
-      contents: read #This is required for actions/checkout
+      contents: read
 
     steps:
-      - name: Download artifact from build job
+      - name: Download API artifact
         uses: actions/download-artifact@v4
         with:
           name: node-app
 
       - name: Deploy API app
-        id: deploy-api
         uses: azure/webapps-deploy@v3
         with:
           app-name: ${{ secrets.AZURE_API_APP_NAME }}
@@ -68,20 +109,19 @@ jobs:
     runs-on: ubuntu-latest
     needs: build
     if: github.event_name == 'push'
+
     permissions:
-      contents: read #This is required for actions/checkout
+      contents: read
 
     steps:
-      - name: Download artifact from build job
+      - name: Download web artifact
         uses: actions/download-artifact@v4
         with:
-          name: node-app
+          name: web-app
 
       - name: Deploy web app
-        id: deploy-webapp
         uses: azure/webapps-deploy@v3
         with:
           app-name: ${{ secrets.AZURE_WEB_APP_NAME }}
           publish-profile: ${{ secrets.AZURE_WEB_PUBLISH_PROFILE }}
           package: .
-          
