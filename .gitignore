@@ -23,6 +23,9 @@ apps/api/uploads/
 # API logs
 apps/api/*.log
 
+# deployment guide draft
+docs/azure-deployment.md
+
 
 
 # Agentic part

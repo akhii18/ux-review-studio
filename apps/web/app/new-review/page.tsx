@@ -213,26 +213,6 @@ type ReviewFile = {
   storageRef?: string | null;
 };
 
-type ReviewDraftSnapshot = {
-  reviewId: string | null;
-  step: number;
-  name: string;
-  product: string;
-  touchedFields: { name: boolean; product: boolean };
-  domain: string;
-  reviewType: string;
-  owner: string;
-  figmaUrl: string;
-  designSystemUrl: string;
-  criteria: string[];
-  files: Array<Pick<ReviewFile, "id" | "name" | "type" | "status" | "blobUrl" | "contentText" | "sizeBytes" | "mimeType" | "storageRef">>;
-  contextText: string;
-  depth: string;
-  confidence: number[];
-};
-
-const DRAFT_STORAGE_KEY = "uxm:new-review:draft";
-
 function NewReviewPageContent() {
   const searchParams = useSearchParams();
   const reviewId = searchParams.get("reviewId");
@@ -289,7 +269,7 @@ function NewReviewPageContent() {
     filesRef.current = files;
   }, [files]);
 
-  const draftSnapshot = useMemo<ReviewDraftSnapshot>(() => ({
+  const draftSnapshot = useMemo(() => ({
     reviewId: draftReviewId,
     step,
     name,
@@ -333,146 +313,48 @@ function NewReviewPageContent() {
     touchedFields,
   ]);
 
+  const resetDraftForm = () => {
+    setDraftReviewId(null);
+    setStep(0);
+    setName("");
+    setProduct("");
+    setTouchedFields({ name: false, product: false });
+    setDomain("bfsi");
+    setReviewType("full");
+    setOwner("");
+    setFigmaUrl("");
+    setDesignSystemUrl("");
+    setCriteria(REVIEW_TYPE_REQUIRED_CRITERIA.full ?? []);
+    setFiles([]);
+    setContextText("");
+    setDepth("standard");
+    setConfidence([75]);
+    setRunning(false);
+    setStageIdx(0);
+    setCurrentStageLabel("");
+  };
+
   useEffect(() => {
     if (typeof window === "undefined") return;
-
-    const restoreFromSnapshot = (snapshot: ReviewDraftSnapshot) => {
-      setDraftReviewId(snapshot.reviewId ?? null);
-      setStep(snapshot.step ?? 0);
-      setName(snapshot.name ?? "");
-      setProduct(snapshot.product ?? "");
-      setTouchedFields(snapshot.touchedFields ?? { name: false, product: false });
-      setDomain(snapshot.domain ?? "bfsi");
-      setReviewType(snapshot.reviewType ?? "full");
-      setOwner(snapshot.owner ?? "");
-      setFigmaUrl(snapshot.figmaUrl ?? "");
-      setDesignSystemUrl(snapshot.designSystemUrl ?? "");
-      setCriteria(Array.isArray(snapshot.criteria) ? snapshot.criteria : []);
-      setContextText(snapshot.contextText ?? "");
-      setDepth(snapshot.depth ?? "standard");
-      setConfidence(Array.isArray(snapshot.confidence) && snapshot.confidence.length > 0 ? snapshot.confidence : [75]);
-      setFiles((snapshot.files ?? []).map((file) => ({
-        ...file,
-        isObjectUrl: false,
-      })));
-    };
-
-    const loadDraft = async () => {
-      const raw = localStorage.getItem(DRAFT_STORAGE_KEY);
-      if (raw) {
-        try {
-          const snapshot = JSON.parse(raw) as ReviewDraftSnapshot;
-          restoreFromSnapshot(snapshot);
-
-          if (snapshot.reviewId) {
-            const review = await getReview(snapshot.reviewId);
-            setDraftReviewId(review.id ?? snapshot.reviewId);
-            setName(review.name ?? snapshot.name ?? "");
-            setProduct(review.product ?? snapshot.product ?? "");
-            setDomain(review.domain ?? snapshot.domain ?? "bfsi");
-            setReviewType(review.reviewType ?? snapshot.reviewType ?? "full");
-            setOwner(review.owner ?? snapshot.owner ?? "");
-            setCriteria(Array.isArray(review.criteria) ? review.criteria : snapshot.criteria ?? []);
-            setDepth(review.depth ?? snapshot.depth ?? "standard");
-            setConfidence([review.confidenceThreshold ?? snapshot.confidence?.[0] ?? 75]);
-            setStep(draftStepFromStage(review.stage ?? snapshot.step?.toString()));
-
-            const noteAsset = (review.assets ?? []).find((asset: any) => asset.name === "Context notes" || asset.mimeType === "text/plain");
-            const restoredFiles: ReviewFile[] = (review.assets ?? [])
-              .filter((asset: any) => asset !== noteAsset && asset.mimeType !== "text/plain")
-              .map((asset: any) => {
-                const mimeType = asset.mimeType ?? "application/octet-stream";
-                const isImage = mimeType.startsWith("image/");
-                const isPdf = mimeType === "application/pdf";
-                return {
-                  id: asset.id,
-                  name: asset.name,
-                  type: isImage ? "Screenshot" : isPdf ? "PDF" : "Word",
-                  status: "Ready",
-                  previewUrl: asset.blobUrl ?? undefined,
-                  blobUrl: asset.blobUrl ?? undefined,
-                  storageRef: asset.storageRef ?? asset.blobUrl ?? undefined,
-                  contentText: asset.contentText ?? undefined,
-                  sizeBytes: asset.sizeBytes ?? null,
-                  mimeType,
-                  isObjectUrl: false,
-                };
-              });
-
-            setFiles(restoredFiles.length > 0 ? restoredFiles : snapshot.files ?? []);
-            const content = noteAsset?.contentText ?? snapshot.contextText ?? "";
-            setContextText(content);
-            const figmaMatch = content.match(/Figma URL:\s*(.+)/i);
-            const designMatch = content.match(/Design System URL:\s*(.+)/i);
-            setFigmaUrl(figmaMatch?.[1]?.trim() ?? snapshot.figmaUrl ?? "");
-            setDesignSystemUrl(designMatch?.[1]?.trim() ?? snapshot.designSystemUrl ?? "");
-          }
-
-          lastSyncedSnapshotRef.current = JSON.stringify(snapshot);
-        } catch {
-          localStorage.removeItem(DRAFT_STORAGE_KEY);
-        }
-      }
-
-      isHydratingRef.current = false;
-    };
-
-    loadDraft();
-  }, []);
-
-  useEffect(() => {
-    if (typeof window === "undefined" || isHydratingRef.current) return;
-    try {
-      localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(draftSnapshot));
-    } catch {
-      // Ignore storage quota issues; server save is still the source of truth.
-    }
-  }, [draftSnapshot]);
-
-  useEffect(() => {
-    if (typeof window === "undefined" || isHydratingRef.current || running) return;
-    const snapshotKey = JSON.stringify(draftSnapshot);
-    if (!name.trim() || !product.trim()) return;
-    if (snapshotKey === lastSyncedSnapshotRef.current) return;
-
-    const timer = setTimeout(() => {
-      persistDraft(true)
-        .then(() => {
-          lastSyncedSnapshotRef.current = snapshotKey;
-        })
-        .catch((error) => {
-          console.error(error);
-        });
-    }, 1200);
-
-    return () => clearTimeout(timer);
-  }, [draftSnapshot, name, product, running]);
-
-  useEffect(() => {
-    if (!reviewId) return;
-
     let cancelled = false;
-    setRunning(false);
+    isHydratingRef.current = true;
 
-    getReview(reviewId)
-      .then((review) => {
-        if (cancelled || !review) return;
+    const applyReview = (review: any) => {
+      setDraftReviewId(review.id ?? reviewId ?? null);
+      setStep(draftStepFromStage(review.stage));
+      setName(review.name ?? "");
+      setProduct(review.product ?? "");
+      setDomain(review.domain ?? "bfsi");
+      setReviewType(review.reviewType ?? "full");
+      setOwner(review.owner ?? "");
+      setCriteria(Array.isArray(review.criteria) ? review.criteria : []);
+      setDepth(review.depth ?? "standard");
+      setConfidence([review.confidenceThreshold ?? 75]);
 
-        setDraftReviewId(review.id ?? reviewId);
-        setName(review.name ?? "");
-        setProduct(review.product ?? "");
-        setDomain(review.domain ?? "bfsi");
-        setReviewType(review.reviewType ?? "full");
-        setOwner(review.owner ?? "");
-        setCriteria(Array.isArray(review.criteria) ? review.criteria : []);
-        setDepth(review.depth ?? "standard");
-        setConfidence([review.confidenceThreshold ?? 75]);
-        setStep(draftStepFromStage(review.stage));
-
-        const noteAsset = (review.assets ?? []).find((asset: any) => asset.name === "Context notes" || asset.mimeType === "text/plain");
-        const nextFiles: ReviewFile[] = (review.assets ?? [])
-          .filter((asset: any) => asset !== noteAsset && asset.mimeType !== "text/plain")
-          .map((asset: any) => {
+      const noteAsset = (review.assets ?? []).find((asset: any) => asset.name === "Context notes" || asset.mimeType === "text/plain");
+      const nextFiles: ReviewFile[] = (review.assets ?? [])
+        .filter((asset: any) => asset !== noteAsset && asset.mimeType !== "text/plain")
+        .map((asset: any) => {
           const mimeType = asset.mimeType ?? "application/octet-stream";
           const isImage = mimeType.startsWith("image/");
           const isPdf = mimeType === "application/pdf";
@@ -491,19 +373,39 @@ function NewReviewPageContent() {
           };
         });
 
-        setFiles(nextFiles);
+      setFiles(nextFiles);
 
-        const content = noteAsset?.contentText ?? "";
-        setContextText(content);
+      const content = noteAsset?.contentText ?? "";
+      setContextText(content);
 
-        const figmaMatch = content.match(/Figma URL:\s*(.+)/i);
-        const designMatch = content.match(/Design System URL:\s*(.+)/i);
-        setFigmaUrl(figmaMatch?.[1]?.trim() ?? "");
-        setDesignSystemUrl(designMatch?.[1]?.trim() ?? "");
+      const figmaMatch = content.match(/Figma URL:\s*(.+)/i);
+      const designMatch = content.match(/Design System URL:\s*(.+)/i);
+      setFigmaUrl(figmaMatch?.[1]?.trim() ?? "");
+      setDesignSystemUrl(designMatch?.[1]?.trim() ?? "");
+    };
+
+    if (!reviewId) {
+      resetDraftForm();
+      lastSyncedSnapshotRef.current = "";
+      isHydratingRef.current = false;
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    getReview(reviewId)
+      .then((review) => {
+        if (cancelled || !review) return;
+        applyReview(review);
       })
       .catch(() => {
         if (!cancelled) {
           toast.error("Failed to load draft review");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          isHydratingRef.current = false;
         }
       });
 
@@ -679,10 +581,12 @@ function NewReviewPageContent() {
   };
 
   const persistDraft = async (quiet = false) => {
+    const fallbackName = name.trim() || "Untitled review";
+    const fallbackProduct = product.trim() || "Untitled product";
     const saved = await saveReviewDraft({
       reviewId: draftReviewId ?? reviewId ?? undefined,
-      name,
-      product,
+      name: fallbackName,
+      product: fallbackProduct,
       domain,
       reviewType,
       owner,
@@ -1080,7 +984,6 @@ function NewReviewPageContent() {
                         <Button size="lg" variant="outline" className="min-h-11 bg-card hover:bg-card/90" onClick={async () => {
                           try {
                             await persistDraft();
-                            toast.success("Draft saved");
                           } catch (error) {
                             toast.error("Failed to save draft");
                             console.error(error);
@@ -1160,7 +1063,6 @@ function NewReviewPageContent() {
               <Button variant="outline" className="min-h-10" onClick={async () => {
                 try {
                   await persistDraft();
-                  toast.success("Draft saved");
                 } catch (error) {
                   toast.error("Failed to save draft");
                   console.error(error);
