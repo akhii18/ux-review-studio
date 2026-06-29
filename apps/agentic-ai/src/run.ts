@@ -42,10 +42,10 @@ import type {
 const REVIEW_AGENT_NAMES: ReviewAgentName[] = [
   "usability",
   "accessibility",
-  "cognitiveInteraction",
-  "contentMicrocopy",
-  "gestalt",
-  "visualDesign",
+  "cognitiveInteraction", // Consistency agent
+  "contentMicrocopy",    // Content UX agent
+  "gestalt",             // Risk agent
+  "visualDesign",        // Recommendations agent
 ];
 
 function parseCsv(value?: string): string[] {
@@ -345,22 +345,22 @@ async function main() {
 
   // Print raw per-agent findings (useful for debugging / audit)
   if (SELECTED_REVIEW_AGENTS.includes("usability")) {
-    printAgentReport("Nielsen Usability Review", finalState.nielsenOutput);
+    printAgentReport("Usability Review", finalState.nielsenOutput);
   }
   if (SELECTED_REVIEW_AGENTS.includes("accessibility")) {
-    printAgentReport("Accessibility Review (WCAG POUR)", finalState.accessibilityOutput);
+    printAgentReport("Accessibility Review (WCAG)", finalState.accessibilityOutput);
   }
   if (SELECTED_REVIEW_AGENTS.includes("cognitiveInteraction")) {
-    printAgentReport("Cognitive Interaction Review", finalState.cognitiveInteractionOutput);
+    printAgentReport("Consistency Review", finalState.cognitiveInteractionOutput);
   }
   if (SELECTED_REVIEW_AGENTS.includes("contentMicrocopy")) {
-    printAgentReport("Content & Microcopy Review", finalState.contentMicrocopyOutput);
+    printAgentReport("Content UX Review", finalState.contentMicrocopyOutput);
   }
   if (SELECTED_REVIEW_AGENTS.includes("gestalt")) {
-    printAgentReport("Gestalt & Layout Logic Review", finalState.gestaltOutput);
+    printAgentReport("Risk Review", finalState.gestaltOutput);
   }
   if (SELECTED_REVIEW_AGENTS.includes("visualDesign")) {
-    printAgentReport("Visual Design Review", finalState.visualDesignOutput);
+    printAgentReport("Recommendations Review", finalState.visualDesignOutput);
   }
 
   // Print the clean canonical output from the synthesis agent

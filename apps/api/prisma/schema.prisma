@@ -149,6 +149,7 @@ model Finding {
   notes            String?
   escalationReason String?
   isAiGenerated    Boolean       @default(true)
+  bboxRefs         Json?         // Normalised bounding-boxes refs from AI grounding (array of {screenIndex, bbox:{x,y,width,height}})
   createdAt        DateTime      @default(now())
   updatedAt        DateTime      @updatedAt
 

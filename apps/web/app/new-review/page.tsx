@@ -1,8 +1,10 @@
 "use client";
 
-import { Suspense, useEffect, useMemo, useRef, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
-import { getReview, saveReviewDraft, startReview, getReviewProgress } from "@/lib/api";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+// import { processPdf } from "@/lib/pdfToPageFiles";
+import { processDocx } from "@/lib/docxToMarkdown";
+import { useRouter } from "next/navigation";
+import { createReview, saveAsset, startReview, getReviewProgress } from "@/lib/api";
 import { AppHeader } from "@/components/ui/AppHeader";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -15,7 +17,6 @@ import { Switch } from "@/components/ui/switch";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Sheet, SheetClose, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Progress } from "@/components/ui/progress";
 import { Slider } from "@/components/ui/slider";
 import {
@@ -25,91 +26,96 @@ import {
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
-const criteriaGroups = [
-  { group: "Usability", items: ["Nielsen's 10 heuristics", "Navigation logic", "Task flow efficiency", "Recognition over recall"] },
-  { group: "Accessibility", items: ["WCAG 2.2 AA conformance", "Keyboard navigation", "Screen reader interpretation", "Touch targets ≥ 44px"] },
-  { group: "Consistency", items: ["Design system tokens", "Component usage", "Spacing 8pt grid", "Iconography consistency"] },
-  { group: "Content UX", items: ["Microcopy clarity", "Error message quality", "Label precision", "Tone & voice"] },
-  { group: "Risk", items: ["Compliance (Section 508)", "Domain regulation (HIPAA, BFSI)", "Destructive action safety", "Data privacy disclosures"] },
-  { group: "Recommendations", items: ["Business impact estimate", "Effort estimate", "Acceptance criteria", "Linked principle"] },
+// ── Subcategory groups matching the mentor's checklist image ─────────────────
+const SUBCATEGORY_GROUPS = [
+  {
+    category: "Usability",
+    agent: "usability",
+    items: [
+      { id: "nielsensHeuristics",   label: "Nielsen's 10 heuristics" },
+      { id: "navigationLogic",      label: "Navigation logic" },
+      { id: "taskFlowEfficiency",   label: "Task flow efficiency" },
+      { id: "recognitionOverRecall",label: "Recognition over recall" },
+    ],
+  },
+  {
+    category: "Accessibility",
+    agent: "accessibility",
+    items: [
+      { id: "wcagConformance",            label: "WCAG 2.2 AA conformance" },
+      { id: "keyboardNavigation",         label: "Keyboard navigation" },
+      { id: "screenReaderInterpretation", label: "Screen reader interpretation" },
+      { id: "touchTargets",               label: "Touch targets \u2265 44px" },
+    ],
+  },
+  {
+    category: "Consistency",
+    agent: "cognitiveInteraction",
+    items: [
+      { id: "designSystemTokens",    label: "Design system tokens" },
+      { id: "componentUsage",        label: "Component usage" },
+      { id: "spacingGrid",           label: "Spacing 8pt grid" },
+      { id: "iconographyConsistency",label: "Iconography consistency" },
+    ],
+  },
+  {
+    category: "Content UX",
+    agent: "contentMicrocopy",
+    items: [
+      { id: "microcopyClarity",    label: "Microcopy clarity" },
+      { id: "errorMessageQuality", label: "Error message quality" },
+      { id: "labelPrecision",      label: "Label precision" },
+      { id: "toneAndVoice",        label: "Tone & voice" },
+    ],
+  },
+  {
+    category: "Risk",
+    agent: "gestalt",
+    items: [
+      { id: "section508Compliance",    label: "Compliance (Section 508)" },
+      { id: "domainRegulation",        label: "Domain regulation (HIPAA, BFSI)" },
+      { id: "destructiveActionSafety", label: "Destructive action safety" },
+      { id: "dataPrivacyDisclosures",  label: "Data privacy disclosures" },
+    ],
+  },
+  {
+    category: "Recommendations",
+    agent: "visualDesign",
+    items: [
+      { id: "businessImpactEstimate", label: "Business impact estimate" },
+      { id: "effortEstimate",         label: "Effort estimate" },
+      { id: "acceptanceCriteria",     label: "Acceptance criteria" },
+      { id: "linkedPrinciple",        label: "Linked principle" },
+    ],
+  },
 ] as const;
+
+type SubcategoryId = typeof SUBCATEGORY_GROUPS[number]["items"][number]["id"];
+
+/** Derive the unique backend agent names from any set of selected subcategory IDs */
+function getAgentsFromSubcategories(subcategoryIds: string[]): string[] {
+  const agents = new Set<string>();
+  for (const group of SUBCATEGORY_GROUPS) {
+    if (group.items.some((item) => subcategoryIds.includes(item.id))) {
+      agents.add(group.agent);
+    }
+  }
+  return Array.from(agents);
+}
 
 const REVIEW_TYPE_REQUIRED_CRITERIA: Record<string, string[]> = {
   full: [
-    "Nielsen's 10 heuristics",
-    "Navigation logic",
-    "Task flow efficiency",
-    "Recognition over recall",
-    "WCAG 2.2 AA conformance",
-    "Keyboard navigation",
-    "Screen reader interpretation",
-    "Touch targets ≥ 44px",
-    "Design system tokens",
-    "Component usage",
-    "Spacing 8pt grid",
-    "Iconography consistency",
-    "Microcopy clarity",
-    "Error message quality",
-    "Label precision",
-    "Tone & voice",
-    "Compliance (Section 508)",
-    "Data privacy disclosures",
-    "Domain regulation (HIPAA, BFSI)",
-    "Destructive action safety",
-    "Business impact estimate",
-    "Effort estimate",
-    "Acceptance criteria",
-    "Linked principle",
+    "nielsensHeuristics", "navigationLogic", "taskFlowEfficiency", "recognitionOverRecall",
+    "wcagConformance", "keyboardNavigation", "screenReaderInterpretation", "touchTargets",
+    "designSystemTokens", "componentUsage", "spacingGrid", "iconographyConsistency",
+    "microcopyClarity", "errorMessageQuality", "labelPrecision", "toneAndVoice",
+    "section508Compliance", "domainRegulation", "destructiveActionSafety", "dataPrivacyDisclosures",
+    "businessImpactEstimate", "effortEstimate", "acceptanceCriteria", "linkedPrinciple",
   ],
-  prd: [
-    "Nielsen's 10 heuristics",
-    "Navigation logic",
-    "Task flow efficiency",
-    "Recognition over recall",
-    "Microcopy clarity",
-    "Error message quality",
-    "Label precision",
-    "Domain regulation (HIPAA, BFSI)",
-    "Destructive action safety",
-    "Data privacy disclosures",
-    "Business impact estimate",
-    "Effort estimate",
-    "Acceptance criteria",
-    "Linked principle",
-  ],
-  a11y: [
-    "WCAG 2.2 AA conformance",
-    "Keyboard navigation",
-    "Screen reader interpretation",
-    "Touch targets ≥ 44px",
-    "Error message quality",
-    "Label precision",
-    "Compliance (Section 508)",
-    "Data privacy disclosures",
-    "Effort estimate",
-    "Acceptance criteria",
-    "Linked principle",
-  ],
-  ds: [
-    "Touch targets ≥ 44px",
-    "Design system tokens",
-    "Component usage",
-    "Spacing 8pt grid",
-    "Iconography consistency",
-    "Effort estimate",
-    "Acceptance criteria",
-    "Linked principle",
-  ],
-  content: [
-    "Microcopy clarity",
-    "Error message quality",
-    "Label precision",
-    "Tone & voice",
-    "Data privacy disclosures",
-    "Effort estimate",
-    "Acceptance criteria",
-    "Linked principle",
-  ],
+  prd: ["nielsensHeuristics", "navigationLogic", "taskFlowEfficiency", "designSystemTokens", "componentUsage"],
+  a11y: ["wcagConformance", "keyboardNavigation", "screenReaderInterpretation", "touchTargets", "section508Compliance"],
+  ds: ["designSystemTokens", "componentUsage", "spacingGrid", "iconographyConsistency"],
+  content: ["microcopyClarity", "errorMessageQuality", "labelPrecision", "toneAndVoice"],
 };
 
 const steps = ["Review Setup", "Add Inputs", "Select Criteria", "Configure AI", "Run Review"];
@@ -162,89 +168,30 @@ function toAlphaNumeric(value: string): string {
   return value.replace(/[^a-zA-Z0-9 ]/g, "").replace(/\s{2,}/g, " ");
 }
 
-function isWordDocument(file: File): boolean {
-  const lowerName = file.name.toLowerCase();
-  return (
-    file.type === "application/msword" ||
-    file.type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
-    lowerName.endsWith(".doc") ||
-    lowerName.endsWith(".docx")
-  );
-}
-
-function isPdfDocument(file: File): boolean {
-  const lowerName = file.name.toLowerCase();
-  return file.type === "application/pdf" || lowerName.endsWith(".pdf");
-}
-
-function isScreenshot(file: File): boolean {
-  return file.type.startsWith("image/");
-}
-
-function draftStageForStep(step: number): string {
-  const stageMap = ["draft:setup", "draft:inputs", "draft:criteria", "draft:configure", "draft:ready"];
-  return stageMap[Math.max(0, Math.min(stageMap.length - 1, step))];
-}
-
-function draftStepFromStage(stage?: string | null): number {
-  const stageMap: Record<string, number> = {
-    "draft:setup": 0,
-    "draft:inputs": 1,
-    "draft:criteria": 2,
-    "draft:configure": 3,
-    "draft:ready": 4,
-  };
-
-  return stage ? stageMap[stage] ?? 0 : 0;
-}
-
-type ReviewFile = {
-  id: string;
-  name: string;
-  type: string;
-  status: string;
-  file?: File;
-  previewUrl?: string;
-  blobUrl?: string;
-  contentText?: string;
-  sizeBytes?: number | null;
-  mimeType?: string;
-  isObjectUrl?: boolean;
-  storageRef?: string | null;
-};
-
-function NewReviewPageContent() {
-  const searchParams = useSearchParams();
-  const reviewId = searchParams.get("reviewId");
+export default function NewReviewPage() {
   const [step, setStep] = useState(0);
   const router = useRouter();
   const [name, setName] = useState("");
   const [product, setProduct] = useState("");
-  const [touchedFields, setTouchedFields] = useState<{ name: boolean; product: boolean }>({
-    name: false,
-    product: false,
-  });
   const [domain, setDomain] = useState("bfsi");
   const [reviewType, setReviewType] = useState("full");
   const [owner, setOwner] = useState("");
   const [figmaUrl, setFigmaUrl] = useState("");
   const [designSystemUrl, setDesignSystemUrl] = useState("");
   const [criteria, setCriteria] = useState<string[]>([]);
-  const [files, setFiles] = useState<ReviewFile[]>([]);
+  const [files, setFiles] = useState<Array<{ id: string; name: string; type: string; status: string; file?: File; previewUrl?: string }>>([]);
   const [contextText, setContextText] = useState("");
   const [depth, setDepth] = useState("standard");
   const [confidence, setConfidence] = useState([75]);
   const [running, setRunning] = useState(false);
   const [stageIdx, setStageIdx] = useState(0);
   const [currentStageLabel, setCurrentStageLabel] = useState("");
-  const [draftReviewId, setDraftReviewId] = useState<string | null>(null);
   const stageIdxRef = useRef(0);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const filesRef = useRef<ReviewFile[]>([]);
-  const isHydratingRef = useRef(true);
-  const lastSyncedSnapshotRef = useRef<string>("");
+  const filesRef = useRef<Array<{ id: string; name: string; type: string; status: string; file?: File; previewUrl?: string }>>([]);
   const [isDragging, setIsDragging] = useState(false);
+  const [isDocProcessing, setIsDocProcessing] = useState(false);
   const [isScreenshotModalOpen, setIsScreenshotModalOpen] = useState(false);
   const [activeScreenshotIndex, setActiveScreenshotIndex] = useState(0);
   const [isPdfModalOpen, setIsPdfModalOpen] = useState(false);
@@ -262,162 +209,22 @@ function NewReviewPageContent() {
 
   useEffect(() => {
     const requiredForType = REVIEW_TYPE_REQUIRED_CRITERIA[reviewType] ?? [];
-    setCriteria(requiredForType);
+    if (requiredForType.length === 0) return;
+
+    setCriteria((current) => {
+      const merged = Array.from(new Set([...requiredForType, ...current]));
+      return merged;
+    });
   }, [reviewType]);
 
   useEffect(() => {
     filesRef.current = files;
   }, [files]);
 
-  const draftSnapshot = useMemo(() => ({
-    reviewId: draftReviewId,
-    step,
-    name,
-    product,
-    touchedFields,
-    domain,
-    reviewType,
-    owner,
-    figmaUrl,
-    designSystemUrl,
-    criteria,
-    files: files.map((file) => ({
-      id: file.id,
-      name: file.name,
-      type: file.type,
-      status: file.status,
-      blobUrl: file.blobUrl,
-      contentText: file.contentText,
-      sizeBytes: file.sizeBytes,
-      mimeType: file.mimeType,
-      storageRef: file.storageRef,
-    })),
-    contextText,
-    depth,
-    confidence,
-  }), [
-    confidence,
-    contextText,
-    criteria,
-    designSystemUrl,
-    depth,
-    draftReviewId,
-    domain,
-    figmaUrl,
-    files,
-    name,
-    owner,
-    product,
-    reviewType,
-    step,
-    touchedFields,
-  ]);
-
-  const resetDraftForm = () => {
-    setDraftReviewId(null);
-    setStep(0);
-    setName("");
-    setProduct("");
-    setTouchedFields({ name: false, product: false });
-    setDomain("bfsi");
-    setReviewType("full");
-    setOwner("");
-    setFigmaUrl("");
-    setDesignSystemUrl("");
-    setCriteria(REVIEW_TYPE_REQUIRED_CRITERIA.full ?? []);
-    setFiles([]);
-    setContextText("");
-    setDepth("standard");
-    setConfidence([75]);
-    setRunning(false);
-    setStageIdx(0);
-    setCurrentStageLabel("");
-  };
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    let cancelled = false;
-    isHydratingRef.current = true;
-
-    const applyReview = (review: any) => {
-      setDraftReviewId(review.id ?? reviewId ?? null);
-      setStep(draftStepFromStage(review.stage));
-      setName(review.name ?? "");
-      setProduct(review.product ?? "");
-      setDomain(review.domain ?? "bfsi");
-      setReviewType(review.reviewType ?? "full");
-      setOwner(review.owner ?? "");
-      setCriteria(Array.isArray(review.criteria) ? review.criteria : []);
-      setDepth(review.depth ?? "standard");
-      setConfidence([review.confidenceThreshold ?? 75]);
-
-      const noteAsset = (review.assets ?? []).find((asset: any) => asset.name === "Context notes" || asset.mimeType === "text/plain");
-      const nextFiles: ReviewFile[] = (review.assets ?? [])
-        .filter((asset: any) => asset !== noteAsset && asset.mimeType !== "text/plain")
-        .map((asset: any) => {
-          const mimeType = asset.mimeType ?? "application/octet-stream";
-          const isImage = mimeType.startsWith("image/");
-          const isPdf = mimeType === "application/pdf";
-          return {
-            id: asset.id,
-            name: asset.name,
-            type: isImage ? "Screenshot" : isPdf ? "PDF" : "Word",
-            status: "Ready",
-            previewUrl: asset.blobUrl ?? undefined,
-            blobUrl: asset.blobUrl ?? undefined,
-            storageRef: asset.storageRef ?? asset.blobUrl ?? undefined,
-            contentText: asset.contentText ?? undefined,
-            sizeBytes: asset.sizeBytes ?? null,
-            mimeType,
-            isObjectUrl: false,
-          };
-        });
-
-      setFiles(nextFiles);
-
-      const content = noteAsset?.contentText ?? "";
-      setContextText(content);
-
-      const figmaMatch = content.match(/Figma URL:\s*(.+)/i);
-      const designMatch = content.match(/Design System URL:\s*(.+)/i);
-      setFigmaUrl(figmaMatch?.[1]?.trim() ?? "");
-      setDesignSystemUrl(designMatch?.[1]?.trim() ?? "");
-    };
-
-    if (!reviewId) {
-      resetDraftForm();
-      lastSyncedSnapshotRef.current = "";
-      isHydratingRef.current = false;
-      return () => {
-        cancelled = true;
-      };
-    }
-
-    getReview(reviewId)
-      .then((review) => {
-        if (cancelled || !review) return;
-        applyReview(review);
-      })
-      .catch(() => {
-        if (!cancelled) {
-          toast.error("Failed to load draft review");
-        }
-      })
-      .finally(() => {
-        if (!cancelled) {
-          isHydratingRef.current = false;
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [reviewId]);
-
   useEffect(() => {
     return () => {
       filesRef.current.forEach((file) => {
-        if (file.previewUrl && file.isObjectUrl) {
+        if (file.previewUrl) {
           URL.revokeObjectURL(file.previewUrl);
         }
       });
@@ -446,33 +253,111 @@ function NewReviewPageContent() {
     }
   }, [activePdfIndex, isPdfModalOpen, pdfFiles]);
 
-  const mapPickedFiles = (picked: File[]) => {
-    const allowedFiles = picked.filter((file) => isScreenshot(file) || isPdfDocument(file) || isWordDocument(file));
-    if (allowedFiles.length !== picked.length) {
-      toast.error("Only screenshots, PDFs, and Word documents are allowed.");
+  /**
+   * Converts a raw File array into file-list entries.
+   * PDFs are expanded page-by-page into PNG entries using pdfjs-dist so
+   * every downstream consumer (upload loop, workspace viewer, AI pipeline)
+   * treats them identically to uploaded screenshots.
+   */
+  const addFiles = async (picked: File[]) => {
+    const entries: Array<{ id: string; name: string; type: string; status: string; file?: File; previewUrl?: string }> = [];
+    const hasPdf = picked.some(
+      (f) => f.type === "application/pdf" || f.name.toLowerCase().endsWith(".pdf")
+    );
+    const hasDocx = picked.some(
+      (f) => f.type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" || f.name.toLowerCase().endsWith(".docx")
+    );
+    const needsDocProcessing = hasPdf || hasDocx;
+    const markdownChunks: string[] = [];
+
+    if (needsDocProcessing) {
+      setIsDocProcessing(true);
+      const label = hasPdf && hasDocx ? "PDF & Word document" : hasPdf ? "PDF" : "Word document";
+      toast.info(`Extracting text & images from ${label} — this may take a moment…`);
     }
 
-    return allowedFiles.map((file) => {
-      const screenshot = isScreenshot(file);
-      const pdf = isPdfDocument(file);
-      const word = isWordDocument(file);
-      return {
-        id: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
-        name: file.name,
-        type: screenshot ? "Screenshot" : pdf ? "PDF" : word ? "Word" : "PRD",
-        status: "Ready",
-        file,
-          previewUrl: screenshot || pdf ? URL.createObjectURL(file) : undefined,
-          mimeType: file.type,
-          isObjectUrl: screenshot || pdf,
-      };
-    });
+    try {
+      for (const file of picked) {
+        const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
+        const isDocx = file.type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" || file.name.toLowerCase().endsWith(".docx");
+        const isScreenshot = file.type.startsWith("image/");
+
+        // if (isPdf) {
+        //   // Extract text + images separately from each PDF.
+        //   try {
+        //     const result = await processPdf(file);
+        //     entries.push(...result.images);
+        //     if (result.markdown.trim()) {
+        //       markdownChunks.push(result.markdown);
+        //     }
+        //   } catch (err) {
+        //     console.error(`Failed to process PDF "${file.name}":`, err);
+        //     // Fall back to treating the PDF as a raw upload so the user isn't blocked.
+        //     entries.push({
+        //       id: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+        //       name: file.name,
+        //       type: "PDF",
+        //       status: "Ready",
+        //       file,
+        //       previewUrl: URL.createObjectURL(file),
+        //     });
+        //   }
+        if (isDocx) {
+          // Extract text + images separately from each Word document.
+          try {
+            const result = await processDocx(file);
+            entries.push(...result.images);
+            if (result.markdown.trim()) {
+              markdownChunks.push(result.markdown);
+            }
+          } catch (err) {
+            console.error(`Failed to process Word document "${file.name}":`, err);
+            // Fall back to treating the DOCX as a raw upload so the user isn't blocked.
+            entries.push({
+              id: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+              name: file.name,
+              type: "PRD",
+              status: "Ready",
+              file,
+            });
+          }
+        } else {
+          entries.push({
+            id: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+            name: file.name,
+            type: isScreenshot ? "Screenshot" : "PRD",
+            status: "Ready",
+            file,
+            previewUrl: isScreenshot ? URL.createObjectURL(file) : undefined,
+          });
+        }
+      }
+
+      setFiles((cur) => [...cur, ...entries]);
+
+      // Append extracted document markdown to the context text area
+      if (markdownChunks.length > 0) {
+        const newMarkdown = markdownChunks.join("\n\n");
+        setContextText((prev) => {
+          const separator = prev.trim() ? "\n\n" : "";
+          return prev + separator + newMarkdown;
+        });
+      }
+
+      if (needsDocProcessing) {
+        const imageCount = entries.filter((e) => e.type === "Screenshot").length;
+        const label = hasPdf && hasDocx ? "Documents" : hasPdf ? "PDF" : "Word document";
+        toast.success(`${label} processed — ${imageCount} image${imageCount === 1 ? "" : "s"} extracted, text added to flow notes.`);
+      }
+    } finally {
+      if (needsDocProcessing) setIsDocProcessing(false);
+    }
   };
 
   const removeFile = (fileId: string) => {
     setFiles((current) => {
       const fileToRemove = current.find((file) => file.id === fileId);
-      if (fileToRemove?.previewUrl && fileToRemove.isObjectUrl) {
+      if (fileToRemove?.previewUrl) {
         URL.revokeObjectURL(fileToRemove.previewUrl);
       }
       return current.filter((file) => file.id !== fileId);
@@ -518,8 +403,7 @@ function NewReviewPageContent() {
     e.preventDefault();
     setIsDragging(false);
     const picked = Array.from(e.dataTransfer.files ?? []);
-    const mapped = mapPickedFiles(picked);
-    setFiles((cur) => [...cur, ...mapped]);
+    void addFiles(picked);
   };
 
   const toggleCriterion = (c: string) =>
@@ -527,8 +411,7 @@ function NewReviewPageContent() {
 
   const handleFilePick = (e: React.ChangeEvent<HTMLInputElement>) => {
     const picked = Array.from(e.target.files ?? []);
-    const mapped = mapPickedFiles(picked);
-    setFiles((cur) => [...cur, ...mapped]);
+    void addFiles(picked);
   };
 
   const toBase64 = (f: File): Promise<string> =>
@@ -539,90 +422,54 @@ function NewReviewPageContent() {
       r.readAsDataURL(f);
     });
 
-  const buildDraftAssets = async () => {
-    const noteParts: string[] = [];
-    if (contextText.trim()) noteParts.push(contextText.trim());
-    if (figmaUrl.trim()) noteParts.push(`Figma URL: ${figmaUrl.trim()}`);
-    if (designSystemUrl.trim()) noteParts.push(`Design System URL: ${designSystemUrl.trim()}`);
-
-    const assetPayloads = await Promise.all(
-      filesRef.current.map(async (item) => {
-        if (item.file) {
-          const base64Data = await toBase64(item.file);
-          return {
-            name: item.name,
-            mimeType: item.file.type || item.mimeType || "application/octet-stream",
-            base64Data,
-            sizeBytes: item.file.size,
-          };
-        }
-
-        return {
-          name: item.name,
-          mimeType: item.mimeType || (item.type === "Screenshot" ? "image/png" : item.type === "PDF" ? "application/pdf" : "text/plain"),
-          blobUrl: item.storageRef ?? item.blobUrl ?? item.previewUrl,
-          contentText: item.contentText,
-          sizeBytes: item.sizeBytes ?? undefined,
-        };
-      })
-    );
-
-    if (noteParts.length > 0) {
-      assetPayloads.push({
-        name: "Context notes",
-        mimeType: "text/plain",
-        blobUrl: undefined,
-        contentText: noteParts.join("\n\n"),
-        sizeBytes: undefined,
-      });
-    }
-
-    return assetPayloads;
-  };
-
-  const persistDraft = async (quiet = false) => {
-    const fallbackName = name.trim() || "Untitled review";
-    const fallbackProduct = product.trim() || "Untitled product";
-    const saved = await saveReviewDraft({
-      reviewId: draftReviewId ?? reviewId ?? undefined,
-      name: fallbackName,
-      product: fallbackProduct,
-      domain,
-      reviewType,
-      owner,
-      criteria,
-      depth,
-      confidenceThreshold: confidence[0],
-      stage: draftStageForStep(step),
-      assets: await buildDraftAssets(),
-    });
-
-    const savedId = saved.id ?? saved.reviewId ?? draftReviewId ?? reviewId;
-    if (savedId) {
-      setDraftReviewId(savedId);
-      if (draftReviewId !== savedId || reviewId !== savedId) {
-        router.replace(`/new-review?reviewId=${savedId}`);
-      }
-    }
-
-    if (!quiet) {
-      toast.success("Draft saved");
-    }
-
-    return saved;
-  };
-
   const runReview = async () => {
     setRunning(true);
     setStageIdx(0);
     setCurrentStageLabel("Creating review…");
 
     try {
-      const reviewRes = await persistDraft();
+      // 1. Create the review record
+      const reviewRes = await createReview({
+        name,
+        product,
+        domain,
+        reviewType,
+        owner,
+        criteria,
+        depth,
+        confidenceThreshold: confidence[0],
+      });
       const reviewId = reviewRes.id || reviewRes.reviewId;
 
       if (!reviewId) {
         throw new Error("Did not receive a valid review ID from the server");
+      }
+
+      // 2. Upload assets
+      for (const f of files) {
+        if (f.file) {
+          const base64Data = await toBase64(f.file);
+          await saveAsset(reviewId, {
+            name: f.name,
+            mimeType: f.file.type || "application/octet-stream",
+            base64Data,
+            sizeBytes: f.file.size,
+          });
+        }
+      }
+
+      // Upload context text and external references if provided
+      const notes: string[] = [];
+      if (contextText.trim()) notes.push(contextText.trim());
+      if (figmaUrl.trim()) notes.push(`Figma URL: ${figmaUrl.trim()}`);
+      if (designSystemUrl.trim()) notes.push(`Design System URL: ${designSystemUrl.trim()}`);
+
+      if (notes.length > 0) {
+        await saveAsset(reviewId, {
+          name: "Context notes",
+          mimeType: "text/plain",
+          contentText: notes.join("\n\n"),
+        });
       }
 
       // 3. Start the pipeline
@@ -671,9 +518,6 @@ function NewReviewPageContent() {
   const validStep0 = name.trim().length > 0 && product.trim().length > 0;
   const validStep1 = files.length > 0;
   const validStep2 = criteria.length > 0;
-  const progressPercent = Math.round(((stageIdx + 1) / progressStages.length) * 100);
-  const hasNameError = touchedFields.name && name.trim().length === 0;
-  const hasProductError = touchedFields.product && product.trim().length === 0;
 
   return (
     <>
@@ -717,26 +561,11 @@ function NewReviewPageContent() {
               {step === 0 && (
                 <div className="grid gap-5 md:grid-cols-2">
                   <Field label="Review name" required help="Use a descriptive, scannable name.">
-                    <Input
-                      value={name}
-                      onChange={(e) => setName(toAlphaNumeric(e.target.value))}
-                      onBlur={() => setTouchedFields((current) => ({ ...current, name: true }))}
-                      className={cn(hasNameError && "border-red-500 focus-visible:ring-red-500")}
-                      aria-invalid={hasNameError}
-                      aria-required
-                    />
-                    {hasNameError && <p className="mt-1 text-xs text-red-600">Required</p>}
+                    <Input value={name} onChange={(e) => setName(toAlphaNumeric(e.target.value))} aria-required />
+                    {name.trim().length === 0 && <p className="mt-1 text-xs text-destructive">Required.</p>}
                   </Field>
                   <Field label="Product / application" required>
-                    <Input
-                      value={product}
-                      onChange={(e) => setProduct(toAlphaNumeric(e.target.value))}
-                      onBlur={() => setTouchedFields((current) => ({ ...current, product: true }))}
-                      className={cn(hasProductError && "border-red-500 focus-visible:ring-red-500")}
-                      aria-invalid={hasProductError}
-                      aria-required
-                    />
-                    {hasProductError && <p className="mt-1 text-xs text-red-600">Required</p>}
+                    <Input value={product} onChange={(e) => setProduct(toAlphaNumeric(e.target.value))} aria-required />
                   </Field>
                   <Field label="Business domain">
                     <Select value={domain} onValueChange={setDomain}>
@@ -783,24 +612,36 @@ function NewReviewPageContent() {
                   <div
                     className={cn(
                       "rounded-xl border-2 border-dashed p-8 text-center transition cursor-pointer",
-                      isDragging
+                      isDocProcessing
+                        ? "border-primary/40 bg-primary/5 cursor-wait"
+                        : isDragging
                         ? "border-primary bg-primary/10"
                         : "border-border bg-secondary/40 hover:border-primary/40 hover:bg-secondary/70"
                     )}
-                    onClick={() => fileInputRef.current?.click()}
-                    onDragOver={handleDragOver}
-                    onDragLeave={handleDragLeave}
-                    onDrop={handleDrop}
+                    onClick={() => !isDocProcessing && fileInputRef.current?.click()}
+                    onDragOver={!isDocProcessing ? handleDragOver : undefined}
+                    onDragLeave={!isDocProcessing ? handleDragLeave : undefined}
+                    onDrop={!isDocProcessing ? handleDrop : undefined}
                   >
-                    <Upload className="mx-auto h-7 w-7 text-muted-foreground" aria-hidden="true" />
-                    <p className="mt-3 text-sm font-medium">Drag & drop screens, flows or PRDs</p>
-                    <p className="text-xs text-muted-foreground">PNG, JPG, PDF, DOC, DOCX — up to 20 MB each</p>
-                    <Button variant="outline" size="sm" className="mt-3 min-h-9" type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); fileInputRef.current?.click(); }}>Browse files</Button>
+                    {isDocProcessing ? (
+                      <>
+                        <svg className="mx-auto h-7 w-7 animate-spin text-primary" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" aria-hidden="true"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>
+                        <p className="mt-3 text-sm font-medium text-primary">Extracting text & images…</p>
+                        <p className="text-xs text-muted-foreground">Please wait while text and images are separated</p>
+                      </>
+                    ) : (
+                      <>
+                        <Upload className="mx-auto h-7 w-7 text-muted-foreground" aria-hidden="true" />
+                        <p className="mt-3 text-sm font-medium">Drag & drop screens, flows or PRDs</p>
+                        <p className="text-xs text-muted-foreground">PNG, JPG, PDF, DOCX — up to 20 MB each</p>
+                        <Button variant="outline" size="sm" className="mt-3 min-h-9" type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); fileInputRef.current?.click(); }}>Browse files</Button>
+                      </>
+                    )}
                     <input
                       ref={fileInputRef}
                       type="file"
                       multiple
-                      accept="image/*,.pdf,.doc,.docx"
+                      accept="image/*,.pdf,.doc,.docx,.txt"
                       className="hidden"
                       onChange={handleFilePick}
                     />
@@ -885,33 +726,79 @@ function NewReviewPageContent() {
               )}
 
               {step === 2 && (
-                <div className="space-y-5">
-                  {criteriaGroups.map((g) => (
-                    <div key={g.group}>
-                      <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">{g.group}</p>
-                      <div className="grid gap-2 md:grid-cols-2">
-                        {g.items.map((c) => {
-                          const active = criteria.includes(c);
-                          return (
-                            <button
-                              type="button"
-                              key={c}
-                              onClick={() => toggleCriterion(c)}
-                              className={cn(
-                                "flex min-h-[44px] items-start gap-3 rounded-lg border p-3 text-left transition",
-                                active ? "border-primary bg-primary/5" : "border-border bg-card hover:bg-secondary/60",
-                              )}
-                              aria-pressed={active}
-                            >
-                              <Checkbox checked={active} className="mt-0.5" tabIndex={-1} />
-                              <span className="text-sm font-medium">{c}</span>
-                            </button>
-                          );
-                        })}
+                <div className="space-y-6">
+                  {SUBCATEGORY_GROUPS.map((group) => {
+                    const groupItems = group.items;
+                    const allSelected = groupItems.every((item) => criteria.includes(item.id));
+                    const someSelected = groupItems.some((item) => criteria.includes(item.id));
+
+                    const toggleGroup = () => {
+                      if (allSelected) {
+                        // Deselect all in group
+                        setCriteria((cur) => cur.filter((c) => !groupItems.some((item) => item.id === c)));
+                      } else {
+                        // Select all in group
+                        setCriteria((cur) => Array.from(new Set([...cur, ...groupItems.map((item) => item.id)])));
+                      }
+                    };
+
+                    return (
+                      <div key={group.category}>
+                        {/* Category header with select-all toggle */}
+                        <button
+                          type="button"
+                          onClick={toggleGroup}
+                          className="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-widest text-muted-foreground hover:text-foreground transition"
+                        >
+                          <span
+                            className={cn(
+                              "flex h-3.5 w-3.5 items-center justify-center rounded-sm border transition",
+                              allSelected
+                                ? "border-primary bg-primary text-primary-foreground"
+                                : someSelected
+                                ? "border-primary bg-primary/30"
+                                : "border-border bg-card"
+                            )}
+                          >
+                            {allSelected && <Check className="h-2.5 w-2.5" />}
+                            {someSelected && !allSelected && (
+                              <span className="block h-0.5 w-2 rounded-full bg-primary" />
+                            )}
+                          </span>
+                          {group.category}
+                        </button>
+
+                        {/* Subcategory items grid — 2 columns matching the mentor image */}
+                        <div className="grid gap-2 sm:grid-cols-2">
+                          {groupItems.map((item) => {
+                            const active = criteria.includes(item.id);
+                            return (
+                              <button
+                                type="button"
+                                key={item.id}
+                                onClick={() => toggleCriterion(item.id)}
+                                className={cn(
+                                  "flex items-center gap-3 rounded-lg border px-4 py-3 text-left text-sm transition hover:bg-secondary/60",
+                                  active
+                                    ? "border-primary bg-primary/5 hover:bg-primary/10"
+                                    : "border-border bg-card"
+                                )}
+                                aria-pressed={active}
+                              >
+                                <Checkbox checked={active} className="shrink-0" tabIndex={-1} />
+                                <span className={cn("font-medium", active ? "text-foreground" : "text-muted-foreground")}>
+                                  {item.label}
+                                </span>
+                              </button>
+                            );
+                          })}
+                        </div>
                       </div>
-                    </div>
-                  ))}
-                  {criteria.length === 0 && <p className="text-xs text-destructive">Select at least one criterion to continue.</p>}
+                    );
+                  })}
+                  {criteria.length === 0 && (
+                    <p className="text-xs text-destructive">Select at least one criterion to continue.</p>
+                  )}
                 </div>
               )}
 
@@ -931,7 +818,7 @@ function NewReviewPageContent() {
                     <RadioGroup value={depth} onValueChange={setDepth} className="grid grid-cols-3 gap-2">
                       {["quick", "standard", "deep"].map((v) => (
                         <Label key={v} className="flex min-h-[44px] cursor-pointer items-center gap-2 rounded-lg border border-border bg-card p-3 capitalize has-[:checked]:border-primary has-[:checked]:bg-primary/5">
-                          <RadioGroupItem value={v} className="-translate-x-0.5" />
+                          <RadioGroupItem value={v} />
                           <span className="text-sm">{v}</span>
                         </Label>
                       ))}
@@ -979,16 +866,9 @@ function NewReviewPageContent() {
                         <Sparkles className="h-5 w-5" aria-hidden="true" />
                       </div>
                       <h3 className="mt-3 text-base font-semibold">Ready to run AI review</h3>
-                      <p className="mt-1 text-sm text-muted-foreground">{files.length} inputs · {criteria.length} criteria · {depth} depth · ~2–4 min estimated</p>
+                      <p className="mt-1 text-sm text-muted-foreground">{files.length} inputs · {criteria.length} subcategories · {getAgentsFromSubcategories(criteria).length} agents · {depth} depth · ~2–4 min estimated</p>
                       <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
-                        <Button size="lg" variant="outline" className="min-h-11 bg-card hover:bg-card/90" onClick={async () => {
-                          try {
-                            await persistDraft();
-                          } catch (error) {
-                            toast.error("Failed to save draft");
-                            console.error(error);
-                          }
-                        }}>
+                        <Button size="lg" variant="outline" className="min-h-11" onClick={() => toast.success("Draft saved")}>
                           <Save className="mr-1.5 h-4 w-4" aria-hidden="true" />Save draft
                         </Button>
                         <Button size="lg" className="min-h-11" onClick={runReview}>
@@ -998,14 +878,11 @@ function NewReviewPageContent() {
                     </div>
                   ) : (
                     <div className="space-y-3 rounded-xl border border-border bg-card p-5" role="status" aria-live="polite">
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="flex items-center gap-2">
-                          <Loader2 className="h-4 w-4 animate-spin text-primary" aria-hidden="true" />
-                          <p className="text-sm font-medium">{currentStageLabel || "AI agent at work…"}</p>
-                        </div>
-                        <p className="text-xs font-medium text-muted-foreground">{progressPercent}%</p>
+                      <div className="flex items-center gap-2">
+                        <Loader2 className="h-4 w-4 animate-spin text-primary" aria-hidden="true" />
+                        <p className="text-sm font-medium">{currentStageLabel || "AI agent at work…"}</p>
                       </div>
-                      <Progress value={progressPercent} className="h-1.5" />
+                      <Progress value={((stageIdx + 1) / progressStages.length) * 100} className="h-1.5" />
                       <ul className="mt-2 space-y-1.5">
                         {progressStages.map((s, i) => (
                           <li key={s} className="flex items-center gap-2 text-sm">
@@ -1041,15 +918,31 @@ function NewReviewPageContent() {
             {criteria.length > 0 && (
               <Card className="shadow-card">
                 <CardHeader className="pb-2"><CardTitle className="text-sm">Selected criteria</CardTitle></CardHeader>
-                <CardContent className="flex flex-wrap gap-1.5">
-                  {criteria.map((c) => (
-                    <Badge key={c} variant="secondary" className="gap-1 pl-2 pr-1 text-[10px]">
-                      {c}
-                      <button type="button" onClick={() => toggleCriterion(c)} className="ml-1 rounded-full p-0.5 hover:bg-foreground/10" aria-label={`Remove ${c}`}>
-                        <X className="h-3 w-3" />
-                      </button>
-                    </Badge>
-                  ))}
+                <CardContent className="space-y-1.5">
+                  {SUBCATEGORY_GROUPS.map((group) => {
+                    const selectedInGroup = group.items.filter((item) => criteria.includes(item.id));
+                    if (selectedInGroup.length === 0) return null;
+                    return (
+                      <div key={group.category}>
+                        <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{group.category}</p>
+                        <div className="mt-1 flex flex-wrap gap-1">
+                          {selectedInGroup.map((item) => (
+                            <Badge key={item.id} variant="secondary" className="gap-1 pl-2 pr-1 text-[10px]">
+                              {item.label}
+                              <button
+                                type="button"
+                                onClick={() => toggleCriterion(item.id)}
+                                className="ml-1 rounded-full p-0.5 hover:bg-foreground/10"
+                                aria-label={`Remove ${item.label}`}
+                              >
+                                <X className="h-3 w-3" />
+                              </button>
+                            </Badge>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </CardContent>
               </Card>
             )}
@@ -1058,16 +951,9 @@ function NewReviewPageContent() {
 
         {/* Navigation */}
         {!running && step < steps.length - 1 && (
-          <div className="fixed bottom-0 left-0 right-0 z-20 flex items-end px-4 pb-2 pt-1 md:left-[var(--sidebar-width)] md:px-6 md:peer-data-[state=collapsed]:left-[var(--sidebar-width-icon)]">
-            <div className="flex w-full translate-y-3 justify-end gap-2 rounded-xl border border-border bg-card p-2 shadow-card">
-              <Button variant="outline" className="min-h-10" onClick={async () => {
-                try {
-                  await persistDraft();
-                } catch (error) {
-                  toast.error("Failed to save draft");
-                  console.error(error);
-                }
-              }}>
+          <div className="fixed bottom-0 left-0 right-0 z-20 flex justify-end px-4 py-3 md:left-[var(--sidebar-width)] md:px-6 md:peer-data-[state=collapsed]:left-[var(--sidebar-width-icon)]">
+            <div className="flex gap-2">
+              <Button variant="outline" className="min-h-10" onClick={() => toast.success("Draft saved")}>
                 <Save className="mr-1.5 h-4 w-4" aria-hidden="true" />Save draft
               </Button>
               <Button
@@ -1082,33 +968,26 @@ function NewReviewPageContent() {
         )}
       </div>
 
-      <Sheet open={isScreenshotModalOpen} onOpenChange={setIsScreenshotModalOpen}>
-        <SheetContent side="right" className="w-[92vw] max-w-none sm:w-[58vw] sm:max-w-[58vw] p-0 [&>button]:hidden">
-          <SheetHeader className="border-b border-border px-4 py-3">
+      <Dialog open={isScreenshotModalOpen} onOpenChange={setIsScreenshotModalOpen}>
+        <DialogContent className="max-w-4xl p-0 overflow-hidden">
+          <DialogHeader className="px-4 py-3 border-b border-border">
             <div className="flex items-center justify-between gap-3">
-              <SheetTitle className="text-sm font-medium">
+              <DialogTitle className="text-sm font-medium">
                 Screenshots ({screenshotFiles.length})
-              </SheetTitle>
-              <div className="flex items-center gap-2">
-                {screenshotFiles.length > 0 && (
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    className="border-destructive/30 text-destructive hover:bg-destructive/10 hover:text-destructive"
-                    onClick={removeActiveScreenshotFromModal}
-                  >
-                    <Trash2 className="mr-1.5 h-4 w-4" />Remove
-                  </Button>
-                )}
-                <SheetClose asChild>
-                  <Button type="button" variant="ghost" size="icon" className="h-8 w-8" aria-label="Close screenshots preview">
-                    <X className="h-4 w-4" />
-                  </Button>
-                </SheetClose>
-              </div>
+              </DialogTitle>
+              {screenshotFiles.length > 0 && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="border-destructive/30 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                  onClick={removeActiveScreenshotFromModal}
+                >
+                  <Trash2 className="mr-1.5 h-4 w-4" />Remove
+                </Button>
+              )}
             </div>
-          </SheetHeader>
+          </DialogHeader>
 
           {screenshotFiles.length > 0 && (
             <div className="space-y-3 p-4">
@@ -1172,8 +1051,8 @@ function NewReviewPageContent() {
               )}
             </div>
           )}
-        </SheetContent>
-      </Sheet>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={isPdfModalOpen} onOpenChange={setIsPdfModalOpen}>
         <DialogContent className="max-w-5xl p-0 overflow-hidden">
@@ -1261,14 +1140,6 @@ function NewReviewPageContent() {
         </DialogContent>
       </Dialog>
     </>
-  );
-}
-
-export default function NewReviewPage() {
-  return (
-    <Suspense fallback={<div className="flex-1 flex items-center justify-center"><p className="text-muted-foreground text-sm">Loading…</p></div>}>
-      <NewReviewPageContent />
-    </Suspense>
   );
 }
 

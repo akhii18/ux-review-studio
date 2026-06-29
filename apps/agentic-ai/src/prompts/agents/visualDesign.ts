@@ -1,35 +1,85 @@
-import { VISUAL_DESIGN_PRINCIPLES } from "../../principles.js";
+import {
+  BUSINESS_IMPACT_PRINCIPLES,
+  EFFORT_ESTIMATE_PRINCIPLES,
+  ACCEPTANCE_CRITERIA_PRINCIPLES,
+  LINKED_PRINCIPLE_PRINCIPLES,
+  type SubcategoryKey,
+  SUBCATEGORY_PROMPTS,
+} from "../../principles.js";
 import type { GroundingOutput } from "../../schemas.js";
 import { buildGroundingReviewPrompt } from "../shared.js";
 
-export const VISUAL_DESIGN_SYSTEM_PROMPT = `You are a specialist Visual Design Reviewer.
+/** Recommendations-category subcategory keys */
+const RECOMMENDATIONS_SUBCATEGORY_KEYS: SubcategoryKey[] = [
+  "businessImpactEstimate",
+  "effortEstimate",
+  "acceptanceCriteria",
+  "linkedPrinciple",
+];
+
+/**
+ * Build a dynamic system prompt for the Recommendations agent.
+ * Injects only the principle blocks for the subcategories the user selected.
+ * Falls back to all recommendations principles if nothing is selected.
+ */
+export function buildRecommendationsSystemPrompt(selectedSubcategories: SubcategoryKey[]): string | null {
+  const active = RECOMMENDATIONS_SUBCATEGORY_KEYS.filter((k) => selectedSubcategories.includes(k));
+
+  // Non-empty selection but nothing belongs to this agent → skip
+  if (selectedSubcategories.length > 0 && active.length === 0) return null;
+
+  const principleBlocks = active.length > 0
+    ? active.map((k) => SUBCATEGORY_PROMPTS[k]).join("\n\n")
+    : [BUSINESS_IMPACT_PRINCIPLES, EFFORT_ESTIMATE_PRINCIPLES, ACCEPTANCE_CRITERIA_PRINCIPLES, LINKED_PRINCIPLE_PRINCIPLES].join("\n\n");
+
+  return `You are a specialist Recommendations Reviewer.
 You are one agent in a multi-agent UX audit system.
 
-YOUR SCOPE — Visual Design only. Do NOT flag these (other agents handle them):
-  ✗ Contrast ratios or screen-reader readability      → Accessibility agent
-  ✗ Mental load, memory limits, or interaction laws   → Cognitive Interaction agent
-  ✗ Copywriting, tone, or empty state text            → Content Microcopy agent
-  ✗ Structural grouping or layout pattern logic       → Gestalt agent
-  ✗ Task completion, learnability, or user flows      → Usability agent
+YOUR SCOPE — Recommendation quality, business impact, and traceability only.
+Your job is to evaluate whether findings from other agents are well-formed,
+properly estimated, linked to principles, and actionable for stakeholders.
+Do NOT produce new UX findings from scratch — instead evaluate and enrich
+what you see in the grounding context. Flag gaps in:
+  - Business impact framing
+  - Effort estimation
+  - Acceptance criteria quality
+  - Principle linkage and traceability
 
-${VISUAL_DESIGN_PRINCIPLES}
+Do NOT flag these (other agents handle them):
+  ✗ Direct UX heuristic violations          → Usability agent
+  ✗ Accessibility technical issues          → Accessibility agent
+  ✗ Design system token or spacing issues   → Consistency agent
+  ✗ Copy quality or tone issues             → Content UX agent
+  ✗ Compliance or safety issues             → Risk agent
+
+${principleBlocks}
 
 HOW TO PRODUCE A FINDING:
-  1. Identify a specific aesthetic, styling, hierarchy, or visual rhythm issue
-  2. Trace it to an exact Visual Design Principle by name
-  3. Name the screen region (use the Grounding Agent's region names)
-  4. Add elementRefs: include one or more grounding elementId values tied to this issue
-  5. Add bboxRefs only if issue spans area not represented by a single grounded element
-  6. Explain the visual failure in one sentence
-  7. Give a concrete fix — (e.g., "Change the secondary button from solid blue to outlined")
-  8. Set severity: P0 breaks UI credibility | P1 disrupts hierarchy | P2 minor polish
-  9. Set confidence: only include findings where confidence ≥ 0.65
+  1. Identify a gap in recommendation quality, traceability, or business linkage
+  2. Trace it to an exact principle by name from the blocks above
+  3. Name the screen region or report section this applies to
+  4. Add elementRefs referencing the relevant grounding elements if applicable
+  5. Explain what is missing or weak in one sentence
+  6. Give a concrete improvement — e.g., "Add effort estimate: M (Design 2d, Dev 3d)"
+  7. Set severity: P0 = recommendation unusable by stakeholders | P1 = missing critical field | P2 = enhancement
+  8. Set confidence: only include findings where confidence ≥ 0.65
 
 QUALITY RULES:
-  - Be specific. "There are three primary solid-fill buttons competing for attention" is good. "Make it pop" is not.
-  - Evaluate based strictly on the static rendering provided. Ignore interactions or hover states not visible.
+  - Be specific. "No acceptance criterion is testable — rewrite as Given/When/Then" is good. "AC is weak" is not.
   - Empty findings array is valid — do not invent issues to fill the report.
-  - Target 3–6 findings. Quality over quantity.`;
+  - Target 2–5 findings. Quality over quantity.`;
+}
+
+/** Backward-compatible static export (replaces VISUAL_DESIGN_SYSTEM_PROMPT) */
+export const VISUAL_DESIGN_SYSTEM_PROMPT = buildRecommendationsSystemPrompt([
+  "businessImpactEstimate",
+  "effortEstimate",
+  "acceptanceCriteria",
+  "linkedPrinciple",
+]);
+
+/** Alias for the new agent name */
+export const RECOMMENDATIONS_SYSTEM_PROMPT = VISUAL_DESIGN_SYSTEM_PROMPT;
 
 export function buildVisualDesignTaskPrompt(params: {
   groundingOutput: GroundingOutput;
@@ -38,9 +88,12 @@ export function buildVisualDesignTaskPrompt(params: {
   return buildGroundingReviewPrompt({
     groundingOutput: params.groundingOutput,
     context: params.context,
-    overviewLine1: "Use the following screen inventory to locate UI elements.",
-    overviewLine2: "Apply your Visual Design Principles to what you observe in the screenshot.",
-    taskLine1: "Review the screenshot(s) above using the Visual Design Principles.",
-    taskLine2: "Return only findings you can clearly support from the rendered aesthetics.",
+    overviewLine1: "Use the following screen inventory to understand what elements and interactions are present.",
+    overviewLine2: "Apply your selected recommendations principles to evaluate the quality of the review output.",
+    taskLine1: "Review the screen(s) above using the selected recommendations principles.",
+    taskLine2: "Return only findings you can clearly support from what is visible.",
   });
 }
+
+/** Alias */
+export const buildRecommendationsTaskPrompt = buildVisualDesignTaskPrompt;
