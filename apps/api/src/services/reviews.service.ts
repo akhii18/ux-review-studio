@@ -253,7 +253,7 @@ export const ReviewsService = {
 
     // Fire pipeline asynchronously — do not await
     setImmediate(() => {
-      import("./ai/orchestrator.js").then(({ runReviewPipeline }) => {
+      import("./ai/agentic.js").then(({ runReviewPipeline }) => {
         runReviewPipeline(reviewId).catch((err: unknown) => {
           console.error("Pipeline failed for review", reviewId, err);
         });

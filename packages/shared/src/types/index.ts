@@ -51,6 +51,7 @@ export interface Finding {
   notes?: string;
   escalationReason?: string;
   isAiGenerated: boolean;
+  bboxRefs?: Array<{ screenIndex: number; bbox: { x: number; y: number; width: number; height: number } }>;
   createdAt: string;
   updatedAt: string;
 }

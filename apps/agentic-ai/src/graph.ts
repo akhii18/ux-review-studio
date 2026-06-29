@@ -4,16 +4,19 @@
  * Wires the agents into a LangGraph graph and compiles it.
  *
  * Flow:
- *   START → grounding → usability             \
- *                     ↘ accessibility          \
- *                     ↘ cognitiveInteraction    ├→ synthesis → END
- *                     ↘ contentMicrocopy       /
- *                     ↘ gestalt               /
- *                     ↘ visualDesign         /
- *                       synthesis → boundingBoxes → END
+ *   START → grounding → usability               \
+ *                       → accessibility            \
+ *                       → consistency (cognitive)   ├→ synthesis → END
+ *                       → contentUX (microcopy)    /
+ *                       → risk (gestalt)           /
+ *                       → recommendations (visual)/
  *
  *   All 6 UX review agents run in parallel after grounding,
  *   then fan-in to synthesis which deduplicates and merges.
+ *
+ * Note: Internal node names are unchanged for backward compatibility.
+ * New display names: cognitiveInteraction=Consistency, contentMicrocopy=Content UX,
+ * gestalt=Risk, visualDesign=Recommendations.
  */
 
 import { StateGraph, START, END } from "@langchain/langgraph";
@@ -26,7 +29,6 @@ import { contentMicrocopyAgent } from "./agents/contentMicrocopy.js";
 import { gestaltAgent } from "./agents/gestalt.js";
 import { visualDesignAgent } from "./agents/visualDesign.js";
 import { synthesisAgent } from "./agents/synthesis.js";
-import { boundingBoxesAgent } from "./agents/boundingBoxes.js";
 
 export const REVIEW_AGENT_NAMES = [
   "usability",
@@ -48,8 +50,7 @@ export function buildGraph(options?: { selectedAgents?: ReviewAgentName[] }) {
   const graph = new StateGraph(GraphState)
     // Register always-on nodes.
     .addNode("grounding",            groundingAgent)
-    .addNode("synthesis",            synthesisAgent)
-    .addNode("boundingBoxes",        boundingBoxesAgent);
+    .addNode("synthesis",            synthesisAgent);
 
   // LangGraph's compile-time node-name inference is strict for dynamic graphs.
   // We build edges dynamically at runtime based on user selection.
@@ -100,8 +101,7 @@ export function buildGraph(options?: { selectedAgents?: ReviewAgentName[] }) {
     g.addEdge("grounding", "synthesis");
   }
 
-  g.addEdge("synthesis", "boundingBoxes");
-  g.addEdge("boundingBoxes", END);
+  g.addEdge("synthesis", END);
 
   return g.compile();
 }

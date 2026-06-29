@@ -11,19 +11,19 @@
  *
  * Data flow in our 7-agent graph:
  *
- * run.ts sets:           screenshots, context
- * grounding writes:      groundingOutput
+ * run.ts sets:              screenshots, context, selectedPrinciples
+ * grounding writes:         groundingOutput
  * * [The following 6 run in PARALLEL after grounding completes]
- * usability reads:       screenshots + groundingOutput  →  writes nielsenOutput
- * accessibility reads:   screenshots + groundingOutput  →  writes accessibilityOutput
- * cognitiveInteraction:  screenshots + groundingOutput  →  writes cognitiveInteractionOutput
- * contentMicrocopy:      screenshots + groundingOutput  →  writes contentMicrocopyOutput
- * gestalt:               screenshots + groundingOutput  →  writes gestaltOutput
- * visualDesign:          screenshots + groundingOutput  →  writes visualDesignOutput
+ * usability reads:          screenshots + groundingOutput  →  writes nielsenOutput
+ * accessibility reads:      screenshots + groundingOutput  →  writes accessibilityOutput
+ * consistency (cognitive):  screenshots + groundingOutput  →  writes cognitiveInteractionOutput
+ * contentUX (microcopy):    screenshots + groundingOutput  →  writes contentMicrocopyOutput
+ * risk (gestalt):           screenshots + groundingOutput  →  writes gestaltOutput
+ * recommendations (visual): screenshots + groundingOutput  →  writes visualDesignOutput
  */
 
 import { Annotation } from "@langchain/langgraph";
-import type { PrincipleFamilyKey } from "./principles.js";
+import type { SubcategoryKey } from "./principles.js";
 import type { 
   GroundingOutput, 
   NielsenOutput, 
@@ -35,13 +35,17 @@ import type {
   SynthesisOutput,
   ScreenMetadata,
   GeometryOutput,
-  BoundingBoxReviewOutput,
 } from "./schemas.js";
 
 // replace = new value always overwrites; safe because each field has one writer
 const replace = <T>(_old: T, incoming: T): T => incoming;
 
-export type SelectedPrinciples = Partial<Record<PrincipleFamilyKey, true | string[]>>;
+/**
+ * Maps each subcategory key to a boolean indicating whether the user
+ * has selected it for the current review. Agents use this to determine
+ * which principle blocks to inject into their system prompts.
+ */
+export type SelectedPrinciples = Partial<Record<SubcategoryKey, boolean>>;
 
 export const GraphState = Annotation.Root({
   // ── Set once by run.ts, never changed ──────────────────────────────────────
@@ -116,14 +120,6 @@ export const GraphState = Annotation.Root({
   // The clean, deduplicated output that all downstream steps should consume.
   // Raw per-agent outputs above are preserved for debugging / audit purposes.
   synthesisOutput: Annotation<SynthesisOutput | null>({
-    reducer: replace,
-    default: () => null,
-  }),
-
-  // ── Written by post-synthesis bounding-box review agent ──────────────────
-  // Human-review-ready geometry and issue/fix data. Rendering remains
-  // deterministic and happens after the graph completes.
-  boundingBoxReviewOutput: Annotation<BoundingBoxReviewOutput | null>({
     reducer: replace,
     default: () => null,
   }),

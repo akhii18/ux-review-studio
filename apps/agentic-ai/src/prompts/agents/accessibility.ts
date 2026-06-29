@@ -1,22 +1,52 @@
-import { POUR_PRINCIPLES } from "../../principles.js";
+import {
+  POUR_PRINCIPLES,
+  KEYBOARD_NAVIGATION_PRINCIPLES,
+  SCREEN_READER_PRINCIPLES,
+  TOUCH_TARGETS_PRINCIPLES,
+  type SubcategoryKey,
+  SUBCATEGORY_PROMPTS,
+} from "../../principles.js";
 import type { GroundingOutput } from "../../schemas.js";
 import { buildGroundingReviewPrompt } from "../shared.js";
 
-export const ACCESSIBILITY_SYSTEM_PROMPT = `You are a specialist WCAG Accessibility Reviewer.
+/** Accessibility-category subcategory keys */
+const ACCESSIBILITY_SUBCATEGORY_KEYS: SubcategoryKey[] = [
+  "wcagConformance",
+  "keyboardNavigation",
+  "screenReaderInterpretation",
+  "touchTargets",
+];
+
+/**
+ * Build a dynamic system prompt for the Accessibility agent.
+ * Injects only the principle blocks for the subcategories the user selected.
+ * Falls back to all accessibility principles if nothing is selected.
+ */
+export function buildAccessibilitySystemPrompt(selectedSubcategories: SubcategoryKey[]): string | null {
+  const active = ACCESSIBILITY_SUBCATEGORY_KEYS.filter((k) => selectedSubcategories.includes(k));
+
+  // Non-empty selection but nothing belongs to this agent → skip
+  if (selectedSubcategories.length > 0 && active.length === 0) return null;
+
+  const principleBlocks = active.length > 0
+    ? active.map((k) => SUBCATEGORY_PROMPTS[k]).join("\n\n")
+    : [POUR_PRINCIPLES, KEYBOARD_NAVIGATION_PRINCIPLES, SCREEN_READER_PRINCIPLES, TOUCH_TARGETS_PRINCIPLES].join("\n\n");
+
+  return `You are a specialist WCAG Accessibility Reviewer.
 You are one agent in a multi-agent UX audit system.
 
 YOUR SCOPE — Accessibility only. Do NOT flag these (other agents handle them):
-  ✗ Mental load, memory limits, or interaction laws   → Cognitive Interaction agent
-  ✗ Copywriting, tone, or empty state text            → Content Microcopy agent
-  ✗ Structural grouping or layout pattern logic       → Gestalt agent
+  ✗ Design tokens, spacing grid, or component usage   → Consistency agent
+  ✗ Copywriting, tone, or empty state text            → Content UX agent
   ✗ Task completion, learnability, or user flows      → Usability agent
-  ✗ Aesthetics, specific colors, or UI styling        → Visual Design agent
+  ✗ Compliance, safety, or privacy concerns           → Risk agent
+  ✗ Impact estimates, effort, or acceptance criteria  → Recommendations agent
 
-${POUR_PRINCIPLES}
+${principleBlocks}
 
 HOW TO PRODUCE A FINDING:
   1. Identify a specific, visible accessibility problem on screen
-  2. Trace it to an exact POUR principle by name
+  2. Trace it to an exact principle by name from the blocks above
   3. Name the screen region (use the Grounding Agent's region names)
   4. Add elementRefs: include one or more grounding elementId values tied to this issue
   5. Add bboxRefs only if issue spans area not represented by a single grounded element
@@ -35,6 +65,15 @@ QUALITY RULES:
     keyboard order). Note these limitations in coverageNote.
   - Empty findings array is valid — do not invent issues to fill the report.
   - Target 3–6 findings. Quality over quantity.`;
+}
+
+/** Backward-compatible static export used when no subcategory context is available. */
+export const ACCESSIBILITY_SYSTEM_PROMPT = buildAccessibilitySystemPrompt([
+  "wcagConformance",
+  "keyboardNavigation",
+  "screenReaderInterpretation",
+  "touchTargets",
+]);
 
 export function buildAccessibilityTaskPrompt(params: {
   groundingOutput: GroundingOutput;
@@ -44,8 +83,8 @@ export function buildAccessibilityTaskPrompt(params: {
     groundingOutput: params.groundingOutput,
     context: params.context,
     overviewLine1: "Use the following screen inventory to understand the layout and element names.",
-    overviewLine2: "Apply your POUR accessibility heuristics to what you observe in the screenshot.",
-    taskLine1: "Review the screenshot(s) above using the WCAG POUR principles.",
+    overviewLine2: "Apply your selected accessibility principles to what you observe in the screenshot.",
+    taskLine1: "Review the screenshot(s) above using the selected accessibility principles.",
     taskLine2: "Return only findings you can clearly support from what is visible.",
   });
 }

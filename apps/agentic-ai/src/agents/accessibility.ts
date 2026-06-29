@@ -3,21 +3,19 @@
  * ------------------------
  * Stage 2b of the graph. Runs IN PARALLEL with the usability agent.
  *
- * JOB: Apply WCAG's 4 POUR principles to the screenshot and produce
- * structured, explainable accessibility findings.
+ * JOB: Apply selected Accessibility principles (WCAG 2.2 AA Conformance,
+ * Keyboard Navigation, Screen Reader Interpretation, Touch Targets ≥ 44px)
+ * to the screenshot and produce structured, explainable accessibility findings.
  *
- * POUR Principles (sourced from accessibility_principles.csv):
- *   - Perceivable  : Information must be presentable to all users
- *   - Operable     : Interface must be operable by any input method
- *   - Understandable: Content must be readable and predictable
- *   - Robust       : Must work reliably with assistive technologies
- *
- * INPUT  (from state):  screenshots[], groundingOutput, context
+ * INPUT  (from state):  screenshots[], groundingOutput, context, selectedPrinciples
  * OUTPUT (to state):    accessibilityOutput (AccessibilityOutput)
  *
  * What this agent does NOT cover (other agents handle these):
- *   - General UX heuristics       → Usability (Nielsen) agent
- *   - Microcopy and label quality → Content UX agent (if added)
+ *   - General UX heuristics          → Usability agent
+ *   - Design system / spacing        → Consistency agent
+ *   - Microcopy and label quality    → Content UX agent
+ *   - Compliance / risk              → Risk agent
+ *   - Impact estimates               → Recommendations agent
  *
  * Tools: None — pure vision LLM + structured output.
  */
@@ -26,8 +24,9 @@ import { HumanMessage, SystemMessage } from "@langchain/core/messages";
 import { llm } from "../llm.js";
 import { AccessibilityOutputSchema, type AccessibilityOutput } from "../schemas.js";
 import type { GraphStateType } from "../state.js";
+import type { SubcategoryKey } from "../principles.js";
 import {
-  ACCESSIBILITY_SYSTEM_PROMPT,
+  buildAccessibilitySystemPrompt,
   buildAccessibilityTaskPrompt,
 } from "../prompts/agents/accessibility.js";
 
@@ -36,15 +35,37 @@ import {
 export async function accessibilityAgent(
   state: GraphStateType
 ): Promise<Partial<GraphStateType>> {
-  console.log("\n[Accessibility] Starting WCAG POUR review...");
+  console.log("\n[Accessibility] Starting accessibility review...");
 
-  const { screenshots, groundingOutput, context } = state;
+  const { screenshots, groundingOutput, context, selectedPrinciples } = state;
 
   // Guard: grounding must have run first
   if (!groundingOutput) {
     throw new Error(
       "[Accessibility] groundingOutput is null — grounding agent must run first"
     );
+  }
+
+  // Derive which subcategories are active for this agent
+  const selectedSubcategories: SubcategoryKey[] = selectedPrinciples
+    ? (Object.keys(selectedPrinciples) as SubcategoryKey[]).filter(
+        (k) => selectedPrinciples[k] === true
+      )
+    : [];
+
+  // Build dynamic system prompt based on user's subcategory selection
+  const systemPrompt = buildAccessibilitySystemPrompt(selectedSubcategories);
+
+  // If systemPrompt is null, this agent has no selected subcategories to review
+  if (systemPrompt === null) {
+    console.log("[Accessibility] Skipped — no relevant subcategories selected.");
+    return {
+      accessibilityOutput: {
+        findings: [],
+        summary: "Review skipped (no accessibility criteria selected).",
+        coverageNote: "N/A",
+      },
+    };
   }
 
   // Send screenshots so the agent can see the actual UI
@@ -57,7 +78,6 @@ export async function accessibilityAgent(
     },
   }));
 
-  // Grounding output gives the agent element names and layout context
   const textBlock = {
     type: "text" as const,
     text: buildAccessibilityTaskPrompt({ groundingOutput, context }),
@@ -67,7 +87,7 @@ export async function accessibilityAgent(
     const structuredLLM = llm.withStructuredOutput(AccessibilityOutputSchema);
 
     const result = await structuredLLM.invoke([
-      new SystemMessage(ACCESSIBILITY_SYSTEM_PROMPT),
+      new SystemMessage(systemPrompt),
       new HumanMessage({ content: [...imageBlocks, textBlock] }),
     ]) as AccessibilityOutput;
 
