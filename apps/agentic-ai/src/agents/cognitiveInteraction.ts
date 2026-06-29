@@ -1,12 +1,13 @@
 /**
- * agents/cognitiveInteraction.ts
- * ------------------------
+ * agents/cognitiveInteraction.ts  →  Consistency Agent
+ * ------------------------------------------------------
  * Stage 2c of the graph. Runs IN PARALLEL with other UX review agents.
  *
- * JOB: Apply Cognitive Interaction Laws (Fitts's, Hick's, Miller's, etc.)
- * to the screenshot and produce structured, explainable friction findings.
+ * JOB: Apply selected Consistency principles (Design System Tokens,
+ * Component Usage, Spacing 8pt Grid, Iconography Consistency)
+ * to the screenshot and produce structured findings.
  *
- * INPUT  (from state):  screenshots[], groundingOutput, context
+ * INPUT  (from state):  screenshots[], groundingOutput, context, selectedPrinciples
  * OUTPUT (to state):    cognitiveInteractionOutput
  *
  * Tools: None — pure vision LLM + structured output.
@@ -16,8 +17,9 @@ import { HumanMessage, SystemMessage } from "@langchain/core/messages";
 import { llm } from "../llm.js";
 import { CognitiveInteractionOutputSchema, type CognitiveInteractionOutput } from "../schemas.js";
 import type { GraphStateType } from "../state.js";
+import type { SubcategoryKey } from "../principles.js";
 import {
-  COGNITIVE_INTERACTION_SYSTEM_PROMPT,
+  buildConsistencySystemPrompt,
   buildCognitiveInteractionTaskPrompt,
 } from "../prompts/agents/cognitiveInteraction.js";
 
@@ -26,14 +28,36 @@ import {
 export async function cognitiveInteractionAgent(
   state: GraphStateType
 ): Promise<Partial<GraphStateType>> {
-  console.log("\n[Cognitive Interaction] Starting mental load & friction review...");
+  console.log("\n[Consistency] Starting design system consistency review...");
 
-  const { screenshots, groundingOutput, context } = state;
+  const { screenshots, groundingOutput, context, selectedPrinciples } = state;
 
   if (!groundingOutput) {
     throw new Error(
-      "[Cognitive Interaction] groundingOutput is null — grounding agent must run first"
+      "[Consistency] groundingOutput is null — grounding agent must run first"
     );
+  }
+
+  // Derive which subcategories are active for this agent
+  const selectedSubcategories: SubcategoryKey[] = selectedPrinciples
+    ? (Object.keys(selectedPrinciples) as SubcategoryKey[]).filter(
+        (k) => selectedPrinciples[k] === true
+      )
+    : [];
+
+  // Build dynamic system prompt based on user's subcategory selection
+  const systemPrompt = buildConsistencySystemPrompt(selectedSubcategories);
+
+  // If systemPrompt is null, this agent has no selected subcategories to review
+  if (systemPrompt === null) {
+    console.log("[Consistency] Skipped — no relevant subcategories selected.");
+    return {
+      cognitiveInteractionOutput: {
+        findings: [],
+        summary: "Review skipped (no consistency criteria selected).",
+        coverageNote: "N/A",
+      },
+    };
   }
 
   const imageBlocks = screenshots.map((src) => ({
@@ -54,11 +78,11 @@ export async function cognitiveInteractionAgent(
     const structuredLLM = llm.withStructuredOutput(CognitiveInteractionOutputSchema);
 
     const result = await structuredLLM.invoke([
-      new SystemMessage(COGNITIVE_INTERACTION_SYSTEM_PROMPT),
+      new SystemMessage(systemPrompt),
       new HumanMessage({ content: [...imageBlocks, textBlock] }),
     ]) as CognitiveInteractionOutput;
 
-    console.log(`[Cognitive Interaction] Done — ${result.findings.length} findings`);
+    console.log(`[Consistency] Done — ${result.findings.length} findings`);
     result.findings.forEach((f) => {
       console.log(`  ${f.severity} | ${f.principle} | ${f.region}`);
     });
@@ -67,7 +91,7 @@ export async function cognitiveInteractionAgent(
 
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    console.error("[Cognitive Interaction] Error:", msg);
+    console.error("[Consistency] Error:", msg);
     throw err;
   }
 }

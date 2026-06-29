@@ -107,17 +107,6 @@ function buildOverlaySvg(width: number, height: number, boxes: OverlayBox[]): st
 }
 
 function collectOverlayBoxes(state: GraphStateType): OverlayBox[] {
-  if (state.boundingBoxReviewOutput) {
-    return state.boundingBoxReviewOutput.findings.flatMap((finding, findingIndex) =>
-      finding.boxes.map((box) => ({
-        findingId: finding.findingId,
-        issueNumber: findingIndex + 1,
-        severity: finding.severity,
-        screenIndex: box.screenIndex,
-        bbox: box.bbox,
-      }))
-    );
-  }
 
   if (!state.synthesisOutput) return [];
 
@@ -169,14 +158,15 @@ export function writeHumanReviewArtifacts(params: {
   mkdirSync(reviewArtifactsDir, { recursive: true });
 
   const issueReviewJsonPath = join(reviewArtifactsDir, "issues.json");
-  const issues = (state.boundingBoxReviewOutput?.findings ?? []).map((finding, index) => ({
-    ...finding,
+  const synthesisFindings = state.synthesisOutput?.findings ?? [];
+  const issues = synthesisFindings.map((finding, index) => ({
+    findingId: finding.id,
+    severity: finding.severity,
+    region: finding.region,
+    issue: finding.issue,
+    fix: finding.fix,
     issueNumber: index + 1,
     displayLabel: String(index + 1),
-    boxes: finding.boxes.map((box) => ({
-      ...box,
-      label: String(index + 1),
-    })),
   }));
 
   const output = {
@@ -188,8 +178,8 @@ export function writeHumanReviewArtifacts(params: {
       artifactSchemaVersion: "1.0.0",
       annotationLabelMode: "issue-number",
     },
-    summary: state.boundingBoxReviewOutput?.summary ?? "No bounding box review output available.",
-    coverageNote: state.boundingBoxReviewOutput?.coverageNote ?? "No bounding box review output available.",
+    summary: state.synthesisOutput?.deduplicationNote ?? "No synthesis output available.",
+    coverageNote: `${synthesisFindings.length} canonical findings from synthesis.`,
     issues,
   };
 

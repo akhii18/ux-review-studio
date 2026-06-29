@@ -1,68 +1,42 @@
 import {
-  PRINCIPLE_FAMILY_KEYS,
-  PRINCIPLE_FAMILY_PROMPTS,
-  PRINCIPLE_FAMILY_DISPLAY_NAMES,
-  extractPrincipleNames,
-  type PrincipleFamilyKey,
+  SUBCATEGORY_KEYS,
+  SUBCATEGORY_PROMPTS,
+  SUBCATEGORY_DISPLAY_NAMES,
+  SUBCATEGORY_CATEGORIES,
+  type SubcategoryKey,
 } from "../../principles.js";
 import type { SelectedPrinciples } from "../../state.js";
 
-function normalizeSelectionValue(value: true | string[] | undefined): true | string[] | null {
-  if (value === true) return true;
-  if (!Array.isArray(value)) return null;
-
-  const cleaned = value
-    .map((entry) => entry.trim())
-    .filter((entry) => entry.length > 0);
-
-  if (cleaned.length === 0) return null;
-  return Array.from(new Set(cleaned));
-}
-
-function resolveSelectedFamilies(selectedPrinciples?: SelectedPrinciples | null): PrincipleFamilyKey[] {
+/**
+ * Returns the list of active subcategory keys from the user's selection.
+ * Falls back to ALL subcategory keys if nothing is selected.
+ */
+function resolveSelectedSubcategories(selectedPrinciples?: SelectedPrinciples | null): SubcategoryKey[] {
   if (!selectedPrinciples || Object.keys(selectedPrinciples).length === 0) {
-    return [...PRINCIPLE_FAMILY_KEYS];
+    return [...SUBCATEGORY_KEYS];
   }
 
-  const selectedFamilies = PRINCIPLE_FAMILY_KEYS.filter((family) =>
-    normalizeSelectionValue(selectedPrinciples[family]) !== null
-  );
-
-  return selectedFamilies.length > 0 ? selectedFamilies : [...PRINCIPLE_FAMILY_KEYS];
+  const active = SUBCATEGORY_KEYS.filter((k) => selectedPrinciples[k] === true);
+  return active.length > 0 ? active : [...SUBCATEGORY_KEYS];
 }
 
 export function resolveAllowedPrincipleNames(
   selectedPrinciples?: SelectedPrinciples | null
 ): string[] | null {
+  // With SubcategoryKey-based selection, all principles in selected subcategories are allowed.
+  // Return null to mean "no restriction" when nothing is selected.
   if (!selectedPrinciples || Object.keys(selectedPrinciples).length === 0) {
     return null;
   }
-
-  const selectedFamilies = resolveSelectedFamilies(selectedPrinciples);
-  const allowed = new Set<string>();
-
-  for (const family of selectedFamilies) {
-    const value = normalizeSelectionValue(selectedPrinciples[family]);
-    if (value === true) {
-      for (const name of extractPrincipleNames(PRINCIPLE_FAMILY_PROMPTS[family])) {
-        allowed.add(name);
-      }
-      continue;
-    }
-
-    if (Array.isArray(value)) {
-      for (const name of value) {
-        allowed.add(name);
-      }
-    }
-  }
-
-  return allowed.size > 0 ? Array.from(allowed) : null;
+  // When specific subcategories are chosen, the principle names are embedded in the
+  // subcategory prompts. We return null here to indicate no strict name filter — the
+  // synthesis agent simply uses whatever principles appear in the selected blocks.
+  return null;
 }
 
 function buildSelectedPrincipleBlocks(selectedPrinciples?: SelectedPrinciples | null): string {
-  const selectedFamilies = resolveSelectedFamilies(selectedPrinciples);
-  return selectedFamilies.map((family) => PRINCIPLE_FAMILY_PROMPTS[family]).join("\n\n");
+  const active = resolveSelectedSubcategories(selectedPrinciples);
+  return active.map((k) => SUBCATEGORY_PROMPTS[k]).join("\n\n");
 }
 
 export function buildSynthesisSystemPrompt(params?: {
@@ -73,7 +47,7 @@ export function buildSynthesisSystemPrompt(params?: {
 
   return `You are the Synthesis & Deduplication agent in a multi-agent UX audit system.
 Six specialist agents have independently reviewed the same UI screenshot(s).
-Each produced findings using their own lens (usability, accessibility, cognitive, content, gestalt, visual design).
+Each produced findings using their own lens (usability, accessibility, consistency, content UX, risk, recommendations).
 Your job is to collapse their overlapping observations into a single, clean, authoritative finding list.
 
 ${principleBlocks}
@@ -87,8 +61,8 @@ RULE 1 — GROUPING
   on the SAME GROUNDED ELEMENT(S) or highly overlapping issue-level bounding boxes,
   even when they cite different principles.
   If elementRefs are sparse, use same-region matching as a fallback.
-  Example: Nielsen flags "Aesthetic and Minimalist Design" for a crowded
-  sidebar; Gestalt flags "Proximity" for the same crowded sidebar.
+  Example: Usability flags "Visibility of system status" for a missing loader;
+  Risk flags "Destructive Action Safety" for the same button with no feedback.
   → Merge into one finding.
 
   Two findings are NOT duplicates when:
@@ -108,7 +82,7 @@ RULE 2 — MERGING
   • fix:           Use the most actionable fix from the group
   • confidence:    Average the group's confidence values, then add +0.05
                    for each additional source beyond the first (cap at 0.97)
-  • sources:       List all agent names that contributed, e.g. ["nielsen", "gestalt"]
+  • sources:       List all agent names that contributed, e.g. ["usability", "risk"]
   • mergedFrom:    List all original finding IDs that were collapsed, e.g. ["nielsen-002", "gestalt-001"]
   • agreementCount: Number of agents that flagged this root problem
 
@@ -146,29 +120,24 @@ export function buildSynthesisTaskPrompt(params: {
     findingsBlock,
     groundingElementBlock,
     selectedPrinciples,
-    allowedPrincipleNames,
   } = params;
 
-  const selectedFamilies = resolveSelectedFamilies(selectedPrinciples);
-  const selectedFamiliesSummary = selectedFamilies
-    .map((family) => PRINCIPLE_FAMILY_DISPLAY_NAMES[family])
-    .join(", ");
-
-  const allowedPrinciplesSection = allowedPrincipleNames && allowedPrincipleNames.length > 0
-    ? `
-════════════════════════════════════════
-ALLOWED PRINCIPLES (STRICT)
-════════════════════════════════════════
-
-Only use principle values from this list in the final output:
-${allowedPrincipleNames.map((name) => `- ${name}`).join("\n")}
-`
-    : "";
+  const active = resolveSelectedSubcategories(selectedPrinciples);
+  // Group active subcategories by category for the summary line
+  const categoryGroups = new Map<string, string[]>();
+  for (const k of active) {
+    const cat = SUBCATEGORY_CATEGORIES[k];
+    if (!categoryGroups.has(cat)) categoryGroups.set(cat, []);
+    categoryGroups.get(cat)!.push(SUBCATEGORY_DISPLAY_NAMES[k]);
+  }
+  const selectedSummary = Array.from(categoryGroups.entries())
+    .map(([cat, names]) => `${cat} (${names.join(", ")})`)
+    .join("; ");
 
   return `
   You have received ${totalRawFindings} raw UX findings from ${activeAgentCount} specialist agents.
 Apply all deduplication rules and return a single merged, prioritized list.
-Selected principle families for this run: ${selectedFamiliesSummary}.
+Selected subcategories for this run: ${selectedSummary}.
 
 ════════════════════════════════════════
 RAW FINDINGS (all agents combined)
@@ -181,7 +150,6 @@ VALID GROUNDED ELEMENT REFERENCES
 ════════════════════════════════════════
 
 ${groundingElementBlock}
-${allowedPrinciplesSection}
 
 ════════════════════════════════════════
 Now synthesize these into the cleanest possible finding list.
