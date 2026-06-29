@@ -375,6 +375,7 @@ export const SynthesizedFindingSchema = FindingSchema.extend({
       "How many independent agents flagged this same root problem. " +
       "Used to escalate severity: 3+ agents → escalate one level."
     ),
+  // bboxRefs: z.array(z.any()).optional(),
 });
 export type SynthesizedFinding = z.infer<typeof SynthesizedFindingSchema>;
 

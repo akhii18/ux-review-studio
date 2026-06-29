@@ -333,7 +333,7 @@ async function persistFindings(params: {
         confidence: clampConfidence(finding.confidence),
         status: "PROPOSED",
         isAiGenerated: true,
-        bboxRefs: finding.bboxRefs && finding.bboxRefs.length > 0 ? finding.bboxRefs : undefined,
+        // bboxRefs: finding.bboxRefs && finding.bboxRefs.length > 0 ? finding.bboxRefs : undefined,
       },
     });
 
