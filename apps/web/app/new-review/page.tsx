@@ -282,27 +282,27 @@ export default function NewReviewPage() {
         const isDocx = file.type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" || file.name.toLowerCase().endsWith(".docx");
         const isScreenshot = file.type.startsWith("image/");
 
-        if (isPdf) {
-          // Extract text + images separately from each PDF.
-          try {
-            const result = await processPdf(file);
-            entries.push(...result.images);
-            if (result.markdown.trim()) {
-              markdownChunks.push(result.markdown);
-            }
-          } catch (err) {
-            console.error(`Failed to process PDF "${file.name}":`, err);
-            // Fall back to treating the PDF as a raw upload so the user isn't blocked.
-            entries.push({
-              id: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
-              name: file.name,
-              type: "PDF",
-              status: "Ready",
-              file,
-              previewUrl: URL.createObjectURL(file),
-            });
-          }
-        } else if (isDocx) {
+        // if (isPdf) {
+        //   // Extract text + images separately from each PDF.
+        //   try {
+        //     const result = await processPdf(file);
+        //     entries.push(...result.images);
+        //     if (result.markdown.trim()) {
+        //       markdownChunks.push(result.markdown);
+        //     }
+        //   } catch (err) {
+        //     console.error(`Failed to process PDF "${file.name}":`, err);
+        //     // Fall back to treating the PDF as a raw upload so the user isn't blocked.
+        //     entries.push({
+        //       id: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+        //       name: file.name,
+        //       type: "PDF",
+        //       status: "Ready",
+        //       file,
+        //       previewUrl: URL.createObjectURL(file),
+        //     });
+        //   }
+        if (isDocx) {
           // Extract text + images separately from each Word document.
           try {
             const result = await processDocx(file);
