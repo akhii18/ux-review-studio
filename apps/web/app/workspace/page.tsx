@@ -90,6 +90,7 @@ interface PinPlacement {
 interface PinCluster {
   id: string;
   ref: BoundingBoxRef;
+  anchor: { x: number; y: number };
   placements: PinPlacement[];
 }
 
@@ -104,6 +105,9 @@ const severityRank: Record<"P0" | "P1" | "P2", number> = {
   P1: 1,
   P2: 2,
 };
+
+const PIN_CLUSTER_CENTER_DISTANCE = 0.035;
+const PIN_CLUSTER_INTERSECTION_RATIO = 0.15;
 
 function stripExtension(name: string): string {
   return name.replace(/\.[^.]+$/, "");
@@ -154,13 +158,82 @@ function getBboxCenter(ref: BoundingBoxRef): { x: number; y: number } {
   };
 }
 
-function getPinClusterKey(ref: BoundingBoxRef): string {
-  const center = getBboxCenter(ref);
-  return [
-    ref.screenIndex,
-    Math.round(center.x * 1000),
-    Math.round(center.y * 1000),
-  ].join(":");
+function getCenterDistance(a: BoundingBoxRef, b: BoundingBoxRef): number {
+  const ca = getBboxCenter(a);
+  const cb = getBboxCenter(b);
+  return Math.hypot(ca.x - cb.x, ca.y - cb.y);
+}
+
+function getBboxIntersectionRatio(a: BoundingBoxRef, b: BoundingBoxRef): number {
+  const left = Math.max(a.bbox.x, b.bbox.x);
+  const top = Math.max(a.bbox.y, b.bbox.y);
+  const right = Math.min(a.bbox.x + a.bbox.width, b.bbox.x + b.bbox.width);
+  const bottom = Math.min(a.bbox.y + a.bbox.height, b.bbox.y + b.bbox.height);
+  const intersection = Math.max(0, right - left) * Math.max(0, bottom - top);
+
+  if (intersection <= 0) return 0;
+
+  const smallerArea = Math.min(a.bbox.width * a.bbox.height, b.bbox.width * b.bbox.height);
+  return intersection / Math.max(smallerArea, Number.EPSILON);
+}
+
+function isBboxCenterInsideBbox(centerRef: BoundingBoxRef, containerRef: BoundingBoxRef): boolean {
+  const center = getBboxCenter(centerRef);
+  return (
+    center.x >= containerRef.bbox.x &&
+    center.x <= containerRef.bbox.x + containerRef.bbox.width &&
+    center.y >= containerRef.bbox.y &&
+    center.y <= containerRef.bbox.y + containerRef.bbox.height
+  );
+}
+
+function shouldClusterPlacements(a: PinPlacement, b: PinPlacement): boolean {
+  if (a.ref.screenIndex !== b.ref.screenIndex) return false;
+
+  return (
+    getCenterDistance(a.ref, b.ref) <= PIN_CLUSTER_CENTER_DISTANCE ||
+    getBboxIntersectionRatio(a.ref, b.ref) >= PIN_CLUSTER_INTERSECTION_RATIO ||
+    isBboxCenterInsideBbox(a.ref, b.ref) ||
+    isBboxCenterInsideBbox(b.ref, a.ref)
+  );
+}
+
+function getClusterAnchor(placements: PinPlacement[]): { x: number; y: number } {
+  const centers = placements.map((placement) => getBboxCenter(placement.ref));
+  return {
+    x: centers.reduce((sum, center) => sum + center.x, 0) / Math.max(1, centers.length),
+    y: centers.reduce((sum, center) => sum + center.y, 0) / Math.max(1, centers.length),
+  };
+}
+
+function buildPinClusters(placements: PinPlacement[]): PinCluster[] {
+  const clusters: PinCluster[] = [];
+
+  for (const placement of placements) {
+    const cluster = clusters.find((candidate) =>
+      candidate.placements.some((clusterPlacement) => shouldClusterPlacements(placement, clusterPlacement))
+    );
+
+    if (cluster) {
+      cluster.placements.push(placement);
+      cluster.anchor = getClusterAnchor(cluster.placements);
+    } else {
+      clusters.push({
+        id: "",
+        ref: placement.ref,
+        anchor: getBboxCenter(placement.ref),
+        placements: [placement],
+      });
+    }
+  }
+
+  return clusters.map((cluster) => ({
+    ...cluster,
+    id: [
+      cluster.ref.screenIndex,
+      ...cluster.placements.map((placement) => placement.finding.id).sort(),
+    ].join(":"),
+  }));
 }
 
 function getClusterSeverity(cluster: PinCluster): "P0" | "P1" | "P2" {
@@ -328,23 +401,7 @@ function WorkspaceContent() {
   }, [screenFindings, screen]);
 
   const pinClusters = useMemo<PinCluster[]>(() => {
-    const clusters = new Map<string, PinCluster>();
-
-    for (const placement of pinPlacements) {
-      const id = getPinClusterKey(placement.ref);
-      const cluster = clusters.get(id);
-      if (cluster) {
-        cluster.placements.push(placement);
-      } else {
-        clusters.set(id, {
-          id,
-          ref: placement.ref,
-          placements: [placement],
-        });
-      }
-    }
-
-    return Array.from(clusters.values());
+    return buildPinClusters(pinPlacements);
   }, [pinPlacements]);
 
   const unplacedFindings = useMemo(() => {
@@ -619,12 +676,11 @@ function WorkspaceContent() {
 
                     <TooltipProvider>
                       {pinClusters.map((cluster, i) => {
-                        const center = getBboxCenter(cluster.ref);
                         const severity = getClusterSeverity(cluster);
                         const style = imageLayout
                           ? {
-                              left: imageLayout.offsetX + center.x * imageLayout.width,
-                              top: imageLayout.offsetY + center.y * imageLayout.height,
+                              left: imageLayout.offsetX + cluster.anchor.x * imageLayout.width,
+                              top: imageLayout.offsetY + cluster.anchor.y * imageLayout.height,
                             }
                           : { display: "none" };
                         const isCluster = cluster.placements.length > 1;
