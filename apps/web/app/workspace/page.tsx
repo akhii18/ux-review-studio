@@ -63,7 +63,7 @@ interface Finding {
   confidence: number;
   notes?: string;
   reviewBasis: ReviewBasisItem[];
-  bboxRefs?: BoundingBoxRef[];
+  bboxRefs?: unknown;
 }
 
 interface WorkspaceScreen {
@@ -126,29 +126,61 @@ function findingMatchesScreen(findingScreen?: string, screenName?: string): bool
   return fs === sn || fs.includes(sn) || sn.includes(fs);
 }
 
-function isValidBBoxRef(ref: BoundingBoxRef | undefined): ref is BoundingBoxRef {
-  if (!ref) return false;
-  const { bbox } = ref;
-  return (
-    Number.isFinite(ref.screenIndex) &&
-    Number.isFinite(bbox.x) &&
-    Number.isFinite(bbox.y) &&
-    Number.isFinite(bbox.width) &&
-    Number.isFinite(bbox.height) &&
-    bbox.x >= 0 &&
-    bbox.y >= 0 &&
-    bbox.width > 0 &&
-    bbox.height > 0 &&
-    bbox.x + bbox.width <= 1 &&
-    bbox.y + bbox.height <= 1 &&
-    bbox.x < 1 &&
-    bbox.y < 1
-  );
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function clamp01(value: number): number {
+  return Math.min(1, Math.max(0, value));
+}
+
+function normalizeBBoxRef(ref: unknown): BoundingBoxRef | null {
+  if (!isRecord(ref) || !isRecord(ref.bbox)) return null;
+
+  const screenIndex = Number(ref.screenIndex);
+  const x = Number(ref.bbox.x);
+  const y = Number(ref.bbox.y);
+  const width = Number(ref.bbox.width);
+  const height = Number(ref.bbox.height);
+
+  if (
+    !Number.isFinite(screenIndex) ||
+    !Number.isFinite(x) ||
+    !Number.isFinite(y) ||
+    !Number.isFinite(width) ||
+    !Number.isFinite(height)
+  ) {
+    return null;
+  }
+
+  const safeX = clamp01(x);
+  const safeY = clamp01(y);
+  const safeWidth = Math.min(1 - safeX, Math.max(0, width));
+  const safeHeight = Math.min(1 - safeY, Math.max(0, height));
+
+  if (safeWidth <= 0 || safeHeight <= 0 || safeX >= 1 || safeY >= 1) return null;
+
+  return {
+    screenIndex: Math.max(0, Math.floor(screenIndex)),
+    bbox: {
+      x: safeX,
+      y: safeY,
+      width: safeWidth,
+      height: safeHeight,
+    },
+  };
+}
+
+function getValidBBoxRefs(finding: Finding): BoundingBoxRef[] {
+  if (!Array.isArray(finding.bboxRefs)) return [];
+  return finding.bboxRefs
+    .map(normalizeBBoxRef)
+    .filter((ref): ref is BoundingBoxRef => Boolean(ref));
 }
 
 function getBboxRefForScreen(finding: Finding, screenIndex?: number): BoundingBoxRef | null {
   if (typeof screenIndex !== "number") return null;
-  return finding.bboxRefs?.find((ref) => isValidBBoxRef(ref) && ref.screenIndex === screenIndex) ?? null;
+  return getValidBBoxRefs(finding).find((ref) => ref.screenIndex === screenIndex) ?? null;
 }
 
 function getBboxCenter(ref: BoundingBoxRef): { x: number; y: number } {
@@ -245,9 +277,9 @@ function getClusterSeverity(cluster: PinCluster): "P0" | "P1" | "P2" {
 }
 
 function findingMatchesScreenContext(finding: Finding, screenName?: string, screenIndex?: number): boolean {
-  const hasCoordinateRefs = finding.bboxRefs?.some(isValidBBoxRef) ?? false;
+  const hasCoordinateRefs = getValidBBoxRefs(finding).length > 0;
   if (hasCoordinateRefs && typeof screenIndex === "number") {
-    return Boolean(getBboxRefForScreen(finding, screenIndex));
+    return Boolean(getBboxRefForScreen(finding, screenIndex)) || findingMatchesScreen(finding.screen, screenName);
   }
   return findingMatchesScreen(finding.screen, screenName);
 }
@@ -284,6 +316,7 @@ function WorkspaceContent() {
   const [selectedScreen, setSelectedScreen] = useState<string | null>(null);
   const [open, setOpen] = useState<Finding | null>(null);
   const [openCluster, setOpenCluster] = useState<PinCluster | null>(null);
+  const [imageLoadFailed, setImageLoadFailed] = useState(false);
   const canvasRef = useRef<HTMLDivElement>(null);
   const imageRef = useRef<HTMLImageElement>(null);
   const [imageLayout, setImageLayout] = useState<ImageLayout | null>(null);
@@ -392,19 +425,24 @@ function WorkspaceContent() {
   }, [allFindings, screen]);
 
   const pinPlacements = useMemo<PinPlacement[]>(() => {
+    if (imageLoadFailed) return [];
     if (typeof screen?.screenIndex !== "number") return [];
 
     return screenFindings
       .filter((finding) => finding.status !== "DISMISSED")
       .map((finding) => ({ finding, ref: getBboxRefForScreen(finding, screen.screenIndex) }))
       .filter((placement): placement is PinPlacement => Boolean(placement.ref));
-  }, [screenFindings, screen]);
+  }, [screenFindings, screen, imageLoadFailed]);
 
   const pinClusters = useMemo<PinCluster[]>(() => {
     return buildPinClusters(pinPlacements);
   }, [pinPlacements]);
 
   const unplacedFindings = useMemo(() => {
+    if (imageLoadFailed) {
+      return screenFindings.filter((finding) => finding.status !== "DISMISSED");
+    }
+
     if (typeof screen?.screenIndex !== "number") {
       return screenFindings.filter((finding) => finding.status !== "DISMISSED");
     }
@@ -412,7 +450,7 @@ function WorkspaceContent() {
     return screenFindings
       .filter((finding) => finding.status !== "DISMISSED")
       .filter((finding) => !getBboxRefForScreen(finding, screen.screenIndex));
-  }, [screenFindings, screen]);
+  }, [screenFindings, screen, imageLoadFailed]);
 
   const visibleScreenFindingCount = useMemo(
     () => screenFindings.filter((finding) => finding.status !== "DISMISSED").length,
@@ -440,6 +478,7 @@ function WorkspaceContent() {
 
   useEffect(() => {
     setImageLayout(null);
+    setImageLoadFailed(false);
   }, [screen?.imageUrl]);
 
   useEffect(() => {
@@ -656,18 +695,22 @@ function WorkspaceContent() {
               <div className="flex flex-1 items-center justify-center overflow-auto p-6">
                 <div className="relative w-full max-w-3xl">
                   <div ref={canvasRef} className="relative flex aspect-[4/3] items-center justify-center overflow-hidden rounded-xl border border-border bg-card shadow-sm">
-                    {screen.imageUrl ? (
+                    {screen.imageUrl && !imageLoadFailed ? (
                       <img
                         ref={imageRef}
                         src={screen.imageUrl}
                         alt={screen.name}
                         className="absolute inset-0 h-full w-full object-contain bg-secondary/20"
                         onLoad={updateImageLayout}
+                        onError={() => {
+                          setImageLayout(null);
+                          setImageLoadFailed(true);
+                        }}
                       />
                     ) : (
                       <div className="text-center">
                         <ImageIcon className="mx-auto h-10 w-10 text-muted-foreground/30" aria-hidden="true" />
-                        <p className="mt-2 text-xs text-muted-foreground">{screen.name}</p>
+                        <p className="mt-2 text-xs text-muted-foreground">{imageLoadFailed ? "Screen image unavailable" : screen.name}</p>
                         <p className="text-[11px] text-muted-foreground/70">
                           Screen preview
                         </p>

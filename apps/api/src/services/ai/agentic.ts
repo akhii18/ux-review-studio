@@ -151,8 +151,49 @@ function clampConfidence(confidence: number): number {
   return Math.min(100, Math.max(0, Math.round(confidence * 100)));
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function normalizePersistableBBoxRef(ref: unknown) {
+  if (!isRecord(ref) || !isRecord(ref.bbox)) return null;
+
+  const screenIndex = Number(ref.screenIndex);
+  const x = Number(ref.bbox.x);
+  const y = Number(ref.bbox.y);
+  const width = Number(ref.bbox.width);
+  const height = Number(ref.bbox.height);
+
+  if (
+    !Number.isFinite(screenIndex) ||
+    !Number.isFinite(x) ||
+    !Number.isFinite(y) ||
+    !Number.isFinite(width) ||
+    !Number.isFinite(height)
+  ) {
+    return null;
+  }
+
+  const safeX = Math.min(1, Math.max(0, x));
+  const safeY = Math.min(1, Math.max(0, y));
+  const safeWidth = Math.min(1 - safeX, Math.max(0, width));
+  const safeHeight = Math.min(1 - safeY, Math.max(0, height));
+
+  if (safeWidth <= 0 || safeHeight <= 0 || safeX >= 1 || safeY >= 1) return null;
+
+  return {
+    screenIndex: Math.max(0, Math.floor(screenIndex)),
+    bbox: {
+      x: safeX,
+      y: safeY,
+      width: safeWidth,
+      height: safeHeight,
+    },
+  };
+}
+
 function normalizePersistableBBoxRefs(finding: SynthesizedFinding, groundingElements: GroundingElement[]) {
-  const explicitRefs = Array.isArray(finding.bboxRefs) ? finding.bboxRefs : [];
+  const explicitRefs: unknown[] = Array.isArray(finding.bboxRefs) ? finding.bboxRefs : [];
   const elementLookup = new Map(groundingElements.map((element) => [element.elementId, element]));
   const fallbackRefs = explicitRefs.length > 0
     ? []
@@ -168,18 +209,8 @@ function normalizePersistableBBoxRefs(finding: SynthesizedFinding, groundingElem
   if (sourceRefs.length === 0) return undefined;
 
   const refs = sourceRefs
-    .map((ref) => {
-      const x = Math.min(1, Math.max(0, ref.bbox.x));
-      const y = Math.min(1, Math.max(0, ref.bbox.y));
-      const width = Math.min(1 - x, Math.max(0, ref.bbox.width));
-      const height = Math.min(1 - y, Math.max(0, ref.bbox.height));
-
-      return {
-        screenIndex: Math.max(0, Math.floor(ref.screenIndex)),
-        bbox: { x, y, width, height },
-      };
-    })
-    .filter((ref) => ref.bbox.width > 0 && ref.bbox.height > 0 && ref.bbox.x < 1 && ref.bbox.y < 1);
+    .map(normalizePersistableBBoxRef)
+    .filter((ref): ref is NonNullable<ReturnType<typeof normalizePersistableBBoxRef>> => Boolean(ref));
 
   return refs.length > 0 ? refs : undefined;
 }
