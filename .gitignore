@@ -25,7 +25,7 @@ apps/api/*.log
 
 # deployment guide draft
 docs/azure-deployment.md
-
+docs/database-deployment.md
 
 
 # Agentic part
