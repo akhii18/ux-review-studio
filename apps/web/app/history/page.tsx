@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { SheetClose } from "@/components/ui/sheet";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import {
   Pagination,
   PaginationContent,
@@ -28,12 +29,31 @@ import {
   PaginationPrevious,
 } from "@/components/ui/pagination";
 import { PriorityBadge } from "@/components/ui/PriorityBadge";
-import { Search, FileBarChart, ExternalLink, Trash2, X } from "lucide-react";
+import { Search, MoreVertical, X, ExternalLink, FileBarChart, Trash2 } from "lucide-react";
 import { deleteReview, exportReviewReport, getReview, listReviews } from "@/lib/api";
 import { toast } from "sonner";
 
 const STATUS_OPTIONS = ["all", "draft", "in_progress", "completed", "failed", "archived"];
 const PAGE_SIZE = 10;
+
+function toTitleCase(value?: string | null) {
+  if (!value) return "—";
+
+  const title = value
+    .replaceAll("_", " ")
+    .trim()
+    .toLowerCase()
+    .split(" ")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+
+  return title
+    .replace(/\bUx\b/g, "UX")
+    .replace(/\bUi\b/g, "UI")
+    .replace(/\bAi\b/g, "AI")
+    .replace(/\bPrd\b/g, "PRD");
+}
 
 function formatReviewDate(value?: string | null) {
   if (!value) return "—";
@@ -44,6 +64,10 @@ function formatReviewDate(value?: string | null) {
     day: "2-digit",
     year: "numeric",
   });
+}
+
+function getReviewActionLabel(status?: string | null) {
+  return status === "in_progress" ? "Continue review" : "Open workspace";
 }
 
 function escapeHtml(input: string) {
@@ -308,7 +332,7 @@ export default function HistoryPage() {
 
         {/* Table */}
         <div className="rounded-xl border border-border bg-card shadow-card overflow-hidden">
-          <div className="max-h-[calc(100vh-12rem)] overflow-auto">
+          <div className="overflow-x-auto">
             <table className="w-full border-collapse text-sm">
               <thead className="sticky top-0 z-10 bg-foreground">
                 <tr className="border-0">
@@ -342,10 +366,10 @@ export default function HistoryPage() {
                   </td>
                 </tr>
               ) : paginated.map((r) => (
-                <tr key={r.id} className="border-b border-border/60 transition-colors hover:bg-secondary/60">
+                <tr key={r.id} className="border-b border-border/60 transition-colors hover:bg-secondary/80">
                   <td className="px-4 py-3 align-middle">
                     <Link
-                      href={r.status === "draft" ? { pathname: "/new-review", query: { reviewId: r.id } } : { pathname: "/workspace", query: { reviewId: r.id } }}
+                      href={r.status === "draft" ? { pathname: "/new-review", query: { reviewId: r.id } } : r.status === "in_progress" ? { pathname: "/new-review", query: { reviewId: r.id } } : { pathname: "/workspace", query: { reviewId: r.id } }}
                       className="font-medium text-foreground hover:text-primary"
                     >
                       {r.name}
@@ -353,50 +377,74 @@ export default function HistoryPage() {
                     <p className="mt-0.5 text-[11px] text-muted-foreground">{formatReviewDate(r.createdAt)}</p>
                   </td>
                   <td className="hidden px-4 py-3 align-middle text-sm md:table-cell">{r.product}</td>
-                  <td className="hidden px-4 py-3 align-middle text-xs text-muted-foreground lg:table-cell">{r.domain || "—"}</td>
-                  <td className="hidden px-4 py-3 align-middle text-xs text-muted-foreground lg:table-cell">{r.reviewType}</td>
+                  <td className="hidden px-4 py-3 align-middle text-xs text-muted-foreground lg:table-cell">{toTitleCase(r.domain) || "—"}</td>
+                  <td className="hidden px-4 py-3 align-middle text-xs text-muted-foreground lg:table-cell">{toTitleCase(r.reviewType)}</td>
                   <td className="px-4 py-3 align-middle text-right font-medium tabular-nums">
                     {r.uxScore ?? <span className="text-muted-foreground">—</span>}
                   </td>
                   <td className="hidden px-4 py-3 align-middle sm:table-cell">
-                    <div className="flex gap-1">
-                      <PriorityBadge priority="P0" compact /><span className="text-xs tabular-nums text-muted-foreground">—</span>
-                      <PriorityBadge priority="P1" compact /><span className="text-xs tabular-nums text-muted-foreground">—</span>
-                      <PriorityBadge priority="P2" compact />
+                    <div className="flex gap-2">
+                      {(["P0", "P1", "P2"] as const).map((priority) => (
+                        <div key={priority} className="flex min-w-[34px] flex-col items-center gap-1">
+                          <PriorityBadge priority={priority} compact />
+                          <span className="text-xs tabular-nums text-muted-foreground">{r.priorityBreakdown?.[priority] ?? 0}</span>
+                        </div>
+                      ))}
                     </div>
                   </td>
                   <td className="px-4 py-3 align-middle">
-                    <Badge variant="secondary" className="capitalize whitespace-nowrap">{r.status?.replace("_", " ")}</Badge>
+                    <Badge variant="secondary" className="whitespace-nowrap">{toTitleCase(r.status)}</Badge>
                   </td>
                   <td className="hidden px-4 py-3 align-middle text-xs xl:table-cell">{r.owner || "User"}</td>
                   <td className="hidden px-4 py-3 align-middle text-xs text-muted-foreground xl:table-cell">{formatReviewDate(r.updatedAt)}</td>
                   <td className="px-1 py-3 align-middle text-right">
-                    <div className="flex justify-end gap-1">
-                      <Button asChild size="icon" variant="ghost" aria-label={r.status === "draft" ? "Resume draft" : "Open workspace"} className="h-9 w-9">
-                        <Link href={r.status === "draft" ? { pathname: "/new-review", query: { reviewId: r.id } } : { pathname: "/workspace", query: { reviewId: r.id } }}>
-                          <ExternalLink className="h-4 w-4" />
-                        </Link>
-                      </Button>
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        aria-label={`Open report for ${r.name || "review"}`}
-                        className="h-9 w-9"
-                        disabled={loadingReportReviewId === r.id || r.status === "draft"}
-                        onClick={() => handleOpenReport(r.id, r.name || "Untitled review")}
-                      >
-                        <FileBarChart className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        aria-label={`Delete ${r.name}`}
-                        className="h-9 w-9 text-destructive hover:bg-destructive/10 hover:text-destructive"
-                        disabled={deletingReviewId === r.id}
-                        onClick={() => setPendingDeleteReview({ id: r.id, name: r.name || "Untitled review" })}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
+                    <div className="flex justify-end">
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            aria-label={`Actions for ${r.name || "review"}`}
+                            className="h-9 w-9"
+                          >
+                            <MoreVertical className="h-4 w-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="min-w-52 p-1">
+                          <DropdownMenuItem asChild className="h-10 w-full justify-start gap-2 px-3">
+                            <Link href={r.status === "draft" ? { pathname: "/new-review", query: { reviewId: r.id } } : r.status === "in_progress" ? { pathname: "/new-review", query: { reviewId: r.id } } : { pathname: "/workspace", query: { reviewId: r.id } }} aria-label={r.status === "draft" ? "Resume draft" : getReviewActionLabel(r.status)}>
+                              <ExternalLink className="h-4 w-4" />
+                              <span>{r.status === "draft" ? "Resume draft" : getReviewActionLabel(r.status)}</span>
+                            </Link>
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            className="h-10 w-full justify-start gap-2 px-3"
+                            disabled={loadingReportReviewId === r.id || r.status === "draft"}
+                            onSelect={(event) => {
+                              event.preventDefault();
+                              if (loadingReportReviewId === r.id || r.status === "draft") return;
+                              void handleOpenReport(r.id, r.name || "Untitled review");
+                            }}
+                            aria-label="Open report"
+                          >
+                            <FileBarChart className="h-4 w-4" />
+                            <span>Open report</span>
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            className="h-10 w-full justify-start gap-2 px-3 text-destructive"
+                            disabled={deletingReviewId === r.id}
+                            onSelect={(event) => {
+                              event.preventDefault();
+                              if (deletingReviewId === r.id) return;
+                              setPendingDeleteReview({ id: r.id, name: r.name || "Untitled review" });
+                            }}
+                            aria-label="Delete review"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                            <span>Delete review</span>
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     </div>
                   </td>
                 </tr>

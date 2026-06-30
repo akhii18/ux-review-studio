@@ -28,7 +28,33 @@ type FindingAnalyticsRecord = {
   severity: "P0" | "P1" | "P2";
   area: string;
   status: string;
+  createdAt: Date;
+  review: {
+    product: string;
+  };
 };
+
+function monthKey(date: Date): string {
+  const year = date.getUTCFullYear();
+  const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+  return `${year}-${month}`;
+}
+
+function toTitleLabel(value: string): string {
+  const title = value
+    .replace(/_/g, " ")
+    .toLowerCase()
+    .split(" ")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+
+  return title
+    .replace(/\bUx\b/g, "UX")
+    .replace(/\bUi\b/g, "UI")
+    .replace(/\bAi\b/g, "AI")
+    .replace(/\bPrd\b/g, "PRD");
+}
 
 type DraftAssetInput = {
   name: string;
@@ -123,7 +149,19 @@ function buildExportMarkdown(review: { name: string; product: string; domain: st
 
 export const ReviewsService = {
   async list(userId: string) {
-    return ReviewsRepository.list(userId);
+    const reviews = await ReviewsRepository.list(userId);
+
+    return reviews.map((review: any) => {
+      const priorityBreakdown = (review.findings ?? []).reduce((acc: Record<string, number>, finding: { severity: string }) => {
+        acc[finding.severity] = (acc[finding.severity] ?? 0) + 1;
+        return acc;
+      }, { P0: 0, P1: 0, P2: 0 });
+
+      return {
+        ...review,
+        priorityBreakdown,
+      };
+    });
   },
 
   async getById(id: string, userId: string) {
@@ -312,8 +350,6 @@ export const ReviewsService = {
   },
 
   async getAnalytics(userId: string) {
-    const { prisma } = await import("../config/prisma.js");
-
     const [reviews, findings]: [ReviewAnalyticsRecord[], FindingAnalyticsRecord[]] = await Promise.all([
       prisma.review.findMany({
         where: { userId },
@@ -321,23 +357,109 @@ export const ReviewsService = {
         orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
       }),
       prisma.finding.findMany({
-        where: { status: { not: "DISMISSED" }, review: { userId } },
+        where: { review: { userId } },
+        select: {
+          severity: true,
+          area: true,
+          status: true,
+          createdAt: true,
+          review: {
+            select: {
+              product: true,
+            },
+          },
+        },
       }),
     ]);
 
-    const completed = reviews.filter((r) => r.status === "completed");
+    const completed = reviews.filter((r) => String(r.status).toLowerCase() === "completed");
     const avgUxScore = completed.length
       ? Math.round(completed.reduce((sum, r) => sum + (r.uxScore ?? 0), 0) / completed.length)
       : 0;
 
-    const p0 = findings.filter((f) => f.severity === "P0").length;
-    const p1 = findings.filter((f) => f.severity === "P1").length;
-    const p2 = findings.filter((f) => f.severity === "P2").length;
+    const openFindings = findings.filter((f) => f.status !== "DISMISSED");
+
+    const p0 = openFindings.filter((f) => f.severity === "P0").length;
+    const p1 = openFindings.filter((f) => f.severity === "P1").length;
+    const p2 = openFindings.filter((f) => f.severity === "P2").length;
+
+    const acceptedOrEdited = findings.filter((f) => f.status === "ACCEPTED" || f.status === "EDITED").length;
+    const dismissed = findings.filter((f) => f.status === "DISMISSED").length;
+    const totalFindings = findings.length;
+    const acceptanceRate = totalFindings > 0 ? Math.round((acceptedOrEdited / totalFindings) * 100) : 0;
+    const dismissalRate = totalFindings > 0 ? Math.round((dismissed / totalFindings) * 100) : 0;
 
     const byArea: Record<string, number> = {};
-    for (const f of findings) {
+    for (const f of openFindings) {
       byArea[f.area] = (byArea[f.area] ?? 0) + 1;
     }
+
+    const byCategory = Object.entries(byArea)
+      .map(([area, count]) => ({ c: toTitleLabel(area), n: count }))
+      .sort((a, b) => b.n - a.n);
+
+    const byProductMap: Record<string, number> = {};
+    for (const f of openFindings) {
+      const product = (f.review.product || "Unknown product").trim() || "Unknown product";
+      byProductMap[product] = (byProductMap[product] ?? 0) + 1;
+    }
+
+    const byProduct = Object.entries(byProductMap)
+      .map(([product, count]) => ({ p: product, n: count }))
+      .sort((a, b) => b.n - a.n)
+      .slice(0, 8);
+
+    const trendBuckets = new Map<string, { scoreSum: number; scoreCount: number; reviews: number; accepted: number; findings: number }>();
+    for (const review of reviews) {
+      const key = monthKey(review.createdAt);
+      const current = trendBuckets.get(key) ?? { scoreSum: 0, scoreCount: 0, reviews: 0, accepted: 0, findings: 0 };
+      current.reviews += 1;
+      if (typeof review.uxScore === "number") {
+        current.scoreSum += review.uxScore;
+        current.scoreCount += 1;
+      }
+      trendBuckets.set(key, current);
+    }
+
+    for (const finding of findings) {
+      const key = monthKey(finding.createdAt);
+      const current = trendBuckets.get(key) ?? { scoreSum: 0, scoreCount: 0, reviews: 0, accepted: 0, findings: 0 };
+      current.findings += 1;
+      if (finding.status === "ACCEPTED" || finding.status === "EDITED") {
+        current.accepted += 1;
+      }
+      trendBuckets.set(key, current);
+    }
+
+    const trend = Array.from(trendBuckets.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .slice(-12)
+      .map(([m, bucket]) => ({
+        m,
+        score: bucket.scoreCount > 0 ? Math.round(bucket.scoreSum / bucket.scoreCount) : 0,
+        reviews: bucket.reviews,
+        accept: bucket.findings > 0 ? Math.round((bucket.accepted / bucket.findings) * 100) : 0,
+      }));
+
+    const a11yBuckets = new Map<string, { resolved: number; total: number }>();
+    for (const finding of findings) {
+      if (finding.area !== "ACCESSIBILITY") continue;
+      const key = monthKey(finding.createdAt);
+      const current = a11yBuckets.get(key) ?? { resolved: 0, total: 0 };
+      current.total += 1;
+      if (finding.status === "ACCEPTED" || finding.status === "EDITED") {
+        current.resolved += 1;
+      }
+      a11yBuckets.set(key, current);
+    }
+
+    const a11yTrend = Array.from(a11yBuckets.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .slice(-12)
+      .map(([m, bucket]) => ({
+        m,
+        v: bucket.total > 0 ? Math.round((bucket.resolved / bucket.total) * 100) : 0,
+      }));
 
     const recent = reviews.slice(0, 5).map((r) => ({
       id: r.id,
@@ -353,13 +475,19 @@ export const ReviewsService = {
       kpis: {
         totalReviews:   reviews.length,
         completedReviews: completed.length,
-        totalFindings:  findings.length,
+        totalFindings,
         avgUxScore,
         p0Count: p0,
         p1Count: p1,
         p2Count: p2,
+        acceptanceRate,
+        dismissalRate,
       },
       findingsByArea: byArea,
+      byCategory,
+      byProduct,
+      trend,
+      a11yTrend,
       recentReviews:  recent,
       needsAttention: findings.filter((f) => f.severity === "P0" && f.status === "PROPOSED").length,
     };
