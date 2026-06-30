@@ -71,6 +71,15 @@ type SynthesizedFinding = {
   id: string;
   region: string;
   elementRefs: string[];
+  bboxRefs?: Array<{
+    screenIndex: number;
+    bbox: {
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+    };
+  }>;
   issue: string;
   principle: string;
   why: string;
@@ -82,7 +91,21 @@ type SynthesizedFinding = {
   agreementCount: number;
 };
 
+type GroundingElement = {
+  elementId: string;
+  screenIndex: number;
+  bbox: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  };
+};
+
 type AgenticRunResult = {
+  groundingOutput?: {
+    elements: GroundingElement[];
+  } | null;
   synthesisOutput?: {
     findings: SynthesizedFinding[];
     totalRawFindings: number;
@@ -126,6 +149,39 @@ async function loadAgenticModule() {
 function clampConfidence(confidence: number): number {
   if (Number.isNaN(confidence)) return 80;
   return Math.min(100, Math.max(0, Math.round(confidence * 100)));
+}
+
+function normalizePersistableBBoxRefs(finding: SynthesizedFinding, groundingElements: GroundingElement[]) {
+  const explicitRefs = Array.isArray(finding.bboxRefs) ? finding.bboxRefs : [];
+  const elementLookup = new Map(groundingElements.map((element) => [element.elementId, element]));
+  const fallbackRefs = explicitRefs.length > 0
+    ? []
+    : finding.elementRefs
+        .map((elementRef) => elementLookup.get(elementRef))
+        .filter((element): element is GroundingElement => Boolean(element))
+        .map((element) => ({
+          screenIndex: element.screenIndex,
+          bbox: element.bbox,
+        }));
+
+  const sourceRefs = explicitRefs.length > 0 ? explicitRefs : fallbackRefs;
+  if (sourceRefs.length === 0) return undefined;
+
+  const refs = sourceRefs
+    .map((ref) => {
+      const x = Math.min(1, Math.max(0, ref.bbox.x));
+      const y = Math.min(1, Math.max(0, ref.bbox.y));
+      const width = Math.min(1 - x, Math.max(0, ref.bbox.width));
+      const height = Math.min(1 - y, Math.max(0, ref.bbox.height));
+
+      return {
+        screenIndex: Math.max(0, Math.floor(ref.screenIndex)),
+        bbox: { x, y, width, height },
+      };
+    })
+    .filter((ref) => ref.bbox.width > 0 && ref.bbox.height > 0 && ref.bbox.x < 1 && ref.bbox.y < 1);
+
+  return refs.length > 0 ? refs : undefined;
 }
 
 /**
@@ -312,8 +368,9 @@ async function persistFindings(params: {
   reviewId: string;
   findings: SynthesizedFinding[];
   imageAssetNames: string[];
+  groundingElements: GroundingElement[];
 }) {
-  const { reviewId, findings, imageAssetNames } = params;
+  const { reviewId, findings, imageAssetNames, groundingElements } = params;
 
   for (const finding of findings) {
     const screenName = extractScreenName(finding, imageAssetNames);
@@ -333,7 +390,7 @@ async function persistFindings(params: {
         confidence: clampConfidence(finding.confidence),
         status: "PROPOSED",
         isAiGenerated: true,
-        // bboxRefs: finding.bboxRefs && finding.bboxRefs.length > 0 ? finding.bboxRefs : undefined,
+        bboxRefs: normalizePersistableBBoxRefs(finding, groundingElements),
       },
     });
 
@@ -447,7 +504,12 @@ export async function runReviewPipeline(reviewId: string): Promise<void> {
       prisma.report.deleteMany({ where: { reviewId } }),
     ]);
 
-    await persistFindings({ reviewId, findings, imageAssetNames });
+    await persistFindings({
+      reviewId,
+      findings,
+      imageAssetNames,
+      groundingElements: finalState.groundingOutput?.elements ?? [],
+    });
 
     await prisma.review.update({ where: { id: reviewId }, data: { stage: "generating_report", uxScore } });
 
