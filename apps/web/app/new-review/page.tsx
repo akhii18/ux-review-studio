@@ -145,8 +145,14 @@ const backendStageToUiIndex: Record<string, number> = {
   failed: 6,
 };
 
+function getFailureReason(stage?: string | null): string | null {
+  if (!stage?.startsWith("failed:")) return null;
+  return stage.slice("failed:".length).trim() || null;
+}
+
 function formatBackendStage(stage?: string | null): string {
   if (!stage) return "Analyzing…";
+  if (stage.startsWith("failed:")) return "Failed";
 
   const labels: Record<string, string> = {
     reading_inputs: "Reading inputs",
@@ -500,7 +506,8 @@ export default function NewReviewPage() {
             }, 600);
           } else if (progress.status === "failed") {
             if (pollRef.current) clearInterval(pollRef.current);
-            toast.error("Review pipeline failed. Check server logs.");
+            const failureReason = getFailureReason(progress.stage);
+            toast.error(failureReason ? `Review pipeline failed: ${failureReason}` : "Review pipeline failed.");
             setCurrentStageLabel("Failed");
             setRunning(false);
           }

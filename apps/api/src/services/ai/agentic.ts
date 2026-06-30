@@ -370,6 +370,11 @@ function buildReviewContext(review: NonNullable<ReviewRecord>): string {
   ].join("\n");
 }
 
+function formatPipelineFailure(err: unknown): string {
+  const message = err instanceof Error ? err.message : String(err);
+  return message.replace(/\s+/g, " ").slice(0, 240);
+}
+
 // ── Main pipeline ─────────────────────────────────────────────────────────────
 
 export async function runReviewPipeline(reviewId: string): Promise<void> {
@@ -481,11 +486,12 @@ export async function runReviewPipeline(reviewId: string): Promise<void> {
       },
     });
   } catch (err) {
+    const failureReason = formatPipelineFailure(err);
     await prisma.review.update({
       where: { id: reviewId },
       data: {
         status: "failed",
-        stage: "failed",
+        stage: `failed:${failureReason}`,
       },
     }).catch(() => undefined);
 
