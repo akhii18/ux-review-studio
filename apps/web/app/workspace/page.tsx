@@ -12,6 +12,8 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "
 import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { useAppDispatch } from "@/store/hooks";
+import { addNotification } from "@/store/slices/notificationsSlice";
 import {
   Download, Check, RefreshCw, Sparkles, Image as ImageIcon,
   AlertCircle, ChevronLeft, ChevronRight, X, ArrowUpRight, Edit3, Plus,
@@ -89,6 +91,7 @@ function findingMatchesScreen(findingScreen?: string, screenName?: string): bool
 function WorkspaceContent() {
   const params = useSearchParams();
   const reviewId = params.get("reviewId");
+  const dispatch = useAppDispatch();
 
   const [reviewData, setReviewData] = useState<any>(null);
   const [reviewLoading, setReviewLoading] = useState(true);
@@ -219,6 +222,14 @@ function WorkspaceContent() {
     if (!reviewId) return;
     try {
       const report = await exportReviewReport(reviewId);
+      dispatch(addNotification({
+        type: "report_exported",
+        title: "Report exported",
+        message: `${reviewData?.name ?? "Your review"} report was exported successfully.`,
+        href: `/workspace?reviewId=${reviewId}`,
+        reviewId,
+        dedupeKey: `report-exported:${reviewId}`,
+      }));
       const blob = new Blob([report.contentMd], { type: "text/markdown" });
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
@@ -230,7 +241,7 @@ function WorkspaceContent() {
     } catch (error: any) {
       toast.error(error?.message ?? "Triage or review the findings for report export");
     }
-  }, [reviewId]);
+  }, [dispatch, reviewData?.name, reviewId]);
 
   const handleFindingAction = useCallback(
     (findingId: string, actionStatus: TriageStatus) => {

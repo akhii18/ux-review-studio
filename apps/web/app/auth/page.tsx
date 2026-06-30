@@ -1,8 +1,8 @@
 "use client";
 
 import { FormEvent, Suspense, useEffect, useRef, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
-import { Check, ChevronDown, Lock, Mail, ShieldCheck, X } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { Check, ChevronDown, Lock, Mail, X } from "lucide-react";
 import { toast } from "sonner";
 import {
   signin as apiSignin,
@@ -12,8 +12,7 @@ import {
 
 function AuthPageContent() {
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const [tab, setTab] = useState("signup");
+  const [tab, setTab] = useState("signin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [signupName, setSignupName] = useState("");
@@ -191,9 +190,7 @@ function AuthPageContent() {
 
         {/* Logo */}
         <div className="flex justify-center mb-3">
-          <div className="h-12 w-12 rounded-xl bg-[#140c3a] flex items-center justify-center">
-            <ShieldCheck className="text-white w-6 h-6" />
-          </div>
+          <img src="/logo.png" alt="UX Review Studio" className="h-12 w-12 rounded-xl object-contain" />
         </div>
 
         <h1 className="text-2xl font-semibold text-[#0f172a]">
