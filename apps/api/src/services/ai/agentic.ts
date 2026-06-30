@@ -102,7 +102,9 @@ type ReviewAssetRecord = {
 // ── Module loader ─────────────────────────────────────────────────────────────
 
 const agenticSourcePath = path.resolve(__dirname, "../../../../agentic-ai/src/index.ts");
-const agenticBuildPath = path.resolve(__dirname, "../../../../agentic-ai/dist/index.js");
+// In production this file is compiled under apps/api/dist/src/services/ai,
+// so the agentic-ai package lives one level higher than the source-time path.
+const agenticBuildPath = path.resolve(__dirname, "../../../../../agentic-ai/dist/index.js");
 
 let agenticModulePromise: Promise<{ runReviewGraph: (params: {
   screenshots: string[];
