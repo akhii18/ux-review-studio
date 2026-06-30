@@ -9,19 +9,21 @@ import { ReviewHistoryModal } from "@/components/dashboard/ReviewHistoryModal";
 import type { ReviewHistoryItem } from "@/components/dashboard/ReviewHistoryModal";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import { PriorityBadge } from "@/components/ui/PriorityBadge";
 import {
   ArrowRight, ArrowUpRight, CheckCircle2, AlertOctagon,
   FileText, Plus, AlertTriangle,
-  MoreHorizontal,
+  ExternalLink, History, Trash2,
+  MoreVertical,
 } from "lucide-react";
 import { deleteReview, getAnalytics, listReviews } from "@/lib/api";
 import { toast } from "sonner";
 
 function toTitleCase(value: string) {
-  return value
+  const titleCased = value
     .replaceAll("_", " ")
     .trim()
     .toLowerCase()
@@ -29,6 +31,12 @@ function toTitleCase(value: string) {
     .filter(Boolean)
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(" ");
+
+  return titleCased
+    .replace(/\bUx\b/g, "UX")
+    .replace(/\bUi\b/g, "UI")
+    .replace(/\bAi\b/g, "AI")
+    .replace(/\bPrd\b/g, "PRD");
 }
 
 export default function DashboardPage() {
@@ -378,9 +386,38 @@ export default function DashboardPage() {
                           </TableCell>
                           <TableCell className="hidden text-xs xl:table-cell">{r.owner || "User"}</TableCell>
                           <TableCell className="hidden text-right sm:table-cell">
-                            <Button asChild size="icon" variant="ghost" aria-label={`Open ${r.name}`} className="h-9 w-9">
-                              <Link href={{ pathname: "/workspace", query: { reviewId: r.id } }}><MoreHorizontal className="h-4 w-4" /></Link>
-                            </Button>
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button size="icon" variant="ghost" aria-label={`Actions for ${r.name}`} className="h-9 w-9">
+                                  <MoreVertical className="h-4 w-4" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end" className="min-w-0 w-auto flex items-center gap-1 p-1">
+                                <DropdownMenuItem asChild className="h-9 w-9 justify-center">
+                                  <Link href={{ pathname: "/workspace", query: { reviewId: r.id } }} aria-label="Open review">
+                                    <ExternalLink className="h-4 w-4" />
+                                    <span className="sr-only">Open review</span>
+                                  </Link>
+                                </DropdownMenuItem>
+                                <DropdownMenuItem asChild className="h-9 w-9 justify-center">
+                                  <Link href="/history" aria-label="Open review history">
+                                    <History className="h-4 w-4" />
+                                    <span className="sr-only">Open review history</span>
+                                  </Link>
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                  className="h-9 w-9 justify-center text-destructive focus:text-destructive"
+                                  onSelect={(event) => {
+                                    event.preventDefault();
+                                    void handleDeleteReview(String(r.id));
+                                  }}
+                                  aria-label="Delete review"
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                  <span className="sr-only">Delete review</span>
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
                           </TableCell>
                         </TableRow>
                       ))}
@@ -406,10 +443,10 @@ export default function DashboardPage() {
                 <div key={t.title} className="flex items-start gap-3 rounded-lg border border-border bg-secondary/40 p-3">
                   <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-card text-xs font-semibold text-primary ring-1 ring-border">{i + 1}</div>
                   <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium leading-snug">{t.title}</p>
+                    <p className="text-sm font-semibold leading-snug">{t.title}</p>
                     <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
-                      {t.principle && t.principle !== "—" && <Badge variant="outline" className="font-normal">{t.principle}</Badge>}
-                      <span>{t.count} occurrence{t.count !== 1 ? "s" : ""}</span>
+                      {t.principle && t.principle !== "—" && <Badge variant="outline" className="font-bold">{t.principle}</Badge>}
+                      <span className="font-bold">{t.count} occurrence{t.count !== 1 ? "s" : ""}</span>
                     </div>
                   </div>
                 </div>

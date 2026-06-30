@@ -7,6 +7,23 @@ import reviewReducer from "./slices/reviewSlice";
 import findingsReducer from "./slices/findingsSlice";
 import checklistsReducer from "./slices/checklistsSlice";
 import settingsReducer from "./slices/settingsSlice";
+import notificationsReducer, { notificationsStorageKey } from "./slices/notificationsSlice";
+
+function persistNotifications(items: unknown) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(notificationsStorageKey, JSON.stringify(items));
+  } catch {
+    // Ignore storage failures.
+  }
+}
+
+const notificationsPersistenceMiddleware = (storeApi: any) => (next: any) => (action: any) => {
+  const result = next(action);
+  const notifications = storeApi.getState().notifications;
+  persistNotifications(notifications.items);
+  return result;
+};
 
 export const store = configureStore({
   reducer: {
@@ -14,6 +31,7 @@ export const store = configureStore({
     findings: findingsReducer,
     checklists: checklistsReducer,
     settings: settingsReducer,
+    notifications: notificationsReducer,
     [findingsApi.reducerPath]: findingsApi.reducer,
     [checklistsApi.reducerPath]: checklistsApi.reducer,
     [principlesApi.reducerPath]: principlesApi.reducer,
@@ -21,6 +39,7 @@ export const store = configureStore({
   },
   middleware: (getDefault) =>
     getDefault().concat(
+      notificationsPersistenceMiddleware,
       findingsApi.middleware,
       checklistsApi.middleware,
       principlesApi.middleware,
