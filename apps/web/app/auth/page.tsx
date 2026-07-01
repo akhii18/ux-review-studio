@@ -188,8 +188,8 @@ function AuthPageContent() {
   };
 
   return (
-    <div className="min-h-dvh overflow-y-auto bg-[#efeeee] px-4 py-6 sm:flex sm:items-center sm:justify-center sm:py-10">
-      <div className="mx-auto w-full max-w-md text-center">
+    <div className="flex h-screen overflow-hidden items-center justify-center bg-[#efeeee] px-4">
+      <div className="w-full max-w-md text-center">
 
         {/* Logo */}
         <div className="flex justify-center mb-3">
@@ -204,7 +204,7 @@ function AuthPageContent() {
         </p>
 
         {/* Card */}
-        <div className="bg-white rounded-2xl border border-gray-200 p-5 shadow-lg text-left sm:p-6">
+        <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-lg text-left">
 
           <h2 className="text-lg font-semibold text-[#0f172a]">
             Welcome
