@@ -1,15 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { createPortal } from "react-dom";
-import { usePathname, useRouter } from "next/navigation";
+import Link from "next/link";
 import { Bell, CheckCheck, Clock3, FileCheck2, Save, Sparkles, TriangleAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { RouteLoadingOverlay } from "@/components/ui/RouteLoadingOverlay";
 import { useAppDispatch, useAppSelector } from "@/store/hooks";
-import { clearNotifications, markAllNotificationsRead, markNotificationRead, type AppNotification } from "@/store/slices/notificationsSlice";
-import { getReview } from "@/lib/api";
+import { addNotification, clearNotifications, markAllNotificationsRead, markNotificationRead, type AppNotification } from "@/store/slices/notificationsSlice";
 import { cn } from "@/lib/utils";
 
 function formatRelativeTime(iso: string): string {
@@ -49,6 +45,7 @@ function accentForNotification(type: AppNotification["type"]) {
     case "review_failed":
       return "text-destructive bg-destructive/10";
     case "review_started":
+    case "review_resumed":
       return "text-primary bg-primary/10";
     default:
       return "text-muted-foreground bg-muted";
@@ -57,46 +54,8 @@ function accentForNotification(type: AppNotification["type"]) {
 
 export function NotificationBellMenu() {
   const dispatch = useAppDispatch();
-  const pathname = usePathname();
-  const router = useRouter();
   const notifications = useAppSelector((state) => state.notifications.items);
   const unreadCount = notifications.filter((item) => !item.read).length;
-  const [isNavigating, setIsNavigating] = useState(false);
-
-  useEffect(() => {
-    setIsNavigating(false);
-  }, [pathname]);
-
-  const handleNotificationOpen = async (notification: AppNotification) => {
-    setIsNavigating(true);
-    dispatch(markNotificationRead(notification.id));
-
-    if (!notification.reviewId) {
-      if (notification.href) {
-        router.push(notification.href);
-      }
-      return;
-    }
-
-    const fallbackHref = notification.type === "draft_saved"
-      ? `/new-review?reviewId=${notification.reviewId}`
-      : `/workspace?reviewId=${notification.reviewId}`;
-
-    try {
-      const review = await getReview(notification.reviewId);
-      const status = String(review?.status ?? "").toLowerCase();
-      const targetHref = notification.type === "draft_saved" && status === "draft"
-        ? `/new-review?reviewId=${notification.reviewId}`
-        : status === "draft" || status === "in_progress"
-          ? `/new-review?reviewId=${notification.reviewId}`
-          : `/workspace?reviewId=${notification.reviewId}`;
-
-      router.push(targetHref);
-    } catch {
-      setIsNavigating(false);
-      router.push(fallbackHref);
-    }
-  };
 
   return (
     <DropdownMenu>
@@ -179,14 +138,25 @@ export function NotificationBellMenu() {
                 </div>
               );
 
+              if (notification.href) {
+                return (
+                  <DropdownMenuItem
+                    key={notification.id}
+                    asChild
+                    className="p-0"
+                  >
+                    <Link href={notification.href} className="w-full" onClick={() => dispatch(markNotificationRead(notification.id))}>
+                      {content}
+                    </Link>
+                  </DropdownMenuItem>
+                );
+              }
+
               return (
                 <DropdownMenuItem
                   key={notification.id}
-                  className="p-0 rounded-lg transition-all data-[highlighted]:bg-sky-500/10 data-[highlighted]:text-sky-950 data-[highlighted]:shadow-[inset_0_0_0_1px_rgba(56,189,248,0.7)] dark:data-[highlighted]:text-sky-50"
-                  onSelect={(event) => {
-                    event.preventDefault();
-                    void handleNotificationOpen(notification);
-                  }}
+                  className="p-0"
+                  onSelect={() => dispatch(markNotificationRead(notification.id))}
                 >
                   {content}
                 </DropdownMenuItem>
@@ -195,9 +165,6 @@ export function NotificationBellMenu() {
           )}
         </div>
       </DropdownMenuContent>
-      {isNavigating && typeof document !== "undefined"
-        ? createPortal(<RouteLoadingOverlay label="Opening review" />, document.body)
-        : null}
     </DropdownMenu>
   );
 }

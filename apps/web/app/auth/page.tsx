@@ -103,14 +103,11 @@ function AuthPageContent() {
       });
 
       localStorage.setItem("token", result.token);
-      const currentUser = { id: result.user.id, name: result.user.name || "User", email: result.user.email };
+      const currentUser = { name: result.user.name || "User", email: result.user.email };
       localStorage.setItem("current_user", JSON.stringify(currentUser));
       document.cookie = `token=${result.token}; Path=/; Max-Age=${result.expiresInSeconds}; SameSite=Lax`;
-      window.dispatchEvent(new Event("uxm:user-updated"));
 
-      toast.success("User authenticated", {
-        className: "!bg-green-600 !text-white !border-green-700",
-      });
+      toast.success("User authenticated");
       router.replace("/dashboard");
     } catch (err: any) {
       setError(err?.message ?? "Sign-in failed");
@@ -188,7 +185,7 @@ function AuthPageContent() {
   };
 
   return (
-    <div className="flex h-screen overflow-hidden items-center justify-center bg-[#efeeee] px-4">
+    <div className="flex min-h-screen items-center justify-center bg-[#efeeee] px-4 py-10">
       <div className="w-full max-w-md text-center">
 
         {/* Logo */}

@@ -40,7 +40,6 @@ import findingsRouter from "./routes/findings.routes";
 import checklistsRouter from "./routes/checklists.routes";
 import principlesRouter from "./routes/principles.routes";
 import settingsRouter from "./routes/settings.routes";
-import notificationsRouter from "./routes/notifications.routes";
 
 const app = express();
 
@@ -104,7 +103,6 @@ app.use("/api/findings", findingsRouter);
 app.use("/api/checklists", checklistsRouter);
 app.use("/api/principles", principlesRouter);
 app.use("/api/settings", settingsRouter);
-app.use("/api/notifications", notificationsRouter);
 
 // ── 404 ────────────────────────────────────────────────────────────────────────
 app.use((_req, res) => {
