@@ -149,8 +149,9 @@ export function getReviewProgress(id: string) {
   );
 }
 
-export function getAnalytics() {
-  return request<any>("/api/reviews/analytics");
+export function getAnalytics(params?: Record<string, string>) {
+  const qs = params ? "?" + new URLSearchParams(params).toString() : "";
+  return request<any>(`/api/reviews/analytics${qs}`);
 }
 
 // ── Findings ──────────────────────────────────────────────────────────────────
