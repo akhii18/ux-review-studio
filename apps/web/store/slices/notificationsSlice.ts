@@ -35,36 +35,17 @@ export type AddNotificationPayload = {
   createdAt?: string;
 };
 
-const LEGACY_STORAGE_KEY = "uxm:notif-items";
+const STORAGE_KEY = "uxm:notif-items";
 const MAX_NOTIFICATIONS = 20;
 
 function createId() {
   return globalThis.crypto?.randomUUID?.() ?? `notif-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-function getCurrentUserId(): string | null {
-  if (typeof window === "undefined") return null;
-
-  const raw = window.localStorage.getItem("current_user");
-  if (!raw) return null;
-
-  try {
-    const parsed = JSON.parse(raw);
-    return typeof parsed?.id === "string" ? parsed.id : null;
-  } catch {
-    return null;
-  }
-}
-
-export function getNotificationsStorageKey() {
-  const userId = getCurrentUserId();
-  return userId ? `uxm:notif-items:${userId}` : LEGACY_STORAGE_KEY;
-}
-
-function readStoredNotifications(storageKey: string): AppNotification[] {
+function loadStoredNotifications(): AppNotification[] {
   if (typeof window === "undefined") return [];
 
-  const raw = window.localStorage.getItem(storageKey);
+  const raw = window.localStorage.getItem(STORAGE_KEY);
   if (!raw) return [];
 
   try {
@@ -73,7 +54,6 @@ function readStoredNotifications(storageKey: string): AppNotification[] {
 
     return parsed
       .filter((item) => item && typeof item.id === "string" && typeof item.type === "string")
-      .filter((item) => item.type !== "review_resumed")
       .map((item) => ({
         id: item.id,
         type: item.type,
@@ -92,16 +72,13 @@ function readStoredNotifications(storageKey: string): AppNotification[] {
 }
 
 const initialState: NotificationsState = {
-  items: [],
+  items: loadStoredNotifications(),
 };
 
 export const notificationsSlice = createSlice({
   name: "notifications",
   initialState,
   reducers: {
-    setNotifications(state, action: PayloadAction<AppNotification[]>) {
-      state.items = action.payload.slice(0, MAX_NOTIFICATIONS);
-    },
     addNotification(state, action: PayloadAction<AddNotificationPayload>) {
       const payload = action.payload;
       const nextItem: AppNotification = {
@@ -145,7 +122,6 @@ export const notificationsSlice = createSlice({
 });
 
 export const {
-  setNotifications,
   addNotification,
   markNotificationRead,
   markAllNotificationsRead,
@@ -153,5 +129,5 @@ export const {
   clearNotifications,
 } = notificationsSlice.actions;
 
-export const notificationsStorageKey = getNotificationsStorageKey;
+export const notificationsStorageKey = STORAGE_KEY;
 export default notificationsSlice.reducer;
