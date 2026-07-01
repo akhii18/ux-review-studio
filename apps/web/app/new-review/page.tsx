@@ -19,7 +19,6 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Progress } from "@/components/ui/progress";
 import { Slider } from "@/components/ui/slider";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useAppDispatch } from "@/store/hooks";
 import { addNotification } from "@/store/slices/notificationsSlice";
 import {
@@ -150,6 +149,7 @@ function matchesPresetCriteria(type: string, values: string[]): boolean {
 function formatReviewTypeLabel(value: string): string {
   const label = value.replaceAll("_", " ").trim().toLowerCase();
   if (!label) return "—";
+  if (label === "partial") return "Custom";
   if (label === "a11y") return "A11y";
   if (label === "prd") return "PRD";
   return label.charAt(0).toUpperCase() + label.slice(1);
@@ -268,7 +268,41 @@ export default function NewReviewPage() {
   const [activeScreenshotIndex, setActiveScreenshotIndex] = useState(0);
   const [isDocumentModalOpen, setIsDocumentModalOpen] = useState(false);
   const [activeDocumentIndex, setActiveDocumentIndex] = useState(0);
+  const [uploadedAssetsStart, setUploadedAssetsStart] = useState(0);
+  const [nameTouched, setNameTouched] = useState(false);
+  const [productTouched, setProductTouched] = useState(false);
   const criteriaTouchedRef = useRef(false);
+
+  useEffect(() => {
+    const syncOwnerFromSignedInUser = () => {
+      if (typeof window === "undefined") return;
+
+      const raw = localStorage.getItem("current_user");
+      if (!raw) {
+        setOwner("User");
+        return;
+      }
+
+      try {
+        const parsed = JSON.parse(raw) as { name?: string };
+        const name = (parsed.name ?? "User").trim() || "User";
+        setOwner(name);
+      } catch {
+        setOwner("User");
+      }
+    };
+
+    syncOwnerFromSignedInUser();
+
+    const handleStorage = () => syncOwnerFromSignedInUser();
+    window.addEventListener("storage", handleStorage);
+    window.addEventListener("uxm:user-updated", handleStorage as EventListener);
+
+    return () => {
+      window.removeEventListener("storage", handleStorage);
+      window.removeEventListener("uxm:user-updated", handleStorage as EventListener);
+    };
+  }, []);
 
   const screenshotFiles = useMemo(
     () => files.filter((file) => file.type === "Screenshot" && Boolean(file.previewUrl)),
@@ -280,8 +314,15 @@ export default function NewReviewPage() {
     [files]
   );
 
+  const visibleUploadedAssets = useMemo(
+    () => files.slice(uploadedAssetsStart, uploadedAssetsStart + 3),
+    [files, uploadedAssetsStart]
+  );
+
+  const maxUploadedAssetsStart = Math.max(0, files.length - 3);
+
   const reviewTypeOptions = [
-    { value: "partial", label: "Partial" },
+    { value: "partial", label: "Custom" },
     { value: "full", label: "Full UX Review" },
     { value: "prd", label: "PRD Alignment Review" },
     { value: "a11y", label: "Accessibility Review" },
@@ -328,7 +369,6 @@ export default function NewReviewPage() {
         setProduct(review.product ?? "");
         setDomain(review.domain || "bfsi");
         setReviewType(review.reviewType || "full");
-        setOwner(review.owner || "");
         setCriteria(Array.isArray(review.criteria) ? review.criteria : []);
         setDepth(review.depth || "standard");
         setConfidence([typeof review.confidenceThreshold === "number" ? review.confidenceThreshold : 75]);
@@ -469,6 +509,12 @@ export default function NewReviewPage() {
       setActiveDocumentIndex(documentFiles.length - 1);
     }
   }, [activeDocumentIndex, documentFiles, isDocumentModalOpen]);
+
+  useEffect(() => {
+    if (uploadedAssetsStart > maxUploadedAssetsStart) {
+      setUploadedAssetsStart(maxUploadedAssetsStart);
+    }
+  }, [maxUploadedAssetsStart, uploadedAssetsStart]);
 
   /**
    * Converts a raw File array into file-list entries.
@@ -796,6 +842,8 @@ export default function NewReviewPage() {
   const validStep0 = name.trim().length > 0 && product.trim().length > 0;
   const validStep1 = files.length > 0;
   const validStep2 = criteria.length > 0;
+  const nameRequiredError = nameTouched && name.trim().length === 0;
+  const productRequiredError = productTouched && product.trim().length === 0;
   const progressPercent = Math.min(100, Math.max(0, Math.round(((stageIdx + 1) / progressStages.length) * 100)));
   const canNavigateToStep = (targetStep: number) => {
     if (running || isLoadingDraft) {
@@ -871,11 +919,24 @@ export default function NewReviewPage() {
                   {step === 0 && (
                 <div className="grid gap-5 md:grid-cols-2">
                   <Field label="Review name" required help="Use a descriptive, scannable name.">
-                    <Input value={name} onChange={(e) => setName(toAlphaNumeric(e.target.value))} aria-required />
-                    {name.trim().length === 0 && <p className="mt-1 text-xs text-destructive">Required.</p>}
+                    <Input
+                      value={name}
+                      onChange={(e) => setName(toAlphaNumeric(e.target.value))}
+                      onBlur={() => setNameTouched(true)}
+                      className={cn(nameRequiredError && "border-red-500 focus-visible:ring-red-500")}
+                      aria-required
+                    />
+                    {nameRequiredError && <p className="mt-1 text-xs text-red-500">Required.</p>}
                   </Field>
                   <Field label="Product / application" required>
-                    <Input value={product} onChange={(e) => setProduct(toAlphaNumeric(e.target.value))} aria-required />
+                    <Input
+                      value={product}
+                      onChange={(e) => setProduct(toAlphaNumeric(e.target.value))}
+                      onBlur={() => setProductTouched(true)}
+                      className={cn(productRequiredError && "border-red-500 focus-visible:ring-red-500")}
+                      aria-required
+                    />
+                    {productRequiredError && <p className="mt-1 text-xs text-red-500">Required.</p>}
                   </Field>
                   <Field label="Business domain">
                     <Select value={domain} onValueChange={setDomain}>
@@ -910,7 +971,7 @@ export default function NewReviewPage() {
                     </Select>
                   </Field>
                   <Field label="Reviewer / owner" className="md:col-span-2">
-                    <Input value={owner} onChange={(e) => setOwner(toAlphaNumeric(e.target.value))} />
+                    <Input value={owner} readOnly aria-readonly />
                   </Field>
                 </div>
                   )}
@@ -954,48 +1015,39 @@ export default function NewReviewPage() {
                       onChange={handleFilePick}
                     />
                   </div>
-                  <div className="grid gap-3 md:grid-cols-2">
-                    <Field label="Figma prototype URL">
-                      <div className="relative">
-                        <Figma className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
-                        <Input
-                          placeholder="https://figma.com/proto/…"
-                          className="pl-9"
-                          value={figmaUrl}
-                          onChange={(e) => setFigmaUrl(e.target.value)}
-                        />
-                      </div>
-                    </Field>
-                    <Field label="Design system reference">
-                      <div className="relative">
-                        <LinkIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
-                        <Input
-                          placeholder="https://zeroheight.com/…"
-                          className="pl-9"
-                          value={designSystemUrl}
-                          onChange={(e) => setDesignSystemUrl(e.target.value)}
-                        />
-                      </div>
-                    </Field>
-                  </div>
-                  <Field label="Flow screenshots & PRD">
-                    <Textarea
-                      rows={3}
-                      placeholder="Paste flow notes, PRD excerpts, or context the AI should know."
-                      value={contextText}
-                      onChange={(e) => setContextText(e.target.value)}
-                    />
-                  </Field>
-                  <Field label="User-session recording (optional)" help="Coming soon — placeholder for future scope.">
-                    <div className="flex items-center gap-2 rounded-lg border border-dashed border-border bg-secondary/30 p-3 text-xs text-muted-foreground">
-                      <Video className="h-4 w-4" aria-hidden="true" />Drop a recording here once enabled.
-                    </div>
-                  </Field>
                   {files.length > 0 && (
                     <div>
-                      <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">Uploaded assets ({files.length})</p>
-                      <div className="grid gap-2 md:grid-cols-2">
-                        {files.map((f) => (
+                      <div className="mb-2 flex items-center justify-between gap-2">
+                        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Uploaded assets ({files.length})</p>
+                        {files.length > 3 && (
+                          <div className="flex items-center gap-1">
+                            <Button
+                              type="button"
+                              size="icon"
+                              variant="outline"
+                              className="h-8 w-8"
+                              onClick={() => setUploadedAssetsStart((current) => Math.max(0, current - 1))}
+                              disabled={uploadedAssetsStart === 0}
+                              aria-label="Show previous uploaded assets"
+                            >
+                              <ChevronLeft className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              type="button"
+                              size="icon"
+                              variant="outline"
+                              className="h-8 w-8"
+                              onClick={() => setUploadedAssetsStart((current) => Math.min(maxUploadedAssetsStart, current + 1))}
+                              disabled={uploadedAssetsStart >= maxUploadedAssetsStart}
+                              aria-label="Show next uploaded assets"
+                            >
+                              <ChevronRight className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        )}
+                      </div>
+                      <div className="grid gap-2 md:grid-cols-3">
+                        {visibleUploadedAssets.map((f) => (
                           <div
                             key={f.id}
                             role="button"
@@ -1051,6 +1103,43 @@ export default function NewReviewPage() {
                       </div>
                     </div>
                   )}
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <Field label="Figma prototype URL">
+                      <div className="relative">
+                        <Figma className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+                        <Input
+                          placeholder="https://figma.com/proto/…"
+                          className="pl-9"
+                          value={figmaUrl}
+                          onChange={(e) => setFigmaUrl(e.target.value)}
+                        />
+                      </div>
+                    </Field>
+                    <Field label="Design system reference">
+                      <div className="relative">
+                        <LinkIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+                        <Input
+                          placeholder="https://zeroheight.com/…"
+                          className="pl-9"
+                          value={designSystemUrl}
+                          onChange={(e) => setDesignSystemUrl(e.target.value)}
+                        />
+                      </div>
+                    </Field>
+                  </div>
+                  <Field label="Flow screenshots & PRD">
+                    <Textarea
+                      rows={3}
+                      placeholder="Paste flow notes, PRD excerpts, or context the AI should know."
+                      value={contextText}
+                      onChange={(e) => setContextText(e.target.value)}
+                    />
+                  </Field>
+                  <Field label="User-session recording (optional)" help="Coming soon — placeholder for future scope.">
+                    <div className="flex items-center gap-2 rounded-lg border border-dashed border-border bg-secondary/30 p-3 text-xs text-muted-foreground">
+                      <Video className="h-4 w-4" aria-hidden="true" />Drop a recording here once enabled.
+                    </div>
+                  </Field>
                 </div>
                   )}
 
@@ -1289,25 +1378,17 @@ export default function NewReviewPage() {
         {/* Navigation */}
         {!running && step < steps.length - 1 && (
           <div className="fixed bottom-0 left-0 right-0 z-20 border-t border-border/80 bg-card/95 px-4 py-3 shadow-[0_-12px_40px_-24px_rgba(15,23,42,0.35)] backdrop-blur-xl md:left-[var(--sidebar-width)] md:px-6 md:peer-data-[state=collapsed]:left-[var(--sidebar-width-icon)]">
-            <div className="mx-auto flex max-w-6xl justify-end">
+            <div className="mx-auto flex max-w-6xl items-center justify-between">
+              <Button
+                variant="ghost"
+                className="min-h-10 px-2"
+                aria-label="Back"
+                disabled={step === 0}
+                onClick={() => setStep((s) => Math.max(0, s - 1))}
+              >
+                <ChevronLeft className="mr-1 h-4 w-4" aria-hidden="true" />Back
+              </Button>
               <div className="flex flex-wrap items-center justify-end gap-2">
-                <TooltipProvider delayDuration={0}>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="min-h-10 min-w-10"
-                        aria-label="Go back"
-                        disabled={step === 0}
-                        onClick={() => setStep((s) => Math.max(0, s - 1))}
-                      >
-                        <ChevronLeft className="h-4 w-4" aria-hidden="true" />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>Go back</TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
                 <Button variant="outline" className="min-h-10 bg-background" disabled={isSavingDraft || isLoadingDraft} onClick={handleSaveDraft}>
                   {isSavingDraft ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" aria-hidden="true" /> : <Save className="mr-1.5 h-4 w-4" aria-hidden="true" />}
                   Save draft
@@ -1330,7 +1411,7 @@ export default function NewReviewPage() {
           <DialogHeader className="border-b border-border px-4 py-3 pr-16">
             <div className="flex items-center justify-between gap-3">
               <DialogTitle className="text-sm font-medium">
-                Screenshots ({screenshotFiles.length})
+                {screenshotFiles[activeScreenshotIndex]?.name ?? "Screenshot"}
               </DialogTitle>
               {screenshotFiles.length > 0 && (
                 <Button
@@ -1348,8 +1429,7 @@ export default function NewReviewPage() {
 
           {screenshotFiles.length > 0 && (
             <div className="space-y-3 p-4">
-              <div className="flex items-center justify-between gap-2">
-                <p className="truncate text-sm font-medium text-foreground">{screenshotFiles[activeScreenshotIndex]?.name}</p>
+              <div className="flex items-center justify-end gap-2">
                 <p className="text-xs text-muted-foreground">
                   {activeScreenshotIndex + 1} / {screenshotFiles.length}
                 </p>
