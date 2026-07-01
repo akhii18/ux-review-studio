@@ -67,6 +67,7 @@ model User {
   reviews    Review[]
   checklists Checklist[]
   settings   Setting[]
+  notifications Notification[]
 
   @@map("users")
 }
@@ -83,6 +84,7 @@ model Review {
   stage               String?
   uxScore             Int?
   criteria            String[]      @default([])
+  findingMetadataOptions Json?
   depth               String        @default("standard")
   confidenceThreshold Int           @default(75)
   createdAt           DateTime      @default(now())
@@ -149,6 +151,7 @@ model Finding {
   notes            String?
   escalationReason String?
   isAiGenerated    Boolean       @default(true)
+  aiMetadata       Json?
   bboxRefs         Json?         // Normalised bounding-boxes refs from AI grounding (array of {screenIndex, bbox:{x,y,width,height}})
   createdAt        DateTime      @default(now())
   updatedAt        DateTime      @updatedAt
@@ -252,4 +255,24 @@ model Setting {
   @@index([userId])
 
   @@map("settings")
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  type      String
+  title     String
+  message   String   @db.Text
+  href      String?
+  reviewId  String?
+  dedupeKey String?
+  readAt    DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@unique([userId, dedupeKey])
+  @@map("notifications")
 }

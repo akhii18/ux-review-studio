@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo, useCallback, Suspense } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { AppHeader } from "@/components/ui/AppHeader";
 import { Button } from "@/components/ui/button";
@@ -36,6 +36,16 @@ interface ReviewBasisItem {
   explanation: string;
 }
 
+interface BoundingBoxRef {
+  screenIndex: number;
+  bbox: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  };
+}
+
 interface Finding {
   id: string;
   reviewId: string;
@@ -55,14 +65,35 @@ interface Finding {
   confidence: number;
   notes?: string;
   reviewBasis: ReviewBasisItem[];
+  bboxRefs?: unknown;
 }
 
 interface WorkspaceScreen {
   id: string;
   name: string;
+  screenIndex?: number;
   imageUrl?: string;
   issues: number;
   p0: number;
+}
+
+interface ImageLayout {
+  offsetX: number;
+  offsetY: number;
+  width: number;
+  height: number;
+}
+
+interface PinPlacement {
+  finding: Finding;
+  ref: BoundingBoxRef;
+}
+
+interface PinCluster {
+  id: string;
+  ref: BoundingBoxRef;
+  anchor: { x: number; y: number };
+  placements: PinPlacement[];
 }
 
 const pinTone: Record<"P0" | "P1" | "P2", string> = {
@@ -70,6 +101,15 @@ const pinTone: Record<"P0" | "P1" | "P2", string> = {
   P1: "bg-warning",
   P2: "bg-info",
 };
+
+const severityRank: Record<"P0" | "P1" | "P2", number> = {
+  P0: 0,
+  P1: 1,
+  P2: 2,
+};
+
+const PIN_CLUSTER_CENTER_DISTANCE = 0.035;
+const PIN_CLUSTER_INTERSECTION_RATIO = 0.15;
 
 function stripExtension(name: string): string {
   return name.replace(/\.[^.]+$/, "");
@@ -88,6 +128,187 @@ function findingMatchesScreen(findingScreen?: string, screenName?: string): bool
   return fs === sn || fs.includes(sn) || sn.includes(fs);
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function clamp01(value: number): number {
+  return Math.min(1, Math.max(0, value));
+}
+
+function normalizeBBoxRef(ref: unknown): BoundingBoxRef | null {
+  if (!isRecord(ref) || !isRecord(ref.bbox)) return null;
+
+  const screenIndex = Number(ref.screenIndex);
+  const x = Number(ref.bbox.x);
+  const y = Number(ref.bbox.y);
+  const width = Number(ref.bbox.width);
+  const height = Number(ref.bbox.height);
+
+  if (
+    !Number.isFinite(screenIndex) ||
+    !Number.isFinite(x) ||
+    !Number.isFinite(y) ||
+    !Number.isFinite(width) ||
+    !Number.isFinite(height)
+  ) {
+    return null;
+  }
+
+  const safeX = clamp01(x);
+  const safeY = clamp01(y);
+  const safeWidth = Math.min(1 - safeX, Math.max(0, width));
+  const safeHeight = Math.min(1 - safeY, Math.max(0, height));
+
+  if (safeWidth <= 0 || safeHeight <= 0 || safeX >= 1 || safeY >= 1) return null;
+
+  return {
+    screenIndex: Math.max(0, Math.floor(screenIndex)),
+    bbox: {
+      x: safeX,
+      y: safeY,
+      width: safeWidth,
+      height: safeHeight,
+    },
+  };
+}
+
+function getValidBBoxRefs(finding: Finding): BoundingBoxRef[] {
+  if (!Array.isArray(finding.bboxRefs)) return [];
+  return finding.bboxRefs
+    .map(normalizeBBoxRef)
+    .filter((ref): ref is BoundingBoxRef => Boolean(ref));
+}
+
+function getBboxRefForScreen(finding: Finding, screenIndex?: number): BoundingBoxRef | null {
+  if (typeof screenIndex !== "number") return null;
+  return getValidBBoxRefs(finding).find((ref) => ref.screenIndex === screenIndex) ?? null;
+}
+
+function getBboxCenter(ref: BoundingBoxRef): { x: number; y: number } {
+  return {
+    x: ref.bbox.x + ref.bbox.width / 2,
+    y: ref.bbox.y + ref.bbox.height / 2,
+  };
+}
+
+function getCenterDistance(a: BoundingBoxRef, b: BoundingBoxRef): number {
+  const ca = getBboxCenter(a);
+  const cb = getBboxCenter(b);
+  return Math.hypot(ca.x - cb.x, ca.y - cb.y);
+}
+
+function getBboxIntersectionRatio(a: BoundingBoxRef, b: BoundingBoxRef): number {
+  const left = Math.max(a.bbox.x, b.bbox.x);
+  const top = Math.max(a.bbox.y, b.bbox.y);
+  const right = Math.min(a.bbox.x + a.bbox.width, b.bbox.x + b.bbox.width);
+  const bottom = Math.min(a.bbox.y + a.bbox.height, b.bbox.y + b.bbox.height);
+  const intersection = Math.max(0, right - left) * Math.max(0, bottom - top);
+
+  if (intersection <= 0) return 0;
+
+  const smallerArea = Math.min(a.bbox.width * a.bbox.height, b.bbox.width * b.bbox.height);
+  return intersection / Math.max(smallerArea, Number.EPSILON);
+}
+
+function isBboxCenterInsideBbox(centerRef: BoundingBoxRef, containerRef: BoundingBoxRef): boolean {
+  const center = getBboxCenter(centerRef);
+  return (
+    center.x >= containerRef.bbox.x &&
+    center.x <= containerRef.bbox.x + containerRef.bbox.width &&
+    center.y >= containerRef.bbox.y &&
+    center.y <= containerRef.bbox.y + containerRef.bbox.height
+  );
+}
+
+function shouldClusterPlacements(a: PinPlacement, b: PinPlacement): boolean {
+  if (a.ref.screenIndex !== b.ref.screenIndex) return false;
+
+  return (
+    getCenterDistance(a.ref, b.ref) <= PIN_CLUSTER_CENTER_DISTANCE ||
+    getBboxIntersectionRatio(a.ref, b.ref) >= PIN_CLUSTER_INTERSECTION_RATIO ||
+    isBboxCenterInsideBbox(a.ref, b.ref) ||
+    isBboxCenterInsideBbox(b.ref, a.ref)
+  );
+}
+
+function getClusterAnchor(placements: PinPlacement[]): { x: number; y: number } {
+  const centers = placements.map((placement) => getBboxCenter(placement.ref));
+  return {
+    x: centers.reduce((sum, center) => sum + center.x, 0) / Math.max(1, centers.length),
+    y: centers.reduce((sum, center) => sum + center.y, 0) / Math.max(1, centers.length),
+  };
+}
+
+function buildPinClusters(placements: PinPlacement[]): PinCluster[] {
+  const clusters: PinCluster[] = [];
+
+  for (const placement of placements) {
+    const cluster = clusters.find((candidate) =>
+      candidate.placements.some((clusterPlacement) => shouldClusterPlacements(placement, clusterPlacement))
+    );
+
+    if (cluster) {
+      cluster.placements.push(placement);
+      cluster.anchor = getClusterAnchor(cluster.placements);
+    } else {
+      clusters.push({
+        id: "",
+        ref: placement.ref,
+        anchor: getBboxCenter(placement.ref),
+        placements: [placement],
+      });
+    }
+  }
+
+  return clusters.map((cluster) => ({
+    ...cluster,
+    id: [
+      cluster.ref.screenIndex,
+      ...cluster.placements.map((placement) => placement.finding.id).sort(),
+    ].join(":"),
+  }));
+}
+
+function getClusterSeverity(cluster: PinCluster): "P0" | "P1" | "P2" {
+  return cluster.placements.reduce<"P0" | "P1" | "P2">((highest, placement) => {
+    return severityRank[placement.finding.severity] < severityRank[highest]
+      ? placement.finding.severity
+      : highest;
+  }, "P2");
+}
+
+function findingMatchesScreenContext(finding: Finding, screenName?: string, screenIndex?: number): boolean {
+  const hasCoordinateRefs = getValidBBoxRefs(finding).length > 0;
+  if (hasCoordinateRefs && typeof screenIndex === "number") {
+    return Boolean(getBboxRefForScreen(finding, screenIndex)) || findingMatchesScreen(finding.screen, screenName);
+  }
+  return findingMatchesScreen(finding.screen, screenName);
+}
+
+function getContainedImageLayout(params: {
+  containerWidth: number;
+  containerHeight: number;
+  naturalWidth: number;
+  naturalHeight: number;
+}): ImageLayout | null {
+  const { containerWidth, containerHeight, naturalWidth, naturalHeight } = params;
+  if (containerWidth <= 0 || containerHeight <= 0 || naturalWidth <= 0 || naturalHeight <= 0) return null;
+
+  const containerRatio = containerWidth / containerHeight;
+  const imageRatio = naturalWidth / naturalHeight;
+
+  if (imageRatio > containerRatio) {
+    const width = containerWidth;
+    const height = containerWidth / imageRatio;
+    return { offsetX: 0, offsetY: (containerHeight - height) / 2, width, height };
+  }
+
+  const height = containerHeight;
+  const width = containerHeight * imageRatio;
+  return { offsetX: (containerWidth - width) / 2, offsetY: 0, width, height };
+}
+
 function WorkspaceContent() {
   const params = useSearchParams();
   const reviewId = params.get("reviewId");
@@ -97,6 +318,11 @@ function WorkspaceContent() {
   const [reviewLoading, setReviewLoading] = useState(true);
   const [selectedScreen, setSelectedScreen] = useState<string | null>(null);
   const [open, setOpen] = useState<Finding | null>(null);
+  const [openCluster, setOpenCluster] = useState<PinCluster | null>(null);
+  const [imageLoadFailed, setImageLoadFailed] = useState(false);
+  const canvasRef = useRef<HTMLDivElement>(null);
+  const imageRef = useRef<HTMLImageElement>(null);
+  const [imageLayout, setImageLayout] = useState<ImageLayout | null>(null);
 
   const fetchReview = useCallback(() => {
     if (!reviewId) return;
@@ -137,11 +363,13 @@ function WorkspaceContent() {
     const imageAssets = assetsList.filter((a: any) => a.mimeType?.startsWith("image/"));
 
     if (imageAssets.length > 0) {
-      return imageAssets.map((asset: any) => {
-        const screenFindings = allFindings.filter((f) => findingMatchesScreen(f.screen, asset.name));
+      return imageAssets.map((asset: any, assetIndex: number) => {
+        const screenName = stripExtension(asset.name);
+        const screenFindings = allFindings.filter((f) => findingMatchesScreenContext(f, screenName, assetIndex));
         return {
           id: asset.id,
-          name: stripExtension(asset.name),
+          name: screenName,
+          screenIndex: assetIndex,
           imageUrl: asset.blobUrl
             ? asset.blobUrl
             : asset.base64Data
@@ -196,8 +424,77 @@ function WorkspaceContent() {
 
   const screenFindings = useMemo(() => {
     if (!screen) return allFindings;
-    return allFindings.filter((f) => findingMatchesScreen(f.screen, screen.name));
+    return allFindings.filter((f) => findingMatchesScreenContext(f, screen.name, screen.screenIndex));
   }, [allFindings, screen]);
+
+  const pinPlacements = useMemo<PinPlacement[]>(() => {
+    if (imageLoadFailed) return [];
+    if (typeof screen?.screenIndex !== "number") return [];
+
+    return screenFindings
+      .filter((finding) => finding.status !== "DISMISSED")
+      .map((finding) => ({ finding, ref: getBboxRefForScreen(finding, screen.screenIndex) }))
+      .filter((placement): placement is PinPlacement => Boolean(placement.ref));
+  }, [screenFindings, screen, imageLoadFailed]);
+
+  const pinClusters = useMemo<PinCluster[]>(() => {
+    return buildPinClusters(pinPlacements);
+  }, [pinPlacements]);
+
+  const unplacedFindings = useMemo(() => {
+    if (imageLoadFailed) {
+      return screenFindings.filter((finding) => finding.status !== "DISMISSED");
+    }
+
+    if (typeof screen?.screenIndex !== "number") {
+      return screenFindings.filter((finding) => finding.status !== "DISMISSED");
+    }
+
+    return screenFindings
+      .filter((finding) => finding.status !== "DISMISSED")
+      .filter((finding) => !getBboxRefForScreen(finding, screen.screenIndex));
+  }, [screenFindings, screen, imageLoadFailed]);
+
+  const visibleScreenFindingCount = useMemo(
+    () => screenFindings.filter((finding) => finding.status !== "DISMISSED").length,
+    [screenFindings],
+  );
+
+  const unplacedPinCount = unplacedFindings.length;
+
+  const updateImageLayout = useCallback(() => {
+    const canvas = canvasRef.current;
+    const image = imageRef.current;
+    if (!canvas || !image || image.naturalWidth === 0 || image.naturalHeight === 0) {
+      setImageLayout(null);
+      return;
+    }
+
+    const rect = canvas.getBoundingClientRect();
+    setImageLayout(getContainedImageLayout({
+      containerWidth: rect.width,
+      containerHeight: rect.height,
+      naturalWidth: image.naturalWidth,
+      naturalHeight: image.naturalHeight,
+    }));
+  }, []);
+
+  useEffect(() => {
+    setImageLayout(null);
+    setImageLoadFailed(false);
+  }, [screen?.imageUrl]);
+
+  useEffect(() => {
+    if (!screen?.imageUrl) return;
+    updateImageLayout();
+
+    const canvas = canvasRef.current;
+    if (!canvas || typeof ResizeObserver === "undefined") return;
+
+    const observer = new ResizeObserver(updateImageLayout);
+    observer.observe(canvas);
+    return () => observer.disconnect();
+  }, [screen?.imageUrl, updateImageLayout]);
 
   const triage = useMemo(() => {
     return {
@@ -398,23 +695,33 @@ function WorkspaceContent() {
                   <ChevronRight className="h-4 w-4" />
                 </Button>
                 <Separator orientation="vertical" className="mx-1 hidden h-5 md:block" />
-                <span className="hidden text-xs text-muted-foreground md:inline">{screenFindings.filter(f => f.status !== "DISMISSED").length} pins · click a pin to view explainable insights</span>
-                <span className="text-xs text-muted-foreground md:hidden">{screenFindings.filter(f => f.status !== "DISMISSED").length} pins</span>
+                <span className="hidden text-xs text-muted-foreground md:inline">
+                  {pinClusters.length} pins{pinPlacements.length !== pinClusters.length ? ` · ${pinPlacements.length} placed findings` : ""}{unplacedPinCount > 0 ? ` · ${unplacedPinCount} unplaced` : ""} · click a pin to view explainable insights
+                </span>
+                <span className="text-xs text-muted-foreground md:hidden">
+                  {pinClusters.length} pins{unplacedPinCount > 0 ? ` · ${unplacedPinCount} unplaced` : ""}
+                </span>
               </div>
 
               <div className="flex flex-1 items-center justify-center overflow-auto p-6">
                 <div className="relative w-full max-w-3xl">
-                  <div className="relative flex aspect-[4/3] items-center justify-center overflow-hidden rounded-xl border border-border bg-card shadow-sm">
-                    {screen.imageUrl ? (
+                  <div ref={canvasRef} className="relative flex aspect-[4/3] items-center justify-center overflow-hidden rounded-xl border border-border bg-card shadow-sm">
+                    {screen.imageUrl && !imageLoadFailed ? (
                       <img
+                        ref={imageRef}
                         src={screen.imageUrl}
                         alt={screen.name}
                         className="absolute inset-0 h-full w-full object-contain bg-secondary/20"
+                        onLoad={updateImageLayout}
+                        onError={() => {
+                          setImageLayout(null);
+                          setImageLoadFailed(true);
+                        }}
                       />
                     ) : (
                       <div className="text-center">
                         <ImageIcon className="mx-auto h-10 w-10 text-muted-foreground/30" aria-hidden="true" />
-                        <p className="mt-2 text-xs text-muted-foreground">{screen.name}</p>
+                        <p className="mt-2 text-xs text-muted-foreground">{imageLoadFailed ? "Screen image unavailable" : screen.name}</p>
                         <p className="text-[11px] text-muted-foreground/70">
                           Screen preview
                         </p>
@@ -422,26 +729,71 @@ function WorkspaceContent() {
                     )}
 
                     <TooltipProvider>
-                      {screenFindings.filter((f) => f.status !== "DISMISSED").map((f, i) => {
-                        const pos = { x: 20 + ((i * 13) % 70), y: 20 + ((i * 21) % 60) };
+                      {pinClusters.map((cluster, i) => {
+                        const severity = getClusterSeverity(cluster);
+                        const style = imageLayout
+                          ? {
+                              left: imageLayout.offsetX + cluster.anchor.x * imageLayout.width,
+                              top: imageLayout.offsetY + cluster.anchor.y * imageLayout.height,
+                            }
+                          : { display: "none" };
+                        const isCluster = cluster.placements.length > 1;
+                        const primaryFinding = cluster.placements[0]?.finding;
+
                         return (
-                          <Tooltip key={f.id}>
+                          <Tooltip key={cluster.id}>
                             <TooltipTrigger asChild>
                               <button
-                                onClick={() => setOpen(f)}
+                                onClick={() => {
+                                  if (isCluster) {
+                                    setOpen(null);
+                                    setOpenCluster(cluster);
+                                  } else if (primaryFinding) {
+                                    setOpenCluster(null);
+                                    setOpen(primaryFinding);
+                                  }
+                                }}
                                 className={cn(
                                   "absolute z-10 flex h-7 w-7 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full text-[10px] font-bold text-white shadow-md ring-2 ring-card transition hover:scale-110",
-                                  pinTone[f.severity],
+                                  pinTone[severity],
+                                  isCluster && "h-8 w-8 ring-4 ring-card before:absolute before:inset-[-5px] before:-z-10 before:rounded-full before:border-2 before:border-current before:bg-card before:opacity-80 after:absolute after:inset-[-9px] after:-z-20 after:rounded-full after:border after:border-current after:opacity-35",
                                 )}
-                                style={{ left: `${pos.x}%`, top: `${pos.y}%` }}
-                                aria-label={`Finding ${i + 1} (${f.severity}): ${f.title}`}
+                                style={style}
+                                aria-label={isCluster
+                                  ? `${cluster.placements.length} findings at this location, highest severity ${severity}`
+                                  : primaryFinding
+                                  ? `Finding ${i + 1} (${primaryFinding.severity}): ${primaryFinding.title}`
+                                  : "Finding pin"}
                               >
-                                {i + 1}
+                                {isCluster ? (
+                                  <>
+                                    <span aria-hidden="true">{i + 1}</span>
+                                    <span className="absolute -right-1.5 -top-1.5 flex h-5 min-w-5 items-center justify-center rounded-full border-2 border-card bg-background px-1 text-[10px] font-extrabold leading-none text-foreground shadow-sm">
+                                      {cluster.placements.length}+
+                                    </span>
+                                  </>
+                                ) : i + 1}
                               </button>
                             </TooltipTrigger>
                             <TooltipContent side="top" className="max-w-xs">
-                              <p className="text-xs font-medium">{f.title}</p>
-                              <p className="text-[10px] text-muted-foreground">{f.severity} · {f.area}</p>
+                              {isCluster ? (
+                                <div className="space-y-1">
+                                  <p className="text-xs font-medium">{cluster.placements.length} findings here</p>
+                                  {cluster.placements.slice(0, 3).map(({ finding }) => (
+                                    <p key={finding.id} className="truncate text-[10px] text-muted-foreground">
+                                      {finding.severity} · {finding.title}
+                                    </p>
+                                  ))}
+                                  {cluster.placements.length > 3 && (
+                                    <p className="text-[10px] text-muted-foreground">+{cluster.placements.length - 3} more</p>
+                                  )}
+                                </div>
+                              ) : primaryFinding ? (
+                                <>
+                                  <p className="text-xs font-medium">{primaryFinding.title}</p>
+                                  <p className="text-[10px] text-muted-foreground">{primaryFinding.severity} · {primaryFinding.area}</p>
+                                </>
+                              ) : null}
                             </TooltipContent>
                           </Tooltip>
                         );
@@ -457,6 +809,36 @@ function WorkspaceContent() {
                       </div>
                     ))}
                   </div>
+
+                  {unplacedFindings.length > 0 && (
+                    <div className="mt-4 rounded-lg border border-border bg-card p-3 shadow-sm">
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <p className="text-xs font-medium">Unplaced findings</p>
+                          <p className="text-[11px] text-muted-foreground">These findings do not have a valid coordinate on this screen.</p>
+                        </div>
+                        <Badge variant="outline" className="shrink-0 text-[10px]">{unplacedFindings.length}</Badge>
+                      </div>
+                      <ScrollArea className="mt-2 max-h-36">
+                        <div className="space-y-1 pr-2">
+                          {unplacedFindings.map((finding) => (
+                            <button
+                              key={finding.id}
+                              onClick={() => {
+                                setOpenCluster(null);
+                                setOpen(finding);
+                              }}
+                              className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs hover:bg-secondary/70"
+                            >
+                              <span className={cn("h-2 w-2 shrink-0 rounded-full", pinTone[finding.severity])} aria-hidden="true" />
+                              <span className="min-w-0 flex-1 truncate">{finding.title}</span>
+                              <PriorityBadge priority={finding.severity} compact />
+                            </button>
+                          ))}
+                        </div>
+                      </ScrollArea>
+                    </div>
+                  )}
                 </div>
               </div>
             </>
@@ -470,16 +852,29 @@ function WorkspaceContent() {
         </section>
       </div>
 
-      <Sheet open={!!open} onOpenChange={(o) => !o && setOpen(null)}>
+      <Sheet open={!!open || !!openCluster} onOpenChange={(o) => {
+        if (!o) {
+          setOpen(null);
+          setOpenCluster(null);
+        }
+      }}>
         <SheetContent className="w-full overflow-y-auto sm:max-w-xl">
-          {open && (
+          {open ? (
             <FindingDetail
               finding={open}
               screenImageUrl={screen?.imageUrl}
               onAction={(status) => handleFindingAction(open.id, status)}
               onBasisChange={(basis) => handleBasisChange(open.id, basis)}
             />
-          )}
+          ) : openCluster ? (
+            <FindingClusterDetail
+              cluster={openCluster}
+              onSelect={(finding) => {
+                setOpenCluster(null);
+                setOpen(finding);
+              }}
+            />
+          ) : null}
         </SheetContent>
       </Sheet>
     </>
@@ -495,6 +890,46 @@ interface FindingDetailProps {
   screenImageUrl?: string;
   onAction: (status: TriageStatus) => void;
   onBasisChange: (basis: ReviewBasisItem[]) => void;
+}
+
+interface FindingClusterDetailProps {
+  cluster: PinCluster;
+  onSelect: (finding: Finding) => void;
+}
+
+function FindingClusterDetail({ cluster, onSelect }: FindingClusterDetailProps) {
+  const severity = getClusterSeverity(cluster);
+
+  return (
+    <>
+      <SheetHeader>
+        <div className="flex flex-wrap items-center gap-2">
+          <PriorityBadge priority={severity} />
+          <Badge variant="outline">{cluster.placements.length} findings</Badge>
+        </div>
+        <SheetTitle className="mt-2 text-left">Findings at this location</SheetTitle>
+        <SheetDescription className="text-left">Select a finding to review its details.</SheetDescription>
+      </SheetHeader>
+
+      <div className="mt-5 space-y-2">
+        {cluster.placements.map(({ finding }) => (
+          <button
+            key={finding.id}
+            onClick={() => onSelect(finding)}
+            className="w-full rounded-lg border border-border bg-card p-3 text-left transition hover:border-accent hover:bg-secondary/60"
+          >
+            <div className="flex flex-wrap items-center gap-2">
+              <PriorityBadge priority={finding.severity} compact />
+              <FindingStatusBadge status={finding.status as any} />
+              <Badge variant="outline" className="text-[10px]">{finding.area}</Badge>
+            </div>
+            <p className="mt-2 text-sm font-medium">{finding.title}</p>
+            <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{finding.observation || finding.description}</p>
+          </button>
+        ))}
+      </div>
+    </>
+  );
 }
 
 function FindingDetail({ finding, screenImageUrl, onAction, onBasisChange }: FindingDetailProps) {

@@ -71,6 +71,15 @@ type SynthesizedFinding = {
   id: string;
   region: string;
   elementRefs: string[];
+  bboxRefs?: Array<{
+    screenIndex: number;
+    bbox: {
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+    };
+  }>;
   issue: string;
   principle: string;
   why: string;
@@ -82,7 +91,21 @@ type SynthesizedFinding = {
   agreementCount: number;
 };
 
+type GroundingElement = {
+  elementId: string;
+  screenIndex: number;
+  bbox: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  };
+};
+
 type AgenticRunResult = {
+  groundingOutput?: {
+    elements: GroundingElement[];
+  } | null;
   synthesisOutput?: {
     findings: SynthesizedFinding[];
     totalRawFindings: number;
@@ -128,6 +151,70 @@ async function loadAgenticModule() {
 function clampConfidence(confidence: number): number {
   if (Number.isNaN(confidence)) return 80;
   return Math.min(100, Math.max(0, Math.round(confidence * 100)));
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function normalizePersistableBBoxRef(ref: unknown) {
+  if (!isRecord(ref) || !isRecord(ref.bbox)) return null;
+
+  const screenIndex = Number(ref.screenIndex);
+  const x = Number(ref.bbox.x);
+  const y = Number(ref.bbox.y);
+  const width = Number(ref.bbox.width);
+  const height = Number(ref.bbox.height);
+
+  if (
+    !Number.isFinite(screenIndex) ||
+    !Number.isFinite(x) ||
+    !Number.isFinite(y) ||
+    !Number.isFinite(width) ||
+    !Number.isFinite(height)
+  ) {
+    return null;
+  }
+
+  const safeX = Math.min(1, Math.max(0, x));
+  const safeY = Math.min(1, Math.max(0, y));
+  const safeWidth = Math.min(1 - safeX, Math.max(0, width));
+  const safeHeight = Math.min(1 - safeY, Math.max(0, height));
+
+  if (safeWidth <= 0 || safeHeight <= 0 || safeX >= 1 || safeY >= 1) return null;
+
+  return {
+    screenIndex: Math.max(0, Math.floor(screenIndex)),
+    bbox: {
+      x: safeX,
+      y: safeY,
+      width: safeWidth,
+      height: safeHeight,
+    },
+  };
+}
+
+function normalizePersistableBBoxRefs(finding: SynthesizedFinding, groundingElements: GroundingElement[]) {
+  const explicitRefs: unknown[] = Array.isArray(finding.bboxRefs) ? finding.bboxRefs : [];
+  const elementLookup = new Map(groundingElements.map((element) => [element.elementId, element]));
+  const fallbackRefs = explicitRefs.length > 0
+    ? []
+    : finding.elementRefs
+        .map((elementRef) => elementLookup.get(elementRef))
+        .filter((element): element is GroundingElement => Boolean(element))
+        .map((element) => ({
+          screenIndex: element.screenIndex,
+          bbox: element.bbox,
+        }));
+
+  const sourceRefs = explicitRefs.length > 0 ? explicitRefs : fallbackRefs;
+  if (sourceRefs.length === 0) return undefined;
+
+  const refs = sourceRefs
+    .map(normalizePersistableBBoxRef)
+    .filter((ref): ref is NonNullable<ReturnType<typeof normalizePersistableBBoxRef>> => Boolean(ref));
+
+  return refs.length > 0 ? refs : undefined;
 }
 
 /**
@@ -314,8 +401,9 @@ async function persistFindings(params: {
   reviewId: string;
   findings: SynthesizedFinding[];
   imageAssetNames: string[];
+  groundingElements: GroundingElement[];
 }) {
-  const { reviewId, findings, imageAssetNames } = params;
+  const { reviewId, findings, imageAssetNames, groundingElements } = params;
 
   for (const finding of findings) {
     const screenName = extractScreenName(finding, imageAssetNames);
@@ -335,7 +423,7 @@ async function persistFindings(params: {
         confidence: clampConfidence(finding.confidence),
         status: "PROPOSED",
         isAiGenerated: true,
-        // bboxRefs: finding.bboxRefs && finding.bboxRefs.length > 0 ? finding.bboxRefs : undefined,
+        bboxRefs: normalizePersistableBBoxRefs(finding, groundingElements),
       },
     });
 
@@ -454,7 +542,12 @@ export async function runReviewPipeline(reviewId: string): Promise<void> {
       prisma.report.deleteMany({ where: { reviewId } }),
     ]);
 
-    await persistFindings({ reviewId, findings, imageAssetNames });
+    await persistFindings({
+      reviewId,
+      findings,
+      imageAssetNames,
+      groundingElements: finalState.groundingOutput?.elements ?? [],
+    });
 
     await prisma.review.update({ where: { id: reviewId }, data: { stage: "generating_report", uxScore } });
 
