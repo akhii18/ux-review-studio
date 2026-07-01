@@ -250,7 +250,7 @@ export default function NewReviewPage() {
   const [owner, setOwner] = useState("");
   const [figmaUrl, setFigmaUrl] = useState("");
   const [designSystemUrl, setDesignSystemUrl] = useState("");
-  const [criteria, setCriteria] = useState<string[]>([]);
+  const [criteria, setCriteria] = useState<string[]>(REVIEW_TYPE_REQUIRED_CRITERIA.full);
   const [files, setFiles] = useState<ReviewFileEntry[]>([]);
   const [contextText, setContextText] = useState("");
   const [depth, setDepth] = useState("standard");
@@ -373,15 +373,6 @@ export default function NewReviewPage() {
           const idx = typeof mappedIdx === "number" ? mappedIdx : 0;
           stageIdxRef.current = idx;
           setStageIdx(idx);
-
-          dispatch(addNotification({
-            type: "review_resumed",
-            title: "Review resumed",
-            message: `${review.name ?? "Your review"} is continuing from saved progress.`,
-            href: `/new-review?reviewId=${resolvedReviewId}`,
-            reviewId: resolvedReviewId,
-            dedupeKey: `review-resumed:${resolvedReviewId}`,
-          }));
 
           if (pollRef.current) clearInterval(pollRef.current);
 
@@ -651,7 +642,8 @@ export default function NewReviewPage() {
       r.readAsDataURL(f);
     });
 
-  const persistDraft = async () => {
+  const persistDraft = async (options?: { notify?: boolean }) => {
+    const shouldNotify = options?.notify ?? false;
     setIsSavingDraft(true);
     const assets: Array<{
       name: string;
@@ -703,6 +695,9 @@ export default function NewReviewPage() {
 
       if (savedReview?.id) {
         setDraftReviewId(savedReview.id);
+      }
+
+      if (savedReview?.id && shouldNotify) {
         dispatch(addNotification({
           type: "draft_saved",
           title: "Draft saved",
@@ -721,7 +716,7 @@ export default function NewReviewPage() {
 
   const handleSaveDraft = async () => {
     try {
-      await persistDraft();
+      await persistDraft({ notify: true });
       toast.success("Draft saved");
     } catch (error) {
       toast.error("Failed to save draft");
@@ -735,7 +730,7 @@ export default function NewReviewPage() {
     setCurrentStageLabel("Saving review…");
 
     try {
-      const reviewId = await persistDraft();
+      const reviewId = await persistDraft({ notify: false });
 
       if (!reviewId) {
         throw new Error("Did not receive a valid review ID from the server");
@@ -771,10 +766,15 @@ export default function NewReviewPage() {
             stageIdxRef.current = progressStages.length - 1;
             setStageIdx(progressStages.length - 1);
             setCurrentStageLabel("Completed");
+            dispatch(addNotification({
+              type: "review_completed",
+              title: "Review completed",
+              message: `${name || "Your review"} finished with ${progress.findingCount || 0} findings.`,
+              href: `/workspace?reviewId=${reviewId}`,
+              reviewId,
+              dedupeKey: `review-completed:${reviewId}`,
+            }));
             toast.success(`Review complete — ${progress.findingCount || 0} findings generated.`);
-            setTimeout(() => {
-              router.push(`/workspace?reviewId=${reviewId}`);
-            }, 600);
           } else if (progress.status === "failed") {
             if (pollRef.current) clearInterval(pollRef.current);
             const failureReason = getFailureReason(progress.stage);
@@ -818,47 +818,57 @@ export default function NewReviewPage() {
       <AppHeader title="New Review" subtitle="Set up an AI-assisted UX review in 5 guided steps" />
       <div className="flex-1 p-4 pb-28 md:p-6 md:pb-28">
         {isLoadingDraft && (
-          <div className="mb-4 rounded-xl border border-border bg-card p-4 text-sm text-muted-foreground shadow-card">
-            Loading saved draft settings…
-          </div>
+          <Card className="mb-4 shadow-card">
+            <CardContent className="flex items-center gap-4 p-5">
+              <div className="flex h-11 w-11 items-center justify-center rounded-full bg-primary/10 text-primary">
+                <Loader2 className="h-5 w-5 animate-spin" aria-hidden="true" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-foreground">Loading saved draft settings</p>
+                <p className="text-xs text-muted-foreground">Restoring your last step, inputs, and review configuration…</p>
+              </div>
+            </CardContent>
+          </Card>
         )}
-        {/* Stepper */}
-        <div className="sticky top-16 z-20 -mx-4 bg-background/90 px-4 py-3 backdrop-blur-lg supports-[backdrop-filter]:bg-background/75 md:-mx-6 md:px-6">
-          <ol className="flex flex-nowrap items-center gap-2 overflow-x-auto whitespace-nowrap [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" role="list" aria-label="Wizard progress">
-            {steps.map((s, i) => (
-              <li key={s} className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => canNavigateToStep(i) && setStep(i)}
-                  disabled={!canNavigateToStep(i)}
-                  aria-current={i === step ? "step" : undefined}
-                  className={cn(
-                    "flex min-h-9 items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium transition",
-                    i === step ? "border-primary bg-primary text-primary-foreground"
-                    : i < step ? "border-success/40 bg-success/10 text-success"
-                    : canNavigateToStep(i) ? "border-border bg-card text-muted-foreground hover:bg-secondary" : "border-border bg-card text-muted-foreground/50 opacity-60",
-                  )}
-                >
-                  <span className={cn("flex h-5 w-5 items-center justify-center rounded-full text-[10px]",
-                    i === step ? "bg-primary-foreground/20" : i < step ? "bg-success/20" : "bg-secondary")}>
-                    {i < step ? <Check className="h-3 w-3" aria-hidden="true" /> : i + 1}
-                  </span>
-                  {s}
-                </button>
-                {i < steps.length - 1 && <span className="text-muted-foreground/40" aria-hidden="true">›</span>}
-              </li>
-            ))}
-          </ol>
-        </div>
+        {!isLoadingDraft ? (
+          <>
+            {/* Stepper */}
+            <div className="sticky top-16 z-20 -mx-4 bg-background/90 px-4 py-3 backdrop-blur-lg supports-[backdrop-filter]:bg-background/75 md:-mx-6 md:px-6">
+              <ol className="flex flex-nowrap items-center gap-2 overflow-x-auto whitespace-nowrap [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" role="list" aria-label="Wizard progress">
+                {steps.map((s, i) => (
+                  <li key={s} className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => canNavigateToStep(i) && setStep(i)}
+                      disabled={!canNavigateToStep(i)}
+                      aria-current={i === step ? "step" : undefined}
+                      className={cn(
+                        "flex min-h-9 items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium transition",
+                        i === step ? "border-primary bg-primary text-primary-foreground"
+                        : i < step ? "border-success/40 bg-success/10 text-success"
+                        : canNavigateToStep(i) ? "border-border bg-card text-muted-foreground hover:bg-secondary" : "border-border bg-card text-muted-foreground/50 opacity-60",
+                      )}
+                    >
+                      <span className={cn("flex h-5 w-5 items-center justify-center rounded-full text-[10px]",
+                        i === step ? "bg-primary-foreground/20" : i < step ? "bg-success/20" : "bg-secondary")}>
+                        {i < step ? <Check className="h-3 w-3" aria-hidden="true" /> : i + 1}
+                      </span>
+                      {s}
+                    </button>
+                    {i < steps.length - 1 && <span className="text-muted-foreground/40" aria-hidden="true">›</span>}
+                  </li>
+                ))}
+              </ol>
+            </div>
 
-        <div className="grid gap-4 lg:grid-cols-[1fr_280px]">
-          <Card className="shadow-card">
-            <CardHeader>
-              <CardTitle className="text-lg">{steps[step]}</CardTitle>
-              {stepHelp[step] && <p className="text-sm text-muted-foreground">{stepHelp[step]}</p>}
-            </CardHeader>
-            <CardContent className="space-y-6">
-              {step === 0 && (
+            <div className="grid gap-4 lg:grid-cols-[1fr_280px]">
+              <Card className="shadow-card">
+                <CardHeader>
+                  <CardTitle className="text-lg">{steps[step]}</CardTitle>
+                  {stepHelp[step] && <p className="text-sm text-muted-foreground">{stepHelp[step]}</p>}
+                </CardHeader>
+                <CardContent className="space-y-6">
+                  {step === 0 && (
                 <div className="grid gap-5 md:grid-cols-2">
                   <Field label="Review name" required help="Use a descriptive, scannable name.">
                     <Input value={name} onChange={(e) => setName(toAlphaNumeric(e.target.value))} aria-required />
@@ -903,9 +913,9 @@ export default function NewReviewPage() {
                     <Input value={owner} onChange={(e) => setOwner(toAlphaNumeric(e.target.value))} />
                   </Field>
                 </div>
-              )}
+                  )}
 
-              {step === 1 && (
+                  {step === 1 && (
                 <div className="space-y-4">
                   <div
                     className={cn(
@@ -1042,9 +1052,9 @@ export default function NewReviewPage() {
                     </div>
                   )}
                 </div>
-              )}
+                  )}
 
-              {step === 2 && (
+                  {step === 2 && (
                 <div className="space-y-6">
                   {SUBCATEGORY_GROUPS.map((group) => {
                     const groupItems = group.items;
@@ -1125,9 +1135,9 @@ export default function NewReviewPage() {
                     <p className="text-xs text-destructive">Select at least one criterion to continue.</p>
                   )}
                 </div>
-              )}
+                  )}
 
-              {step === 3 && (
+                  {step === 3 && (
                 <div className="grid gap-5 md:grid-cols-2">
                   <Field label="Checklist version">
                     <Select defaultValue="uxm-2025-5">
@@ -1181,9 +1191,9 @@ export default function NewReviewPage() {
                     <p><strong className="text-foreground">AI findings are drafts.</strong> You approve, edit, dismiss, or escalate each one before export.</p>
                   </div>
                 </div>
-              )}
+                  )}
 
-              {step === 4 && (
+                  {step === 4 && (
                 <div className="space-y-5">
                   {!running ? (
                     <div className="rounded-xl border border-border bg-gradient-to-br from-secondary/60 to-card p-6 text-center">
@@ -1221,58 +1231,60 @@ export default function NewReviewPage() {
                     </div>
                   )}
                 </div>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* Summary panel */}
-          <aside className="space-y-3">
-            <Card className="shadow-card">
-              <CardHeader className="pb-2"><CardTitle className="text-sm">Review summary</CardTitle></CardHeader>
-              <CardContent className="space-y-2 text-xs">
-                <SumRow label="Name" value={name || "—"} />
-                <SumRow label="Product" value={product || "—"} />
-                <SumRow label="Domain" value={domain} capitalize />
-                <SumRow label="Type" value={formatReviewTypeLabel(reviewType)} />
-                <SumRow label="Inputs" value={`${files.length}`} />
-                <SumRow label="Criteria" value={`${criteria.length}`} />
-                <SumRow label="Depth" value={depth} capitalize />
-                <SumRow label="Confidence" value={`≥ ${confidence[0]}%`} />
-              </CardContent>
-            </Card>
-            {criteria.length > 0 && (
-              <Card className="shadow-card">
-                <CardHeader className="pb-2"><CardTitle className="text-sm">Selected criteria</CardTitle></CardHeader>
-                <CardContent className="space-y-1.5">
-                  {SUBCATEGORY_GROUPS.map((group) => {
-                    const selectedInGroup = group.items.filter((item) => criteria.includes(item.id));
-                    if (selectedInGroup.length === 0) return null;
-                    return (
-                      <div key={group.category}>
-                        <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{group.category}</p>
-                        <div className="mt-1 flex flex-wrap gap-1">
-                          {selectedInGroup.map((item) => (
-                            <Badge key={item.id} variant="secondary" className="gap-1 pl-2 pr-1 text-[10px]">
-                              {item.label}
-                              <button
-                                type="button"
-                                onClick={() => toggleCriterion(item.id)}
-                                className="ml-1 rounded-full p-0.5 hover:bg-foreground/10"
-                                aria-label={`Remove ${item.label}`}
-                              >
-                                <X className="h-3 w-3" />
-                              </button>
-                            </Badge>
-                          ))}
-                        </div>
-                      </div>
-                    );
-                  })}
+                  )}
                 </CardContent>
               </Card>
-            )}
-          </aside>
-        </div>
+
+              {/* Summary panel */}
+              <aside className="space-y-3">
+                <Card className="shadow-card">
+                  <CardHeader className="pb-2"><CardTitle className="text-sm">Review summary</CardTitle></CardHeader>
+                  <CardContent className="space-y-2 text-xs">
+                    <SumRow label="Name" value={name || "—"} />
+                    <SumRow label="Product" value={product || "—"} />
+                    <SumRow label="Domain" value={domain} capitalize />
+                    <SumRow label="Type" value={formatReviewTypeLabel(reviewType)} />
+                    <SumRow label="Inputs" value={`${files.length}`} />
+                    <SumRow label="Criteria" value={`${criteria.length}`} />
+                    <SumRow label="Depth" value={depth} capitalize />
+                    <SumRow label="Confidence" value={`≥ ${confidence[0]}%`} />
+                  </CardContent>
+                </Card>
+                {criteria.length > 0 && (
+                  <Card className="shadow-card">
+                    <CardHeader className="pb-2"><CardTitle className="text-sm">Selected criteria</CardTitle></CardHeader>
+                    <CardContent className="space-y-1.5">
+                      {SUBCATEGORY_GROUPS.map((group) => {
+                        const selectedInGroup = group.items.filter((item) => criteria.includes(item.id));
+                        if (selectedInGroup.length === 0) return null;
+                        return (
+                          <div key={group.category}>
+                            <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{group.category}</p>
+                            <div className="mt-1 flex flex-wrap gap-1">
+                              {selectedInGroup.map((item) => (
+                                <Badge key={item.id} variant="secondary" className="gap-1 pl-2 pr-1 text-[10px]">
+                                  {item.label}
+                                  <button
+                                    type="button"
+                                    onClick={() => toggleCriterion(item.id)}
+                                    className="ml-1 rounded-full p-0.5 hover:bg-foreground/10"
+                                    aria-label={`Remove ${item.label}`}
+                                  >
+                                    <X className="h-3 w-3" />
+                                  </button>
+                                </Badge>
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </CardContent>
+                  </Card>
+                )}
+              </aside>
+            </div>
+          </>
+        ) : null}
 
         {/* Navigation */}
         {!running && step < steps.length - 1 && (

@@ -103,9 +103,10 @@ function AuthPageContent() {
       });
 
       localStorage.setItem("token", result.token);
-      const currentUser = { name: result.user.name || "User", email: result.user.email };
+      const currentUser = { id: result.user.id, name: result.user.name || "User", email: result.user.email };
       localStorage.setItem("current_user", JSON.stringify(currentUser));
       document.cookie = `token=${result.token}; Path=/; Max-Age=${result.expiresInSeconds}; SameSite=Lax`;
+      window.dispatchEvent(new Event("uxm:user-updated"));
 
       toast.success("User authenticated");
       router.replace("/dashboard");
