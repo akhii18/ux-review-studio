@@ -48,6 +48,27 @@ const ConvertLegacyDocSchema = z.object({
   mimeType: z.string().min(1),
   base64Data: z.string().min(1),
 });
+const AnalyticsQuerySchema = z
+  .object({
+    range: z.enum(["1m", "3m", "6m", "1y", "custom"]).optional(),
+    startDate: z.string().optional(),
+    endDate: z.string().optional(),
+    product: z.string().optional(),
+    domain: z.string().optional(),
+    reviewType: z.string().optional(),
+    owner: z.string().optional(),
+  })
+  .superRefine((value, ctx) => {
+    if (value.range !== "custom") return;
+
+    if (!value.startDate) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["startDate"], message: "startDate is required for custom range" });
+    }
+
+    if (!value.endDate) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["endDate"], message: "endDate is required for custom range" });
+    }
+  });
 
 export const ReviewsController = {
   async list(req: Request, res: Response) {
@@ -105,7 +126,16 @@ export const ReviewsController = {
   },
 
   async getAnalytics(req: Request, res: Response) {
-    const analytics = await ReviewsService.getAnalytics(getUserId(req));
+    const query = AnalyticsQuerySchema.parse(req.query);
+    const analytics = await ReviewsService.getAnalytics(getUserId(req), {
+      range: query.range,
+      startDate: query.startDate,
+      endDate: query.endDate,
+      product: query.product,
+      domain: query.domain,
+      reviewType: query.reviewType,
+      owner: query.owner,
+    });
     res.json({ success: true, data: analytics });
   },
 };
