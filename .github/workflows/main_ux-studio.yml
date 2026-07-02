@@ -95,6 +95,7 @@ jobs:
           name: api-app
           path: |
             api-deploy
+          include-hidden-files: true
 
       - name: Upload web artifact
         uses: actions/upload-artifact@v4
