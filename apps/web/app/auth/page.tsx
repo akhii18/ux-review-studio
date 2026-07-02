@@ -187,7 +187,7 @@ function AuthPageContent() {
   };
 
   return (
-    <div className="flex h-screen overflow-hidden items-center justify-center bg-[#efeeee] px-4">
+    <div className="flex min-h-screen overflow-y-auto items-start sm:items-center justify-center bg-[#efeeee] px-4 py-6">
       <div className="w-full max-w-md text-center">
 
         {/* Logo */}
