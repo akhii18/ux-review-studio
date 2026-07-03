@@ -19,7 +19,7 @@ if (!process.env.AZURE_OPENAI_API_KEY || !process.env.AZURE_OPENAI_ENDPOINT) {
 export type ReviewDepth = "quick" | "standard" | "deep";
 
 const REVIEW_DEPTH_MODELS: Record<ReviewDepth, string> = {
-  quick: "gpt-4.1-mini",
+  quick: "gpt-5.5",
   standard: "gpt-5.5",
   deep: "gpt-5.5",
 };
