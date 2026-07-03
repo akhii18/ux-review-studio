@@ -22,6 +22,8 @@ import { PriorityBadge } from "@/components/ui/PriorityBadge";
 import { FindingStatusBadge } from "@/components/ui/FindingStatusBadge";
 import { cn } from "@/lib/utils";
 import { exportReviewReport, getReview, updateFinding, triageFinding } from "@/lib/api";
+import { useAppDispatch } from "@/store/hooks";
+import { addNotification } from "@/store/slices/notificationsSlice";
 import {
   DEFAULT_FINDING_OUTPUT_OPTIONS,
   REVIEW_BASIS_LIBRARY,
@@ -320,6 +322,7 @@ function getContainedImageLayout(params: {
 function WorkspaceContent() {
   const params = useSearchParams();
   const reviewId = params.get("reviewId");
+  const dispatch = useAppDispatch();
 
   const [reviewData, setReviewData] = useState<any>(null);
   const [reviewLoading, setReviewLoading] = useState(true);
