@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - main
-      - develop
   pull_request:
     branches:
       - main
@@ -42,8 +41,24 @@ jobs:
       - name: Build web app
         run: npm run build --workspace @uxm/web
 
+      - name: Build agentic AI app
+        run: npm run build --workspace @uxm/agentic-ai
+
       - name: Build API app
         run: npm run build --workspace @uxm/api
+
+      - name: Prune production dependencies for API deploy
+        run: npm prune --omit=dev
+
+      - name: Create API deployment package
+        run: |
+          rm -rf api-deploy
+          mkdir -p api-deploy
+          cp package.json package-lock.json api-deploy/
+          cp -a apps/api api-deploy/apps/
+          mkdir -p api-deploy/packages
+          cp -a packages/shared api-deploy/packages/
+          cp -a node_modules api-deploy/
 
       - name: Create web deployment package
         run: |
@@ -77,12 +92,10 @@ jobs:
       - name: Upload API artifact
         uses: actions/upload-artifact@v4
         with:
-          name: node-app
+          name: api-app
           path: |
-            .
-            !node_modules
-            !web-deploy
-            !apps/web/.next
+            api-deploy
+          include-hidden-files: true
 
       - name: Upload web artifact
         uses: actions/upload-artifact@v4
@@ -103,7 +116,7 @@ jobs:
       - name: Download API artifact
         uses: actions/download-artifact@v4
         with:
-          name: node-app
+          name: api-app
 
       - name: Deploy API app
         uses: azure/webapps-deploy@v3

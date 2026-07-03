@@ -113,7 +113,9 @@ type ReviewAssetRecord = {
 // ── Module loader ─────────────────────────────────────────────────────────────
 
 const agenticSourcePath = path.resolve(__dirname, "../../../../agentic-ai/src/index.ts");
-const agenticBuildPath = path.resolve(__dirname, "../../../../agentic-ai/dist/index.js");
+// In production this file is compiled under apps/api/dist/src/services/ai,
+// so the agentic-ai package lives one level higher than the source-time path.
+const agenticBuildPath = path.resolve(__dirname, "../../../../../agentic-ai/dist/index.js");
 
 let agenticModulePromise: Promise<{ runReviewGraph: (params: {
   screenshots: string[];
@@ -416,6 +418,11 @@ function buildReviewContext(review: NonNullable<ReviewRecord>): string {
   ].join("\n");
 }
 
+function formatPipelineFailure(err: unknown): string {
+  const message = err instanceof Error ? err.message : String(err);
+  return message.replace(/\s+/g, " ").slice(0, 240);
+}
+
 // ── Main pipeline ─────────────────────────────────────────────────────────────
 
 export async function runReviewPipeline(reviewId: string): Promise<void> {
@@ -533,11 +540,12 @@ export async function runReviewPipeline(reviewId: string): Promise<void> {
       },
     });
   } catch (err) {
+    const failureReason = formatPipelineFailure(err);
     await prisma.review.update({
       where: { id: reviewId },
       data: {
         status: "failed",
-        stage: "failed",
+        stage: `failed:${failureReason}`,
       },
     }).catch(() => undefined);
 

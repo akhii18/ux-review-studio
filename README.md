@@ -40,7 +40,7 @@ npm install
 cp apps/api/.env.example apps/api/.env
 # Fill in DATABASE_URL, DIRECT_URL, JWT_SECRET, CORS_ORIGIN, WEB_APP_URL,
 # and Azure OpenAI values if you are using the AI pipeline.
-# Supabase Storage vars are optional unless you want screenshot uploads.
+# Local development should point at the Docker Postgres service or your own local DB.
 
 # Web
 cp apps/web/.env.local.example apps/web/.env.local
@@ -54,6 +54,8 @@ cd apps/api
 npx prisma migrate dev --name init
 npm run db:seed
 ```
+
+For the full database workflow, including Azure PostgreSQL and production migrations, read [docs/database-setup.md](docs/database-setup.md).
 
 ### 4. Run dev servers
 
@@ -77,7 +79,7 @@ cp apps/web/.env.local.example apps/web/.env.local
 docker-compose up --build
 ```
 
-> Note: Docker is optional. The main development flow is still `npm run dev` against your Supabase project.
+> Note: Docker is optional. The main development flow is still `npm run dev` against your local PostgreSQL database.
 
 ---
 
@@ -141,7 +143,7 @@ If you are not using screenshot uploads, you do not need the Supabase Storage va
 |-------|-------|
 | Frontend | Next.js 14, App Router, TypeScript, Tailwind CSS, Redux Toolkit, RTK Query, React Hook Form, Zod |
 | Backend | Express.js, TypeScript, Prisma ORM |
-| Database | Supabase PostgreSQL |
+| Database | PostgreSQL (local dev + Azure production) |
 | File storage | Supabase Storage |
 | Shared | `@uxm/shared` — types, Zod schemas, constants |
 | Monorepo | Turborepo |
@@ -162,7 +164,7 @@ The original project (TanStack Start + SQLite) was analysed and the following as
 
 The following were **not** migrated (intentional — excluded from Phase 1):
 - `createServerFn` RPC layer → replaced by Express REST APIs
-- LibSQL/SQLite → replaced by Supabase PostgreSQL + Prisma
+- LibSQL/SQLite → replaced by PostgreSQL + Prisma
 - TanStack Router → replaced by Next.js App Router
 - TanStack Query → replaced by RTK Query
 

@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Search, Loader2, Eye, Trash2, X, ChevronDown } from "lucide-react";
+import { Search, Loader2, X, ChevronDown, MoreVertical, ExternalLink, ChevronsUpDown, Trash2 } from "lucide-react";
 import {
   Dialog,
   DialogClose,
@@ -24,6 +24,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Accordion, AccordionContent, AccordionItem } from "@/components/ui/accordion";
 import {
   Pagination,
@@ -71,6 +72,10 @@ function getStatusBadgeClass(status: string) {
   }
 
   return "bg-amber-100 text-amber-700 border-amber-200 dark:bg-amber-900/30 dark:text-amber-400";
+}
+
+function getReviewActionLabel(status?: string | null) {
+  return status === "in_progress" ? "Continue review" : "Open review";
 }
 
 export function ReviewHistoryModal({
@@ -244,7 +249,11 @@ export function ReviewHistoryModal({
             <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6">
               <Accordion type="multiple" value={openItems} onValueChange={(value) => setOpenItems(value as string[])} className="space-y-3" aria-label="Review history records">
                 {paginatedItems.map((item) => (
-                  <AccordionItem key={item.id} value={item.id} className="rounded-lg border border-border bg-card shadow-card">
+                  <AccordionItem
+                    key={item.id}
+                    value={item.id}
+                    className={`rounded-lg border border-border bg-card shadow-card transition-colors hover:border-primary/30 hover:bg-secondary/40 hover:shadow-md ${openItems.includes(item.id) ? "border-primary/30 bg-secondary/40" : ""}`}
+                  >
                     <div
                       role="button"
                       tabIndex={0}
@@ -256,40 +265,67 @@ export function ReviewHistoryModal({
                         }
                       }}
                       aria-expanded={openItems.includes(item.id)}
-                      className="flex w-full items-center gap-2 px-4 py-3"
+                      className="flex w-full items-center gap-2 px-4 py-3 transition-colors hover:bg-secondary/20 focus-visible:bg-secondary/20"
                     >
                       <div className="min-w-0 flex-1 pr-2 text-sm font-semibold">
                         <span className="line-clamp-1">{item.reviewName}</span>
                       </div>
 
                       <div className="ml-auto flex shrink-0 items-center gap-1">
-                        <Button asChild size="icon" variant="ghost" aria-label={`View ${item.reviewName}`} className="h-8 w-8">
-                          <Link
-                            href={{ pathname: "/workspace", query: { reviewId: item.id } }}
-                            onClick={(event) => event.stopPropagation()}
-                          >
-                            <Eye className="h-4 w-4" />
-                          </Link>
-                        </Button>
                         <Badge className={getStatusBadgeClass(item.status)}>{toTitleCase(item.status || "Unknown")}</Badge>
                         <ChevronDown
                           className={`h-4 w-4 text-muted-foreground transition-transform ${openItems.includes(item.id) ? "rotate-180" : ""}`}
                           aria-hidden="true"
                         />
-                        <Button
-                          type="button"
-                          size="icon"
-                          variant="ghost"
-                          className="h-8 w-8 text-destructive hover:bg-destructive/10 hover:text-destructive"
-                          disabled={deletingReviewId === item.id}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            setPendingDeleteReview({ id: item.id, name: item.reviewName });
-                          }}
-                          aria-label={`Delete ${item.reviewName}`}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              type="button"
+                              size="icon"
+                              variant="ghost"
+                              className="h-8 w-8"
+                              onClick={(event) => event.stopPropagation()}
+                              aria-label={`Actions for ${item.reviewName}`}
+                            >
+                              <MoreVertical className="h-4 w-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end" className="min-w-0 w-auto flex items-center gap-1 p-1">
+                            <DropdownMenuItem asChild className="h-9 w-9 justify-center">
+                              <Link
+                                  href={item.status === "in_progress" ? { pathname: "/new-review", query: { reviewId: item.id } } : { pathname: "/workspace", query: { reviewId: item.id } }}
+                                onClick={(event) => event.stopPropagation()}
+                                aria-label={getReviewActionLabel(item.status)}
+                              >
+                                <ExternalLink className="h-4 w-4" />
+                                <span className="sr-only">{getReviewActionLabel(item.status)}</span>
+                              </Link>
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              className="h-9 w-9 justify-center"
+                              onSelect={(event) => {
+                                event.preventDefault();
+                                toggleOpenItem(item.id);
+                              }}
+                              aria-label={openItems.includes(item.id) ? "Collapse details" : "Expand details"}
+                            >
+                              <ChevronsUpDown className="h-4 w-4" />
+                              <span className="sr-only">{openItems.includes(item.id) ? "Collapse details" : "Expand details"}</span>
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              className="h-9 w-9 justify-center text-destructive"
+                              disabled={deletingReviewId === item.id}
+                              onSelect={(event) => {
+                                event.preventDefault();
+                                setPendingDeleteReview({ id: item.id, name: item.reviewName });
+                              }}
+                              aria-label="Delete review"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                              <span className="sr-only">Delete review</span>
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
                       </div>
                     </div>
 

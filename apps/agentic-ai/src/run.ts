@@ -14,8 +14,11 @@
 
 import path from "path";
 import dotenv from "dotenv";
+import { fileURLToPath } from "node:url";
 
-dotenv.config({ path: path.resolve(__dirname, "../../../../.env") });
+const moduleDir = path.dirname(fileURLToPath(import.meta.url));
+
+dotenv.config({ path: path.resolve(moduleDir, "../../../../.env") });
 dotenv.config({ path: path.resolve(process.cwd(), "../../.env") });
 dotenv.config();
 import { readFileSync, existsSync, mkdirSync, writeFileSync } from "fs";

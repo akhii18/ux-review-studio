@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
 import {
   LayoutDashboard,
   Plus,
@@ -32,6 +33,7 @@ import {
   SidebarRail,
   useSidebar,
 } from "@/components/ui/sidebar";
+import { RouteLoadingOverlay } from "@/components/ui/RouteLoadingOverlay";
 
 const navGroups = [
   {
@@ -65,9 +67,17 @@ const navGroups = [
 export function AppSidebar() {
   const pathname = usePathname();
   const router = useRouter();
+  const [pendingRoute, setPendingRoute] = useState<string | null>(null);
   const { isMobile, setOpenMobile } = useSidebar();
 
-  const handleNavClick = () => {
+  useEffect(() => {
+    setPendingRoute(null);
+  }, [pathname]);
+
+  const handleNavClick = (url: string) => {
+    if (url !== pathname) {
+      setPendingRoute(url);
+    }
     if (isMobile) {
       setOpenMobile(false);
     }
@@ -90,6 +100,8 @@ export function AppSidebar() {
   };
 
   return (
+    <>
+    {pendingRoute && <RouteLoadingOverlay label="Opening page" />}
     <Sidebar collapsible="icon">
       <SidebarHeader className="h-16 border-b border-sidebar-border p-2">
         <div className="flex h-full items-center gap-2 overflow-hidden px-2 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0">
@@ -121,7 +133,7 @@ export function AppSidebar() {
                           : "text-sidebar-foreground/70 hover:bg-sidebar-accent/60 hover:text-sidebar-foreground",
                       )}
                     >
-                      <Link href={item.url} onClick={handleNavClick}>
+                      <Link href={item.url} onClick={() => handleNavClick(item.url)}>
                         <item.icon className="h-4 w-4 shrink-0" aria-hidden />
                         <span>{item.title}</span>
                       </Link>
@@ -138,7 +150,7 @@ export function AppSidebar() {
         <SidebarMenu>
           <SidebarMenuItem>
             <SidebarMenuButton asChild tooltip="Documentation" className="text-sidebar-foreground/70 hover:bg-sidebar-accent/60 hover:text-sidebar-foreground">
-              <Link href="/settings" onClick={handleNavClick}>
+              <Link href="/settings" onClick={() => handleNavClick("/settings")}>
                 <BookOpen className="h-4 w-4 shrink-0" aria-hidden />
                 <span>Documentation</span>
               </Link>
@@ -158,5 +170,6 @@ export function AppSidebar() {
       </SidebarFooter>
       <SidebarRail />
     </Sidebar>
+    </>
   );
 }

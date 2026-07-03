@@ -7,6 +7,7 @@ export const ReviewsRepository = {
       orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
       include: {
         _count: { select: { findings: true } },
+        findings: { select: { severity: true } },
       },
     });
   },

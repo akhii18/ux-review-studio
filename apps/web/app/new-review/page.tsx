@@ -3,8 +3,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { processPdf } from "@/lib/pdfToPageFiles";
 import { processDocx } from "@/lib/docxToMarkdown";
-import { useRouter } from "next/navigation";
-import { createReview, saveAsset, startReview, getReviewProgress, convertLegacyDocAsset } from "@/lib/api";
+import { useRouter, useSearchParams } from "next/navigation";
+import { convertLegacyDocAsset, getReview, saveReviewDraft, startReview, getReviewProgress } from "@/lib/api";
 import { AppHeader } from "@/components/ui/AppHeader";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -19,6 +19,9 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Progress } from "@/components/ui/progress";
 import { Slider } from "@/components/ui/slider";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { useAppDispatch } from "@/store/hooks";
+import { addNotification } from "@/store/slices/notificationsSlice";
 import {
   Check, Upload, FileText, Figma, Link as LinkIcon, X, ArrowRight,
   Sparkles, Loader2, Save, Info, Video, ChevronLeft, ChevronRight, Trash2,
@@ -92,6 +95,21 @@ const SUBCATEGORY_GROUPS = [
 
 type SubcategoryId = typeof SUBCATEGORY_GROUPS[number]["items"][number]["id"];
 
+type ReviewFileEntry = {
+  id: string;
+  name: string;
+  type: string;
+  status: string;
+  file?: File;
+  previewUrl?: string;
+  blobUrl?: string;
+  mimeType?: string;
+  contentText?: string;
+  sizeBytes?: number;
+  visibleInUi?: boolean;
+  sourceDocumentId?: string;
+};
+
 /** Derive the unique backend agent names from any set of selected subcategory IDs */
 function getAgentsFromSubcategories(subcategoryIds: string[]): string[] {
   const agents = new Set<string>();
@@ -104,6 +122,7 @@ function getAgentsFromSubcategories(subcategoryIds: string[]): string[] {
 }
 
 const REVIEW_TYPE_REQUIRED_CRITERIA: Record<string, string[]> = {
+  partial: [],
   full: [
     "nielsensHeuristics", "navigationLogic", "taskFlowEfficiency", "recognitionOverRecall",
     "wcagConformance", "keyboardNavigation", "screenReaderInterpretation", "touchTargets",
@@ -117,6 +136,26 @@ const REVIEW_TYPE_REQUIRED_CRITERIA: Record<string, string[]> = {
   ds: ["designSystemTokens", "componentUsage", "spacingGrid", "iconographyConsistency"],
   content: ["microcopyClarity", "errorMessageQuality", "labelPrecision", "toneAndVoice"],
 };
+
+function normalizeCriteria(values: string[]): string[] {
+  return [...values].sort((a, b) => a.localeCompare(b));
+}
+
+function matchesPresetCriteria(type: string, values: string[]): boolean {
+  const preset = REVIEW_TYPE_REQUIRED_CRITERIA[type] ?? [];
+  const left = normalizeCriteria(preset);
+  const right = normalizeCriteria(values);
+
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+function formatReviewTypeLabel(value: string): string {
+  const label = value.replaceAll("_", " ").trim().toLowerCase();
+  if (!label) return "—";
+  if (label === "a11y") return "A11y";
+  if (label === "prd") return "PRD";
+  return label.charAt(0).toUpperCase() + label.slice(1);
+}
 
 const steps = ["Review Setup", "Add Inputs", "Select Criteria", "Configure AI", "Run Review"];
 const stepHelp = [
@@ -145,8 +184,14 @@ const backendStageToUiIndex: Record<string, number> = {
   failed: 6,
 };
 
+function getFailureReason(stage?: string | null): string | null {
+  if (!stage?.startsWith("failed:")) return null;
+  return stage.slice("failed:".length).trim() || null;
+}
+
 function formatBackendStage(stage?: string | null): string {
   if (!stage) return "Analyzing…";
+  if (stage.startsWith("failed:")) return "Failed";
 
   const labels: Record<string, string> = {
     reading_inputs: "Reading inputs",
@@ -168,6 +213,29 @@ function toAlphaNumeric(value: string): string {
   return value.replace(/[^a-zA-Z0-9 ]/g, "").replace(/\s{2,}/g, " ");
 }
 
+function getAssetType(asset: { name?: string; mimeType?: string | null }) {
+  const mimeType = asset.mimeType ?? "";
+  const name = asset.name ?? "";
+  if (mimeType.startsWith("image/")) return "Screenshot";
+  if (mimeType === "application/pdf" || name.toLowerCase().endsWith(".pdf")) return "PDF";
+  if (mimeType.includes("wordprocessingml") || name.toLowerCase().endsWith(".docx")) return "Word";
+  return "PRD";
+}
+
+function getReviewTypeFromCriteria(values: string[]): string {
+  const normalized = normalizeCriteria(values);
+
+  for (const [type, preset] of Object.entries(REVIEW_TYPE_REQUIRED_CRITERIA)) {
+    if (type === "partial") continue;
+    const normalizedPreset = normalizeCriteria(preset);
+    if (normalizedPreset.length === normalized.length && normalizedPreset.every((value, index) => value === normalized[index])) {
+      return type;
+    }
+  }
+
+  return "partial";
+}
+
 export default function NewReviewPage() {
   type UploadAsset = {
     id: string;
@@ -182,6 +250,12 @@ export default function NewReviewPage() {
 
   const [step, setStep] = useState(0);
   const router = useRouter();
+  const dispatch = useAppDispatch();
+  const searchParams = useSearchParams();
+  const initialReviewId = searchParams.get("reviewId");
+  const [draftReviewId, setDraftReviewId] = useState<string | null>(initialReviewId);
+  const [isLoadingDraft, setIsLoadingDraft] = useState(Boolean(initialReviewId));
+  const [isSavingDraft, setIsSavingDraft] = useState(false);
   const [name, setName] = useState("");
   const [product, setProduct] = useState("");
   const [domain, setDomain] = useState("bfsi");
@@ -190,7 +264,7 @@ export default function NewReviewPage() {
   const [figmaUrl, setFigmaUrl] = useState("");
   const [designSystemUrl, setDesignSystemUrl] = useState("");
   const [criteria, setCriteria] = useState<string[]>([]);
-  const [files, setFiles] = useState<UploadAsset[]>([]);
+  const [files, setFiles] = useState<ReviewFileEntry[]>([]);
   const [contextText, setContextText] = useState("");
   const [depth, setDepth] = useState("standard");
   const [confidence, setConfidence] = useState([75]);
@@ -200,13 +274,14 @@ export default function NewReviewPage() {
   const stageIdxRef = useRef(0);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const filesRef = useRef<UploadAsset[]>([]);
+  const filesRef = useRef<ReviewFileEntry[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [isDocProcessing, setIsDocProcessing] = useState(false);
   const [isScreenshotModalOpen, setIsScreenshotModalOpen] = useState(false);
   const [activeScreenshotIndex, setActiveScreenshotIndex] = useState(0);
-  const [isPdfModalOpen, setIsPdfModalOpen] = useState(false);
-  const [activePdfIndex, setActivePdfIndex] = useState(0);
+  const [isDocumentModalOpen, setIsDocumentModalOpen] = useState(false);
+  const [activeDocumentIndex, setActiveDocumentIndex] = useState(0);
+  const criteriaTouchedRef = useRef(false);
 
   const visibleFiles = useMemo(
     () => files.filter((file) => file.visibleInUi !== false),
@@ -218,24 +293,177 @@ export default function NewReviewPage() {
     [visibleFiles]
   );
 
-  const pdfFiles = useMemo(
-    () => visibleFiles.filter((file) => file.type === "PDF" && Boolean(file.previewUrl)),
+  const documentFiles = useMemo(
+    () => visibleFiles.filter((file) => (file.type === "PDF" || file.type === "Word") && Boolean(file.previewUrl)),
     [visibleFiles]
   );
 
-  useEffect(() => {
-    const requiredForType = REVIEW_TYPE_REQUIRED_CRITERIA[reviewType] ?? [];
-    if (requiredForType.length === 0) return;
+  const reviewTypeOptions = [
+    { value: "partial", label: "Partial" },
+    { value: "full", label: "Full UX Review" },
+    { value: "prd", label: "PRD Alignment Review" },
+    { value: "a11y", label: "Accessibility Review" },
+    { value: "ds", label: "Design System Review" },
+    { value: "content", label: "Content & Microcopy Review" },
+  ];
 
-    setCriteria((current) => {
-      const merged = Array.from(new Set([...requiredForType, ...current]));
-      return merged;
-    });
-  }, [reviewType]);
+  const handleReviewTypeChange = (nextType: string) => {
+    criteriaTouchedRef.current = false;
+    setReviewType(nextType);
+    setCriteria(REVIEW_TYPE_REQUIRED_CRITERIA[nextType] ?? []);
+  };
+
+  useEffect(() => {
+    if (!criteriaTouchedRef.current) return;
+
+    const nextType = getReviewTypeFromCriteria(criteria);
+    if (nextType !== reviewType) {
+      setReviewType(nextType);
+    }
+  }, [criteria, reviewType]);
 
   useEffect(() => {
     filesRef.current = files;
   }, [files]);
+
+  useEffect(() => {
+    if (!initialReviewId) {
+      setIsLoadingDraft(false);
+      return;
+    }
+
+    let cancelled = false;
+    setIsLoadingDraft(true);
+
+    getReview(initialReviewId)
+      .then((review) => {
+        if (cancelled) return;
+
+        const resolvedReviewId = review.id ?? initialReviewId;
+
+        setDraftReviewId(resolvedReviewId);
+        setName(review.name ?? "");
+        setProduct(review.product ?? "");
+        setDomain(review.domain || "bfsi");
+        setReviewType(review.reviewType || "full");
+        setOwner(review.owner || "");
+        setCriteria(Array.isArray(review.criteria) ? review.criteria : []);
+        setDepth(review.depth || "standard");
+        setConfidence([typeof review.confidenceThreshold === "number" ? review.confidenceThreshold : 75]);
+        criteriaTouchedRef.current = false;
+
+        const loadedFiles: ReviewFileEntry[] = [];
+        const noteBlocks: string[] = [];
+
+        for (const asset of review.assets ?? []) {
+          const isContextNote = asset.name === "Context notes" && asset.contentText;
+          if (isContextNote) {
+            noteBlocks.push(asset.contentText);
+            continue;
+          }
+
+          loadedFiles.push({
+            id: asset.id ?? `${asset.name}-${asset.createdAt ?? Math.random()}`,
+            name: asset.name ?? "Saved asset",
+            type: getAssetType(asset),
+            status: "Saved",
+            previewUrl: asset.blobUrl ?? undefined,
+            blobUrl: asset.storageRef ?? asset.blobUrl ?? undefined,
+            mimeType: asset.mimeType ?? undefined,
+            contentText: asset.contentText ?? undefined,
+            sizeBytes: asset.sizeBytes ?? undefined,
+          });
+        }
+
+        setFiles(loadedFiles);
+        setContextText(noteBlocks.join("\n\n"));
+
+        const stepMatch = typeof review.stage === "string" ? review.stage.match(/^step-(\d+)$/) : null;
+        if (stepMatch) {
+          setStep(Math.max(0, Math.min(steps.length - 1, Number(stepMatch[1]) - 1)));
+        }
+
+        if (review.status === "in_progress") {
+          setRunning(true);
+          setStep(4);
+          setCurrentStageLabel(formatBackendStage(review.stage) || "AI agent at work…");
+          const mappedIdx = typeof review.stage === "string" ? backendStageToUiIndex[review.stage] : undefined;
+          const idx = typeof mappedIdx === "number" ? mappedIdx : 0;
+          stageIdxRef.current = idx;
+          setStageIdx(idx);
+
+          dispatch(addNotification({
+            type: "review_resumed",
+            title: "Review resumed",
+            message: `${review.name ?? "Your review"} is continuing from saved progress.`,
+            href: `/new-review?reviewId=${resolvedReviewId}`,
+            reviewId: resolvedReviewId,
+            dedupeKey: `review-resumed:${resolvedReviewId}`,
+          }));
+
+          if (pollRef.current) clearInterval(pollRef.current);
+
+          const pollProgress = async () => {
+            try {
+              const progress = await getReviewProgress(resolvedReviewId);
+              const progressIdx = backendStageToUiIndex[progress.stage ?? ""];
+              const nextIdx = typeof progressIdx === "number" ? progressIdx : stageIdxRef.current;
+
+              stageIdxRef.current = nextIdx;
+              setStageIdx(nextIdx);
+              setCurrentStageLabel(formatBackendStage(progress.stage));
+
+              if (progress.status === "completed") {
+                if (pollRef.current) clearInterval(pollRef.current);
+                stageIdxRef.current = progressStages.length - 1;
+                setStageIdx(progressStages.length - 1);
+                setCurrentStageLabel("Completed");
+                dispatch(addNotification({
+                  type: "review_completed",
+                  title: "Review completed",
+                  message: `${review.name ?? "Your review"} finished with ${progress.findingCount || 0} findings.`,
+                  href: `/workspace?reviewId=${resolvedReviewId}`,
+                  reviewId: resolvedReviewId,
+                  dedupeKey: `review-completed:${resolvedReviewId}`,
+                }));
+                toast.success(`Review complete — ${progress.findingCount || 0} findings generated.`);
+                setRunning(false);
+              } else if (progress.status === "failed") {
+                if (pollRef.current) clearInterval(pollRef.current);
+                const failureReason = getFailureReason(progress.stage);
+                dispatch(addNotification({
+                  type: "review_failed",
+                  title: "Review failed",
+                  message: failureReason ? `${review.name ?? "Your review"} failed: ${failureReason}` : `${review.name ?? "Your review"} failed during processing.`,
+                  href: `/new-review?reviewId=${resolvedReviewId}`,
+                  reviewId: resolvedReviewId,
+                  dedupeKey: `review-failed:${resolvedReviewId}`,
+                }));
+                toast.error(failureReason ? `Review pipeline failed: ${failureReason}` : "Review pipeline failed.");
+                setCurrentStageLabel("Failed");
+                setRunning(false);
+              }
+            } catch (error) {
+              // Ignore transient polling errors
+            }
+          };
+
+          void pollProgress();
+          pollRef.current = setInterval(pollProgress, 2000);
+        }
+      })
+      .catch((error) => {
+        console.error(error);
+        toast.error("Failed to load draft review");
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoadingDraft(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [initialReviewId]);
 
   useEffect(() => {
     return () => {
@@ -259,15 +487,15 @@ export default function NewReviewPage() {
   }, [activeScreenshotIndex, isScreenshotModalOpen, screenshotFiles]);
 
   useEffect(() => {
-    if (!isPdfModalOpen) return;
-    if (pdfFiles.length === 0) {
-      setIsPdfModalOpen(false);
+    if (!isDocumentModalOpen) return;
+    if (documentFiles.length === 0) {
+      setIsDocumentModalOpen(false);
       return;
     }
-    if (activePdfIndex > pdfFiles.length - 1) {
-      setActivePdfIndex(pdfFiles.length - 1);
+    if (activeDocumentIndex > documentFiles.length - 1) {
+      setActiveDocumentIndex(documentFiles.length - 1);
     }
-  }, [activePdfIndex, isPdfModalOpen, pdfFiles]);
+  }, [activeDocumentIndex, documentFiles, isDocumentModalOpen]);
 
   /**
    * Converts a raw File array into file-list entries.
@@ -446,11 +674,11 @@ export default function NewReviewPage() {
     setIsScreenshotModalOpen(true);
   };
 
-  const openPdfModal = (fileId: string) => {
-    const index = pdfFiles.findIndex((file) => file.id === fileId);
+  const openDocumentModal = (fileId: string) => {
+    const index = documentFiles.findIndex((file) => file.id === fileId);
     if (index < 0) return;
-    setActivePdfIndex(index);
-    setIsPdfModalOpen(true);
+    setActiveDocumentIndex(index);
+    setIsDocumentModalOpen(true);
   };
 
   const removeActiveScreenshotFromModal = () => {
@@ -459,10 +687,10 @@ export default function NewReviewPage() {
     removeFile(activeScreenshot.id);
   };
 
-  const removeActivePdfFromModal = () => {
-    const activePdf = pdfFiles[activePdfIndex];
-    if (!activePdf) return;
-    removeFile(activePdf.id);
+  const removeActiveDocumentFromModal = () => {
+    const activeDocument = documentFiles[activeDocumentIndex];
+    if (!activeDocument) return;
+    removeFile(activeDocument.id);
   };
 
   const handleDragOver = (e: React.DragEvent) => {
@@ -482,7 +710,10 @@ export default function NewReviewPage() {
   };
 
   const toggleCriterion = (c: string) =>
-    setCriteria((cur) => (cur.includes(c) ? cur.filter((x) => x !== c) : [...cur, c]));
+    setCriteria((cur) => {
+      criteriaTouchedRef.current = true;
+      return cur.includes(c) ? cur.filter((x) => x !== c) : [...cur, c];
+    });
 
   const handleFilePick = (e: React.ChangeEvent<HTMLInputElement>) => {
     const picked = Array.from(e.target.files ?? []);
@@ -506,24 +737,44 @@ export default function NewReviewPage() {
     return new File([bytes], fileName, { type: mimeType });
   };
 
-  const runReview = async () => {
-    const hasImageAsset = files.some(
-      (asset) => asset.type === "Screenshot" && Boolean(asset.file) && (asset.file?.type.startsWith("image/") ?? false)
+  const persistDraft = async () => {
+    setIsSavingDraft(true);
+    const assets: Array<{
+      name: string;
+      mimeType: string;
+      base64Data?: string;
+      blobUrl?: string;
+      contentText?: string;
+      sizeBytes?: number;
+    }> = await Promise.all(
+      files.map(async (f) => ({
+        name: f.name,
+        mimeType: f.file?.type || f.mimeType || "application/octet-stream",
+        base64Data: f.file ? await toBase64(f.file) : undefined,
+        blobUrl: f.file ? undefined : f.blobUrl,
+        contentText: f.contentText,
+        sizeBytes: f.file?.size ?? f.sizeBytes,
+      })),
     );
 
-    if (!hasImageAsset) {
-      toast.error("Add at least one screenshot image before starting the review.");
-      setStep(1);
-      return;
+    const notes: string[] = [];
+    if (contextText.trim()) notes.push(contextText.trim());
+    if (figmaUrl.trim()) notes.push(`Figma URL: ${figmaUrl.trim()}`);
+    if (designSystemUrl.trim()) notes.push(`Design System URL: ${designSystemUrl.trim()}`);
+
+    if (notes.length > 0) {
+      assets.push({
+        name: "Context notes",
+        mimeType: "text/plain",
+        contentText: notes.join("\n\n"),
+        base64Data: undefined,
+        sizeBytes: undefined,
+      });
     }
 
-    setRunning(true);
-    setStageIdx(0);
-    setCurrentStageLabel("Creating review…");
-
     try {
-      // 1. Create the review record
-      const reviewRes = await createReview({
+      const savedReview = await saveReviewDraft({
+        reviewId: draftReviewId ?? undefined,
         name,
         product,
         domain,
@@ -532,44 +783,68 @@ export default function NewReviewPage() {
         criteria,
         depth,
         confidenceThreshold: confidence[0],
+        stage: `step-${step + 1}`,
+        assets,
       });
-      const reviewId = reviewRes.id || reviewRes.reviewId;
+
+      if (savedReview?.id) {
+        setDraftReviewId(savedReview.id);
+        dispatch(addNotification({
+          type: "draft_saved",
+          title: "Draft saved",
+          message: `${name || "Your review"} was saved as a draft.`,
+          href: `/new-review?reviewId=${savedReview.id}`,
+          reviewId: savedReview.id,
+          dedupeKey: `draft-saved:${savedReview.id}`,
+        }));
+      }
+
+      return savedReview?.id as string | undefined;
+    } finally {
+      setIsSavingDraft(false);
+    }
+  };
+
+  const handleSaveDraft = async () => {
+    try {
+      await persistDraft();
+      toast.success("Draft saved");
+    } catch (error) {
+      toast.error("Failed to save draft");
+      console.error(error);
+    }
+  };
+
+  const runReview = async () => {
+    if (!validStep1) {
+      toast.error("Add at least one screenshot image before starting the review.");
+      setStep(1);
+      return;
+    }
+
+    setRunning(true);
+    setStageIdx(0);
+    setCurrentStageLabel("Saving review…");
+
+    try {
+      const reviewId = await persistDraft();
 
       if (!reviewId) {
         throw new Error("Did not receive a valid review ID from the server");
       }
 
-      // 2. Upload assets
-      for (const f of files) {
-        if (f.file) {
-          const base64Data = await toBase64(f.file);
-          await saveAsset(reviewId, {
-            name: f.name,
-            mimeType: f.file.type || "application/octet-stream",
-            base64Data,
-            sizeBytes: f.file.size,
-          });
-        }
-      }
+      dispatch(addNotification({
+        type: "review_started",
+        title: "Review started",
+        message: `${name || "Your review"} is now running.`,
+        href: `/new-review?reviewId=${reviewId}`,
+        reviewId,
+        dedupeKey: `review-started:${reviewId}`,
+      }));
 
-      // Upload context text and external references if provided
-      const notes: string[] = [];
-      if (contextText.trim()) notes.push(contextText.trim());
-      if (figmaUrl.trim()) notes.push(`Figma URL: ${figmaUrl.trim()}`);
-      if (designSystemUrl.trim()) notes.push(`Design System URL: ${designSystemUrl.trim()}`);
-
-      if (notes.length > 0) {
-        await saveAsset(reviewId, {
-          name: "Context notes",
-          mimeType: "text/plain",
-          contentText: notes.join("\n\n"),
-        });
-      }
-
-      // 3. Start the pipeline
+      setCurrentStageLabel("Starting review…");
       await startReview(reviewId);
 
-      // 4. Poll progress every 2s
       pollRef.current = setInterval(async () => {
         try {
           const progress = await getReviewProgress(reviewId);
@@ -594,7 +869,8 @@ export default function NewReviewPage() {
             }, 600);
           } else if (progress.status === "failed") {
             if (pollRef.current) clearInterval(pollRef.current);
-            toast.error("Review pipeline failed. Check server logs.");
+            const failureReason = getFailureReason(progress.stage);
+            toast.error(failureReason ? `Review pipeline failed: ${failureReason}` : "Review pipeline failed.");
             setCurrentStageLabel("Failed");
             setRunning(false);
           }
@@ -611,14 +887,35 @@ export default function NewReviewPage() {
 
   const validStep0 = name.trim().length > 0 && product.trim().length > 0;
   const validStep1 = files.some(
-    (asset) => asset.type === "Screenshot" && Boolean(asset.file) && (asset.file?.type.startsWith("image/") ?? false)
+    (asset) => asset.type === "Screenshot" && ((Boolean(asset.file) && (asset.file?.type.startsWith("image/") ?? false)) || Boolean(asset.blobUrl || asset.previewUrl))
   );
   const validStep2 = criteria.length > 0;
+  const progressPercent = Math.min(100, Math.max(0, Math.round(((stageIdx + 1) / progressStages.length) * 100)));
+  const canNavigateToStep = (targetStep: number) => {
+    if (running || isLoadingDraft) {
+      return targetStep <= step;
+    }
+
+    if (targetStep <= step) {
+      return true;
+    }
+
+    if (targetStep >= 1 && !validStep0) return false;
+    if (targetStep >= 2 && !validStep1) return false;
+    if (targetStep >= 3 && !validStep2) return false;
+
+    return true;
+  };
 
   return (
     <>
       <AppHeader title="New Review" subtitle="Set up an AI-assisted UX review in 5 guided steps" />
       <div className="flex-1 p-4 pb-28 md:p-6 md:pb-28">
+        {isLoadingDraft && (
+          <div className="mb-4 rounded-xl border border-border bg-card p-4 text-sm text-muted-foreground shadow-card">
+            Loading saved draft settings…
+          </div>
+        )}
         {/* Stepper */}
         <div className="sticky top-16 z-20 -mx-4 bg-background/90 px-4 py-3 backdrop-blur-lg supports-[backdrop-filter]:bg-background/75 md:-mx-6 md:px-6">
           <ol className="flex flex-nowrap items-center gap-2 overflow-x-auto whitespace-nowrap [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" role="list" aria-label="Wizard progress">
@@ -626,13 +923,14 @@ export default function NewReviewPage() {
               <li key={s} className="flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => !running && setStep(i)}
+                  onClick={() => canNavigateToStep(i) && setStep(i)}
+                  disabled={!canNavigateToStep(i)}
                   aria-current={i === step ? "step" : undefined}
                   className={cn(
                     "flex min-h-9 items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium transition",
                     i === step ? "border-primary bg-primary text-primary-foreground"
                     : i < step ? "border-success/40 bg-success/10 text-success"
-                    : "border-border bg-card text-muted-foreground hover:bg-secondary",
+                    : canNavigateToStep(i) ? "border-border bg-card text-muted-foreground hover:bg-secondary" : "border-border bg-card text-muted-foreground/50 opacity-60",
                   )}
                 >
                   <span className={cn("flex h-5 w-5 items-center justify-center rounded-full text-[10px]",
@@ -686,14 +984,12 @@ export default function NewReviewPage() {
                     </Select>
                   </Field>
                   <Field label="Review type">
-                    <Select value={reviewType} onValueChange={setReviewType}>
+                      <Select value={reviewType} onValueChange={handleReviewTypeChange}>
                       <SelectTrigger className="bg-background"><SelectValue /></SelectTrigger>
                       <SelectContent className="bg-popover text-popover-foreground">
-                        <SelectItem value="full">Full UX Review</SelectItem>
-                        <SelectItem value="prd">PRD Alignment Review</SelectItem>
-                        <SelectItem value="a11y">Accessibility Review</SelectItem>
-                        <SelectItem value="ds">Design System Review</SelectItem>
-                        <SelectItem value="content">Content & Microcopy Review</SelectItem>
+                          {reviewTypeOptions.map((option) => (
+                            <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                          ))}
                       </SelectContent>
                     </Select>
                   </Field>
@@ -784,33 +1080,54 @@ export default function NewReviewPage() {
                       <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">Uploaded assets ({visibleFiles.length})</p>
                       <div className="grid gap-2 md:grid-cols-2">
                         {visibleFiles.map((f) => (
-                          <div key={f.id} className="flex items-center gap-3 rounded-lg border border-border bg-card p-3">
+                          <div
+                            key={f.id}
+                            role="button"
+                            tabIndex={0}
+                            onClick={() => {
+                              if (f.type === "Screenshot" && f.previewUrl) {
+                                openScreenshotModal(f.id);
+                              } else if ((f.type === "PDF" || f.type === "Word") && f.previewUrl) {
+                                openDocumentModal(f.id);
+                              }
+                            }}
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter" || event.key === " ") {
+                                event.preventDefault();
+                                if (f.type === "Screenshot" && f.previewUrl) {
+                                  openScreenshotModal(f.id);
+                                } else if ((f.type === "PDF" || f.type === "Word") && f.previewUrl) {
+                                  openDocumentModal(f.id);
+                                }
+                              }
+                            }}
+                            className="flex cursor-pointer items-center gap-3 rounded-lg border border-border bg-card p-3 transition hover:border-primary/40 hover:bg-secondary/20"
+                            aria-label={`Open preview for ${f.name}`}
+                          >
                             {f.type === "Screenshot" && f.previewUrl ? (
-                              <button
-                                type="button"
-                                onClick={() => openScreenshotModal(f.id)}
-                                className="h-12 w-12 shrink-0 overflow-hidden rounded-md border border-border"
-                                aria-label={`Open screenshot preview for ${f.name}`}
-                              >
+                              <div className="h-12 w-12 shrink-0 overflow-hidden rounded-md border border-border">
                                 <img src={f.previewUrl} alt={f.name} className="h-full w-full object-cover" />
-                              </button>
-                            ) : f.type === "PDF" && f.previewUrl ? (
-                              <button
-                                type="button"
-                                onClick={() => openPdfModal(f.id)}
-                                className="flex h-12 w-12 shrink-0 items-center justify-center rounded-md border border-border bg-secondary/60 text-[10px] font-semibold text-primary"
-                                aria-label={`Open PDF preview for ${f.name}`}
-                              >
-                                PDF
-                              </button>
+                              </div>
+                            ) : (f.type === "PDF" || f.type === "Word") && f.previewUrl ? (
+                              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-md border border-border bg-secondary/60 text-[10px] font-semibold text-primary">
+                                {f.type === "PDF" ? "PDF" : "DOC"}
+                              </div>
                             ) : (
                               <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-secondary text-primary"><FileText className="h-4 w-4" aria-hidden="true" /></div>
                             )}
                             <div className="min-w-0 flex-1">
-                              <p className="truncate text-sm font-medium">{f.name}</p>
+                              <p className="truncate text-sm font-semibold">{f.name}</p>
                               <p className="text-[11px] text-muted-foreground">{f.type} · {f.status}</p>
                             </div>
-                            <button type="button" onClick={() => removeFile(f.id)} className="rounded p-1 text-muted-foreground hover:text-destructive" aria-label={`Remove ${f.name}`}>
+                            <button
+                              type="button"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                removeFile(f.id);
+                              }}
+                              className="rounded p-1 text-muted-foreground hover:text-destructive"
+                              aria-label={`Remove ${f.name}`}
+                            >
                               <X className="h-4 w-4" />
                             </button>
                           </div>
@@ -831,10 +1148,16 @@ export default function NewReviewPage() {
                     const toggleGroup = () => {
                       if (allSelected) {
                         // Deselect all in group
-                        setCriteria((cur) => cur.filter((c) => !groupItems.some((item) => item.id === c)));
+                        setCriteria((cur) => {
+                          criteriaTouchedRef.current = true;
+                          return cur.filter((c) => !groupItems.some((item) => item.id === c));
+                        });
                       } else {
                         // Select all in group
-                        setCriteria((cur) => Array.from(new Set([...cur, ...groupItems.map((item) => item.id)])));
+                        setCriteria((cur) => {
+                          criteriaTouchedRef.current = true;
+                          return Array.from(new Set([...cur, ...groupItems.map((item) => item.id)]));
+                        });
                       }
                     };
 
@@ -911,7 +1234,7 @@ export default function NewReviewPage() {
                     </Select>
                   </Field>
                   <Field label="Review depth">
-                    <RadioGroup value={depth} onValueChange={setDepth} className="grid grid-cols-3 gap-2">
+                    <RadioGroup value={depth} onValueChange={setDepth} className="flex flex-wrap items-center gap-2">
                       {["quick", "standard", "deep"].map((v) => (
                         <Label key={v} className="flex min-h-[44px] cursor-pointer items-center gap-2 rounded-lg border border-border bg-card p-3 capitalize has-[:checked]:border-primary has-[:checked]:bg-primary/5">
                           <RadioGroupItem value={v} />
@@ -964,9 +1287,6 @@ export default function NewReviewPage() {
                       <h3 className="mt-3 text-base font-semibold">Ready to run AI review</h3>
                       <p className="mt-1 text-sm text-muted-foreground">{visibleFiles.length} inputs · {criteria.length} subcategories · {getAgentsFromSubcategories(criteria).length} agents · {depth} depth · ~2–4 min estimated</p>
                       <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
-                        <Button size="lg" variant="outline" className="min-h-11" onClick={() => toast.success("Draft saved")}>
-                          <Save className="mr-1.5 h-4 w-4" aria-hidden="true" />Save draft
-                        </Button>
                         <Button size="lg" className="min-h-11" onClick={runReview}>
                           <Sparkles className="mr-1.5 h-4 w-4" aria-hidden="true" />Run analysis
                         </Button>
@@ -978,7 +1298,10 @@ export default function NewReviewPage() {
                         <Loader2 className="h-4 w-4 animate-spin text-primary" aria-hidden="true" />
                         <p className="text-sm font-medium">{currentStageLabel || "AI agent at work…"}</p>
                       </div>
-                      <Progress value={((stageIdx + 1) / progressStages.length) * 100} className="h-1.5" />
+                      <div className="flex items-center gap-3">
+                        <Progress value={progressPercent} className="h-1.5 flex-1" />
+                        <span className="min-w-11 text-right text-xs font-medium tabular-nums text-muted-foreground">{progressPercent}%</span>
+                      </div>
                       <ul className="mt-2 space-y-1.5">
                         {progressStages.map((s, i) => (
                           <li key={s} className="flex items-center gap-2 text-sm">
@@ -1004,8 +1327,8 @@ export default function NewReviewPage() {
                 <SumRow label="Name" value={name || "—"} />
                 <SumRow label="Product" value={product || "—"} />
                 <SumRow label="Domain" value={domain} capitalize />
-                <SumRow label="Type" value={reviewType} capitalize />
                 <SumRow label="Inputs" value={`${visibleFiles.length}`} />
+                <SumRow label="Type" value={formatReviewTypeLabel(reviewType)} />
                 <SumRow label="Criteria" value={`${criteria.length}`} />
                 <SumRow label="Depth" value={depth} capitalize />
                 <SumRow label="Confidence" value={`≥ ${confidence[0]}%`} />
@@ -1047,18 +1370,38 @@ export default function NewReviewPage() {
 
         {/* Navigation */}
         {!running && step < steps.length - 1 && (
-          <div className="fixed bottom-0 left-0 right-0 z-20 flex justify-end px-4 py-3 md:left-[var(--sidebar-width)] md:px-6 md:peer-data-[state=collapsed]:left-[var(--sidebar-width-icon)]">
-            <div className="flex gap-2">
-              <Button variant="outline" className="min-h-10" onClick={() => toast.success("Draft saved")}>
-                <Save className="mr-1.5 h-4 w-4" aria-hidden="true" />Save draft
-              </Button>
-              <Button
-                className="min-h-10"
-                disabled={(step === 0 && !validStep0) || (step === 1 && !validStep1) || (step === 2 && !validStep2)}
-                onClick={() => setStep((s) => Math.min(steps.length - 1, s + 1))}
-              >
-                Continue<ArrowRight className="ml-1.5 h-4 w-4" aria-hidden="true" />
-              </Button>
+          <div className="fixed bottom-0 left-0 right-0 z-20 border-t border-border/80 bg-card/95 px-4 py-3 shadow-[0_-12px_40px_-24px_rgba(15,23,42,0.35)] backdrop-blur-xl md:left-[var(--sidebar-width)] md:px-6 md:peer-data-[state=collapsed]:left-[var(--sidebar-width-icon)]">
+            <div className="mx-auto flex max-w-6xl justify-end">
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                <TooltipProvider delayDuration={0}>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="min-h-10 min-w-10"
+                        aria-label="Go back"
+                        disabled={step === 0}
+                        onClick={() => setStep((s) => Math.max(0, s - 1))}
+                      >
+                        <ChevronLeft className="h-4 w-4" aria-hidden="true" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Go back</TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+                <Button variant="outline" className="min-h-10 bg-background" disabled={isSavingDraft || isLoadingDraft} onClick={handleSaveDraft}>
+                  {isSavingDraft ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" aria-hidden="true" /> : <Save className="mr-1.5 h-4 w-4" aria-hidden="true" />}
+                  Save draft
+                </Button>
+                <Button
+                  className="min-h-10"
+                  disabled={isLoadingDraft || (step === 0 && !validStep0) || (step === 1 && !validStep1) || (step === 2 && !validStep2)}
+                  onClick={() => setStep((s) => Math.min(steps.length - 1, s + 1))}
+                >
+                  Continue<ArrowRight className="ml-1.5 h-4 w-4" aria-hidden="true" />
+                </Button>
+              </div>
             </div>
           </div>
         )}
@@ -1066,7 +1409,7 @@ export default function NewReviewPage() {
 
       <Dialog open={isScreenshotModalOpen} onOpenChange={setIsScreenshotModalOpen}>
         <DialogContent className="max-w-4xl p-0 overflow-hidden">
-          <DialogHeader className="px-4 py-3 border-b border-border">
+          <DialogHeader className="border-b border-border px-4 py-3 pr-16">
             <div className="flex items-center justify-between gap-3">
               <DialogTitle className="text-sm font-medium">
                 Screenshots ({screenshotFiles.length})
@@ -1087,6 +1430,13 @@ export default function NewReviewPage() {
 
           {screenshotFiles.length > 0 && (
             <div className="space-y-3 p-4">
+              <div className="flex items-center justify-between gap-2">
+                <p className="truncate text-sm font-medium text-foreground">{screenshotFiles[activeScreenshotIndex]?.name}</p>
+                <p className="text-xs text-muted-foreground">
+                  {activeScreenshotIndex + 1} / {screenshotFiles.length}
+                </p>
+              </div>
+
               <div className="relative flex items-center justify-center rounded-lg border border-border bg-secondary/30 p-2">
                 <img
                   src={screenshotFiles[activeScreenshotIndex]?.previewUrl}
@@ -1120,13 +1470,6 @@ export default function NewReviewPage() {
                 )}
               </div>
 
-              <div className="flex items-center justify-between gap-2">
-                <p className="truncate text-sm text-muted-foreground">{screenshotFiles[activeScreenshotIndex]?.name}</p>
-                <p className="text-xs text-muted-foreground">
-                  {activeScreenshotIndex + 1} / {screenshotFiles.length}
-                </p>
-              </div>
-
               {screenshotFiles.length > 1 && (
                 <div className="flex gap-2 overflow-x-auto pb-1">
                   {screenshotFiles.map((file, idx) => (
@@ -1138,7 +1481,8 @@ export default function NewReviewPage() {
                         "h-14 w-20 shrink-0 overflow-hidden rounded border",
                         idx === activeScreenshotIndex ? "border-primary" : "border-border"
                       )}
-                      aria-label={`Open screenshot ${idx + 1}`}
+                      aria-label={`Open screenshot ${file.name}`}
+                      title={file.name}
                     >
                       <img src={file.previewUrl} alt={file.name} className="h-full w-full object-cover" />
                     </button>
@@ -1150,20 +1494,20 @@ export default function NewReviewPage() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={isPdfModalOpen} onOpenChange={setIsPdfModalOpen}>
+      <Dialog open={isDocumentModalOpen} onOpenChange={setIsDocumentModalOpen}>
         <DialogContent className="max-w-5xl p-0 overflow-hidden">
-          <DialogHeader className="px-4 py-3 border-b border-border">
+          <DialogHeader className="border-b border-border px-4 py-3 pr-16">
             <div className="flex items-center justify-between gap-3">
               <DialogTitle className="text-sm font-medium">
-                PDFs ({pdfFiles.length})
+                Documents ({documentFiles.length})
               </DialogTitle>
-              {pdfFiles.length > 0 && (
+              {documentFiles.length > 0 && (
                 <Button
                   type="button"
                   size="sm"
                   variant="outline"
                   className="border-destructive/30 text-destructive hover:bg-destructive/10 hover:text-destructive"
-                  onClick={removeActivePdfFromModal}
+                  onClick={removeActiveDocumentFromModal}
                 >
                   <Trash2 className="mr-1.5 h-4 w-4" />Remove
                 </Button>
@@ -1171,24 +1515,31 @@ export default function NewReviewPage() {
             </div>
           </DialogHeader>
 
-          {pdfFiles.length > 0 && (
+          {documentFiles.length > 0 && (
             <div className="space-y-3 p-4">
+              <div className="flex items-center justify-between gap-2">
+                <p className="truncate text-sm font-medium text-foreground">{documentFiles[activeDocumentIndex]?.name}</p>
+                <p className="text-xs text-muted-foreground">
+                  {activeDocumentIndex + 1} / {documentFiles.length}
+                </p>
+              </div>
+
               <div className="relative rounded-lg border border-border bg-secondary/20">
                 <iframe
-                  title={pdfFiles[activePdfIndex]?.name}
-                  src={pdfFiles[activePdfIndex]?.previewUrl}
+                  title={documentFiles[activeDocumentIndex]?.name}
+                  src={documentFiles[activeDocumentIndex]?.previewUrl}
                   className="h-[65vh] w-full rounded"
                 />
 
-                {pdfFiles.length > 1 && (
+                {documentFiles.length > 1 && (
                   <>
                     <Button
                       type="button"
                       size="icon"
                       variant="secondary"
                       className="absolute left-3 top-1/2 -translate-y-1/2"
-                      onClick={() => setActivePdfIndex((idx) => (idx === 0 ? pdfFiles.length - 1 : idx - 1))}
-                      aria-label="Previous PDF"
+                      onClick={() => setActiveDocumentIndex((idx) => (idx === 0 ? documentFiles.length - 1 : idx - 1))}
+                      aria-label="Previous document"
                     >
                       <ChevronLeft className="h-4 w-4" />
                     </Button>
@@ -1197,8 +1548,8 @@ export default function NewReviewPage() {
                       size="icon"
                       variant="secondary"
                       className="absolute right-3 top-1/2 -translate-y-1/2"
-                      onClick={() => setActivePdfIndex((idx) => (idx === pdfFiles.length - 1 ? 0 : idx + 1))}
-                      aria-label="Next PDF"
+                      onClick={() => setActiveDocumentIndex((idx) => (idx === documentFiles.length - 1 ? 0 : idx + 1))}
+                      aria-label="Next document"
                     >
                       <ChevronRight className="h-4 w-4" />
                     </Button>
@@ -1206,27 +1557,21 @@ export default function NewReviewPage() {
                 )}
               </div>
 
-              <div className="flex items-center justify-between gap-2">
-                <p className="truncate text-sm text-muted-foreground">{pdfFiles[activePdfIndex]?.name}</p>
-                <p className="text-xs text-muted-foreground">
-                  {activePdfIndex + 1} / {pdfFiles.length}
-                </p>
-              </div>
-
-              {pdfFiles.length > 1 && (
+              {documentFiles.length > 1 && (
                 <div className="flex gap-2 overflow-x-auto pb-1">
-                  {pdfFiles.map((file, idx) => (
+                  {documentFiles.map((file, idx) => (
                     <button
                       key={file.id}
                       type="button"
-                      onClick={() => setActivePdfIndex(idx)}
+                      onClick={() => setActiveDocumentIndex(idx)}
                       className={cn(
-                        "flex h-12 w-20 shrink-0 items-center justify-center rounded border text-xs font-semibold",
-                        idx === activePdfIndex ? "border-primary text-primary" : "border-border text-muted-foreground"
+                        "max-w-[180px] shrink-0 truncate rounded border px-2 py-1.5 text-xs font-medium",
+                        idx === activeDocumentIndex ? "border-primary text-primary" : "border-border text-muted-foreground"
                       )}
-                      aria-label={`Open PDF ${idx + 1}`}
+                      aria-label={`Open document ${file.name}`}
+                      title={file.name}
                     >
-                      PDF {idx + 1}
+                      {file.name}
                     </button>
                   ))}
                 </div>

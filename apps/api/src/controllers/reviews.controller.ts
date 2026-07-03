@@ -31,8 +31,8 @@ const SaveAssetSchema = z.object({
 
 const SaveDraftSchema = z.object({
   reviewId: z.string().optional(),
-  name: z.string().min(1),
-  product: z.string().min(1),
+  name: z.string(),
+  product: z.string(),
   domain: z.string().optional(),
   reviewType: z.string().optional(),
   owner: z.string().optional(),
