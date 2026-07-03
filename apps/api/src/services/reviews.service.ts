@@ -34,49 +34,6 @@ type FindingAnalyticsRecord = {
   };
 };
 
-type AnalyticsRange = "1m" | "3m" | "6m" | "1y" | "custom";
-
-type AnalyticsQueryOptions = {
-  range?: AnalyticsRange;
-  startDate?: string;
-  endDate?: string;
-  product?: string;
-  domain?: string;
-  reviewType?: string;
-  owner?: string;
-};
-
-function parseIsoDateToUtcBoundary(value: string, endOfDay: boolean): Date | null {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
-  const date = new Date(`${value}T${endOfDay ? "23:59:59.999" : "00:00:00.000"}Z`);
-  return Number.isNaN(date.getTime()) ? null : date;
-}
-
-function resolveAnalyticsDateRange(options?: AnalyticsQueryOptions): { gte: Date; lte: Date } {
-  const now = new Date();
-  const selectedRange = options?.range ?? "1y";
-
-  if (selectedRange === "custom") {
-    const startDate = options?.startDate ? parseIsoDateToUtcBoundary(options.startDate, false) : null;
-    const endDate = options?.endDate ? parseIsoDateToUtcBoundary(options.endDate, true) : null;
-    if (!startDate || !endDate || startDate > endDate) {
-      throw new AppError(400, "Invalid custom date range");
-    }
-    return { gte: startDate, lte: endDate };
-  }
-
-  const monthsByRange: Record<Exclude<AnalyticsRange, "custom">, number> = {
-    "1m": 1,
-    "3m": 3,
-    "6m": 6,
-    "1y": 12,
-  };
-
-  const startDate = new Date(now);
-  startDate.setUTCMonth(startDate.getUTCMonth() - monthsByRange[selectedRange]);
-  return { gte: startDate, lte: now };
-}
-
 function monthKey(date: Date): string {
   const year = date.getUTCFullYear();
   const month = String(date.getUTCMonth() + 1).padStart(2, "0");
@@ -392,37 +349,15 @@ export const ReviewsService = {
     });
   },
 
-  async getAnalytics(userId: string, options?: AnalyticsQueryOptions) {
-    const dateRange = resolveAnalyticsDateRange(options);
-
-    const reviewFieldFilters: Record<string, string> = {};
-    if (options?.product && options.product !== "all") reviewFieldFilters.product = options.product;
-    if (options?.domain && options.domain !== "all") reviewFieldFilters.domain = options.domain;
-    if (options?.reviewType && options.reviewType !== "all") reviewFieldFilters.reviewType = options.reviewType;
-    if (options?.owner && options.owner !== "all") reviewFieldFilters.owner = options.owner;
-
-    const [reviews, findings, allReviewMeta]: [
-      ReviewAnalyticsRecord[],
-      FindingAnalyticsRecord[],
-      Array<{ product: string; domain: string; reviewType: string; owner: string }>
-    ] = await Promise.all([
+  async getAnalytics(userId: string) {
+    const [reviews, findings]: [ReviewAnalyticsRecord[], FindingAnalyticsRecord[]] = await Promise.all([
       prisma.review.findMany({
-        where: {
-          userId,
-          createdAt: dateRange,
-          ...reviewFieldFilters,
-        },
+        where: { userId },
         include: { _count: { select: { findings: true } } },
         orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
       }),
       prisma.finding.findMany({
-        where: {
-          review: {
-            userId,
-            ...reviewFieldFilters,
-          },
-          createdAt: dateRange,
-        },
+        where: { review: { userId } },
         select: {
           severity: true,
           area: true,
@@ -435,23 +370,7 @@ export const ReviewsService = {
           },
         },
       }),
-      prisma.review.findMany({
-        where: { userId },
-        select: {
-          product: true,
-          domain: true,
-          reviewType: true,
-          owner: true,
-        },
-      }),
     ]);
-
-    const filterOptions = {
-      products: Array.from(new Set(allReviewMeta.map((review) => (review.product || "").trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b)),
-      domains: Array.from(new Set(allReviewMeta.map((review) => (review.domain || "").trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b)),
-      reviewTypes: Array.from(new Set(allReviewMeta.map((review) => (review.reviewType || "").trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b)),
-      owners: Array.from(new Set(allReviewMeta.map((review) => (review.owner || "").trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b)),
-    };
 
     const completed = reviews.filter((r) => String(r.status).toLowerCase() === "completed");
     const avgUxScore = completed.length
@@ -571,7 +490,6 @@ export const ReviewsService = {
       a11yTrend,
       recentReviews:  recent,
       needsAttention: findings.filter((f) => f.severity === "P0" && f.status === "PROPOSED").length,
-      filterOptions,
     };
   },
 };

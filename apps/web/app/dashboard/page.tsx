@@ -379,10 +379,10 @@ export default function DashboardPage() {
                             <p className="text-[11px] text-muted-foreground">{r.createdAt?.slice(0, 10)}</p>
                           </TableCell>
                           <TableCell className="hidden text-sm md:table-cell">{r.product}</TableCell>
-                          <TableCell className="hidden text-xs text-muted-foreground lg:table-cell">{toTitleCase(String(r.reviewType || "unknown"))}</TableCell>
+                          <TableCell className="hidden text-xs text-muted-foreground lg:table-cell">{r.reviewType}</TableCell>
                           <TableCell className="text-right font-medium tabular-nums">{r.uxScore ?? "—"}</TableCell>
                           <TableCell className="text-right">
-                            <Badge variant="secondary" className="whitespace-nowrap capitalize">{String(r.status || "unknown").replaceAll("_", " ")}</Badge>
+                            <Badge variant="secondary" className="capitalize">{String(r.status || "unknown").replaceAll("_", " ")}</Badge>
                           </TableCell>
                           <TableCell className="hidden text-xs xl:table-cell">{r.owner || "User"}</TableCell>
                           <TableCell className="hidden text-right sm:table-cell">
