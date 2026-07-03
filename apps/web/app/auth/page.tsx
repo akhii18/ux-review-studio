@@ -107,7 +107,9 @@ function AuthPageContent() {
       localStorage.setItem("current_user", JSON.stringify(currentUser));
       document.cookie = `token=${result.token}; Path=/; Max-Age=${result.expiresInSeconds}; SameSite=Lax`;
 
-      toast.success("User authenticated");
+      toast.success("User authenticated", {
+        className: "!bg-green-600 !text-white !border-green-700",
+      });
       router.replace("/dashboard");
     } catch (err: any) {
       setError(err?.message ?? "Sign-in failed");
@@ -185,7 +187,7 @@ function AuthPageContent() {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-[#efeeee] px-4 py-10">
+    <div className="flex h-screen overflow-hidden items-center justify-center bg-[#efeeee] px-4">
       <div className="w-full max-w-md text-center">
 
         {/* Logo */}
