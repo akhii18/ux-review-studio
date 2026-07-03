@@ -1,4 +1,4 @@
-import type { PrincipleCategory, ReviewArea } from "../types";
+import type { FindingOutputOptionKey, PrincipleCategory, ReviewArea } from "../types";
 
 // ── Severity / Priority labels ────────────────────────────────────────────────
 
@@ -27,6 +27,18 @@ export const REVIEW_AREA_LABELS: Record<ReviewArea, string> = {
   RISK: "Risk",
   RECOMMENDATIONS: "Recommendations",
 };
+
+// ── Finding output options ───────────────────────────────────────────────────
+
+export const FINDING_OUTPUT_OPTIONS: Array<{ key: FindingOutputOptionKey; label: string }> = [
+  { key: "recommendationsWithAcceptanceCriteria", label: "Recommendations with acceptance criteria" },
+  { key: "linkedPrinciple", label: "Linked principle for each finding" },
+  { key: "requirementTraceability", label: "Requirement traceability" },
+  { key: "accessibilityImpactWcag", label: "Accessibility impact (WCAG)" },
+  { key: "businessImpactEstimate", label: "Business impact estimate" },
+];
+
+export const DEFAULT_FINDING_OUTPUT_OPTIONS = FINDING_OUTPUT_OPTIONS.map((option) => option.key);
 
 // ── Principle categories ──────────────────────────────────────────────────────
 

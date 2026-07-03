@@ -1,3 +1,5 @@
+import type { FindingOutputOptionKey } from "@uxm/shared";
+
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 
 function getAuthToken(): string | null {
@@ -90,6 +92,7 @@ export function createReview(data: {
   reviewType?: string;
   owner?: string;
   criteria?: string[];
+  findingMetadataOptions?: FindingOutputOptionKey[];
   depth?: ReviewDepth;
   confidenceThreshold?: number;
 }) {
@@ -104,6 +107,7 @@ export function saveReviewDraft(data: {
   reviewType?: string;
   owner?: string;
   criteria?: string[];
+  findingMetadataOptions?: FindingOutputOptionKey[];
   depth?: ReviewDepth;
   confidenceThreshold?: number;
   stage?: string;

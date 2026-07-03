@@ -25,6 +25,11 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+import {
+  DEFAULT_FINDING_OUTPUT_OPTIONS,
+  FINDING_OUTPUT_OPTIONS,
+  type FindingOutputOptionKey,
+} from "@uxm/shared";
 
 // ── Subcategory groups matching the mentor's checklist image ─────────────────
 const SUBCATEGORY_GROUPS = [
@@ -181,6 +186,9 @@ export default function NewReviewPage() {
   const [figmaUrl, setFigmaUrl] = useState("");
   const [designSystemUrl, setDesignSystemUrl] = useState("");
   const [criteria, setCriteria] = useState<string[]>([]);
+  const [findingMetadataOptions, setFindingMetadataOptions] = useState<FindingOutputOptionKey[]>([
+    ...DEFAULT_FINDING_OUTPUT_OPTIONS,
+  ]);
   const [files, setFiles] = useState<Array<{ id: string; name: string; type: string; status: string; file?: File; previewUrl?: string }>>([]);
   const [contextText, setContextText] = useState("");
   const [depth, setDepth] = useState<ReviewDepth>("standard");
@@ -411,6 +419,13 @@ export default function NewReviewPage() {
   const toggleCriterion = (c: string) =>
     setCriteria((cur) => (cur.includes(c) ? cur.filter((x) => x !== c) : [...cur, c]));
 
+  const toggleFindingMetadataOption = (optionKey: FindingOutputOptionKey) =>
+    setFindingMetadataOptions((current) =>
+      current.includes(optionKey)
+        ? current.filter((key) => key !== optionKey)
+        : [...current, optionKey]
+    );
+
   const handleFilePick = (e: React.ChangeEvent<HTMLInputElement>) => {
     const picked = Array.from(e.target.files ?? []);
     void addFiles(picked);
@@ -438,6 +453,7 @@ export default function NewReviewPage() {
         reviewType,
         owner,
         criteria,
+        findingMetadataOptions,
         depth,
         confidenceThreshold: confidence[0],
       });
@@ -840,16 +856,14 @@ export default function NewReviewPage() {
                   </Field>
                   <div className="space-y-2.5 md:col-span-2">
                     <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Include in output</p>
-                    {[
-                      ["Recommendations with acceptance criteria", true],
-                      ["Linked principle for each finding", true],
-                      ["Requirement traceability", true],
-                      ["Accessibility impact (WCAG)", true],
-                      ["Business impact estimate", true],
-                    ].map(([label, def]) => (
-                      <div key={label as string} className="flex items-center justify-between rounded-lg border border-border bg-card px-3 py-2.5">
-                        <Label className="text-sm">{label}</Label>
-                        <Switch defaultChecked={def as boolean} />
+                    {FINDING_OUTPUT_OPTIONS.map((option) => (
+                      <div key={option.key} className="flex items-center justify-between rounded-lg border border-border bg-card px-3 py-2.5">
+                        <Label className="text-sm" htmlFor={`finding-output-${option.key}`}>{option.label}</Label>
+                        <Switch
+                          id={`finding-output-${option.key}`}
+                          checked={findingMetadataOptions.includes(option.key)}
+                          onCheckedChange={() => toggleFindingMetadataOption(option.key)}
+                        />
                       </div>
                     ))}
                   </div>

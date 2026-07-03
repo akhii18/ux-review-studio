@@ -375,6 +375,34 @@ export const SynthesizedFindingSchema = FindingSchema.extend({
       "How many independent agents flagged this same root problem. " +
       "Used to escalate severity: 3+ agents → escalate one level."
     ),
+  acceptanceCriteria: z
+    .array(z.string())
+    .default([])
+    .describe("Testable acceptance criteria for the recommended fix, when requested."),
+
+  requirementTraceability: z
+    .string()
+    .nullable()
+    .default(null)
+    .describe("Requirement or source-input traceability for this finding, when requested."),
+
+  wcagCriteria: z
+    .string()
+    .nullable()
+    .default(null)
+    .describe("Specific WCAG criterion connected to this finding, when requested and applicable."),
+
+  businessImpact: z
+    .string()
+    .nullable()
+    .default(null)
+    .describe("Business impact estimate for this finding, when requested."),
+
+  a11yImpact: z
+    .string()
+    .nullable()
+    .default(null)
+    .describe("Accessibility impact summary for this finding, when requested and applicable."),
   // bboxRefs: z.array(z.any()).optional(),
 });
 export type SynthesizedFinding = z.infer<typeof SynthesizedFindingSchema>;

@@ -89,6 +89,11 @@ type SynthesizedFinding = {
   sources: string[];
   mergedFrom: string[];
   agreementCount: number;
+  acceptanceCriteria?: string[];
+  requirementTraceability?: string | null;
+  wcagCriteria?: string | null;
+  businessImpact?: string | null;
+  a11yImpact?: string | null;
 };
 
 type GroundingElement = {
@@ -133,6 +138,7 @@ let agenticModulePromise: Promise<{ runReviewGraph: (params: {
   reviewDepth?: string | null;
   selectedAgents?: string[];
   selectedPrinciples?: unknown;
+  findingMetadataOptions?: string[] | null;
 }) => Promise<AgenticRunResult> }> | null = null;
 
 async function loadAgenticModule() {
@@ -214,6 +220,28 @@ function normalizePersistableBBoxRefs(finding: SynthesizedFinding, groundingElem
     .filter((ref): ref is NonNullable<ReturnType<typeof normalizePersistableBBoxRef>> => Boolean(ref));
 
   return refs.length > 0 ? refs : undefined;
+}
+
+function normalizeStringArray(value: unknown): string[] | null {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : null;
+}
+
+function hasFindingMetadataOption(review: NonNullable<ReviewRecord>, option: string): boolean {
+  const options = normalizeStringArray(review.findingMetadataOptions);
+  return options ? options.includes(option) : true;
+}
+
+function buildFindingAiMetadata(finding: SynthesizedFinding) {
+  const acceptanceCriteria = Array.isArray(finding.acceptanceCriteria)
+    ? finding.acceptanceCriteria.filter((item) => item.trim().length > 0)
+    : [];
+
+  const metadata: Record<string, string | string[]> = {};
+  if (acceptanceCriteria.length > 0) metadata.acceptanceCriteria = acceptanceCriteria;
+  if (finding.requirementTraceability) metadata.requirementTraceability = finding.requirementTraceability;
+  if (finding.wcagCriteria) metadata.wcagCriteria = finding.wcagCriteria;
+
+  return Object.keys(metadata).length > 0 ? metadata : undefined;
 }
 
 /**
@@ -320,6 +348,11 @@ function buildReportMarkdown(params: {
   deduplicationNote: string;
 }): { executiveSummary: string; contentMd: string } {
   const { review, findings, uxScore, deduplicationNote } = params;
+  const includeRecommendations = hasFindingMetadataOption(review, "recommendationsWithAcceptanceCriteria");
+  const includeLinkedPrinciple = hasFindingMetadataOption(review, "linkedPrinciple");
+  const includeRequirements = hasFindingMetadataOption(review, "requirementTraceability");
+  const includeAccessibility = hasFindingMetadataOption(review, "accessibilityImpactWcag");
+  const includeBusinessImpact = hasFindingMetadataOption(review, "businessImpactEstimate");
   const p0 = findings.filter((finding) => finding.severity === "P0");
   const p1 = findings.filter((finding) => finding.severity === "P1");
   const p2 = findings.filter((finding) => finding.severity === "P2");
@@ -340,12 +373,19 @@ function buildReportMarkdown(params: {
       `### ${index + 1}. ${finding.issue}`,
       `- Region: ${finding.region}`,
       `- Severity: ${finding.severity}`,
-      `- Principle: ${finding.principle}`,
-      `- Why it matters: ${finding.why}`,
-      `- Recommendation: ${finding.fix}`,
+      includeLinkedPrinciple ? `- Principle: ${finding.principle}` : null,
+      includeLinkedPrinciple ? `- Why it matters: ${finding.why}` : null,
+      includeRecommendations ? `- Recommendation: ${finding.fix}` : null,
+      includeRecommendations && finding.acceptanceCriteria?.length
+        ? `- Acceptance criteria:\n${finding.acceptanceCriteria.map((item) => `  - ${item}`).join("\n")}`
+        : null,
+      includeRequirements && finding.requirementTraceability ? `- Requirement traceability: ${finding.requirementTraceability}` : null,
+      includeAccessibility && finding.a11yImpact ? `- Accessibility impact: ${finding.a11yImpact}` : null,
+      includeAccessibility && finding.wcagCriteria ? `- WCAG: ${finding.wcagCriteria}` : null,
+      includeBusinessImpact && finding.businessImpact ? `- Business impact: ${finding.businessImpact}` : null,
       `- Sources: ${sources}`,
       `- Merged from: ${mergedFrom}`,
-    ].join("\n");
+    ].filter(Boolean).join("\n");
   }).join("\n\n");
 
   const contentMd = [
@@ -419,6 +459,9 @@ async function persistFindings(params: {
         principle: finding.principle,
         observation: finding.issue,
         why: finding.why,
+        businessImpact: finding.businessImpact ?? undefined,
+        a11yImpact: finding.a11yImpact ?? undefined,
+        aiMetadata: buildFindingAiMetadata(finding),
         confidence: clampConfidence(finding.confidence),
         status: "PROPOSED",
         isAiGenerated: true,
@@ -518,6 +561,7 @@ export async function runReviewPipeline(reviewId: string): Promise<void> {
       // Pass the subcategory boolean map so each agent knows which
       // principle blocks to inject into its system prompt.
       selectedPrinciples: Object.keys(selectedPrinciples).length > 0 ? selectedPrinciples : undefined,
+      findingMetadataOptions: normalizeStringArray(review.findingMetadataOptions),
     });
 
     const synthesis = finalState.synthesisOutput;

@@ -4,6 +4,12 @@ export type FindingStatus = "PROPOSED" | "ACCEPTED" | "EDITED" | "DISMISSED" | "
 export type ChecklistStatus = "DRAFT" | "APPROVED" | "DEPRECATED";
 export type PrincipleCategory = "NIELSEN_HEURISTICS" | "COGNITIVE_LAWS" | "GESTALT" | "VISUAL_DESIGN" | "ACCESSIBILITY_WCAG" | "CONTENT_MICROCOPY" | "CUSTOM";
 export type ReviewStatus = "draft" | "in_progress" | "completed" | "failed" | "archived";
+export type FindingOutputOptionKey = "recommendationsWithAcceptanceCriteria" | "linkedPrinciple" | "requirementTraceability" | "accessibilityImpactWcag" | "businessImpactEstimate";
+export interface FindingAiMetadata {
+    acceptanceCriteria?: string[];
+    requirementTraceability?: string;
+    wcagCriteria?: string;
+}
 export interface Finding {
     id: string;
     reviewId: string;
@@ -18,6 +24,7 @@ export interface Finding {
     why?: string;
     businessImpact?: string;
     a11yImpact?: string;
+    aiMetadata?: FindingAiMetadata | null;
     status: FindingStatus;
     confidence: number;
     notes?: string;
@@ -86,6 +93,7 @@ export interface Review {
     stage?: string;
     uxScore?: number;
     criteria: string[];
+    findingMetadataOptions?: FindingOutputOptionKey[];
     depth: string;
     confidenceThreshold: number;
     createdAt: string;

@@ -119,6 +119,7 @@ type DraftReviewInput = {
   reviewType?: string;
   owner?: string;
   criteria?: string[];
+  findingMetadataOptions?: string[];
   depth?: ReviewDepth;
   confidenceThreshold?: number;
   stage?: string;
@@ -136,9 +137,36 @@ type ReviewExportRecord = {
   recommendation: string | null;
   businessImpact: string | null;
   a11yImpact: string | null;
+  aiMetadata: unknown;
   status: string;
   reviewBasis: Array<{ type: string; name: string; explanation: string }>;
 };
+
+function normalizeStringArray(value: unknown): string[] | null {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : null;
+}
+
+function hasFindingMetadataOption(review: { findingMetadataOptions?: unknown }, option: string): boolean {
+  const options = normalizeStringArray(review.findingMetadataOptions);
+  return options ? options.includes(option) : true;
+}
+
+function readAiMetadata(finding: ReviewExportRecord): {
+  acceptanceCriteria: string[];
+  requirementTraceability?: string;
+  wcagCriteria?: string;
+} {
+  if (!finding.aiMetadata || typeof finding.aiMetadata !== "object") {
+    return { acceptanceCriteria: [] };
+  }
+
+  const metadata = finding.aiMetadata as Record<string, unknown>;
+  return {
+    acceptanceCriteria: normalizeStringArray(metadata.acceptanceCriteria) ?? [],
+    requirementTraceability: typeof metadata.requirementTraceability === "string" ? metadata.requirementTraceability : undefined,
+    wcagCriteria: typeof metadata.wcagCriteria === "string" ? metadata.wcagCriteria : undefined,
+  };
+}
 
 function isExportableFindings(findings: ReviewExportRecord[]): boolean {
   const proposedCount = findings.filter((finding) => finding.status === "PROPOSED").length;
@@ -146,28 +174,41 @@ function isExportableFindings(findings: ReviewExportRecord[]): boolean {
   return proposedCount === 0 && approved.length > 0 && approved.every((finding) => finding.reviewBasis.length > 0);
 }
 
-function buildExportMarkdown(review: { name: string; product: string; domain: string; reviewType: string; uxScore: number | null; stage: string | null }, findings: ReviewExportRecord[]) {
+function buildExportMarkdown(review: { name: string; product: string; domain: string; reviewType: string; uxScore: number | null; stage: string | null; findingMetadataOptions?: unknown }, findings: ReviewExportRecord[]) {
   const included = findings.filter((finding) => finding.status === "ACCEPTED" || finding.status === "EDITED");
   const dismissed = findings.filter((finding) => finding.status === "DISMISSED");
   const escalated = findings.filter((finding) => finding.status === "ESCALATED");
+  const includeRecommendations = hasFindingMetadataOption(review, "recommendationsWithAcceptanceCriteria");
+  const includeRequirements = hasFindingMetadataOption(review, "requirementTraceability");
+  const includeAccessibility = hasFindingMetadataOption(review, "accessibilityImpactWcag");
+  const includeBusinessImpact = hasFindingMetadataOption(review, "businessImpactEstimate");
 
   const renderBasis = (basis: ReviewExportRecord["reviewBasis"]) =>
     basis.length > 0
       ? basis.map((item) => `- **${item.name}** (${item.type})${item.explanation ? `: ${item.explanation}` : ""}`).join("\n")
       : "- Basis not provided";
 
-  const renderFinding = (finding: ReviewExportRecord, index: number) => [
-    `### ${index + 1}. ${finding.title}`,
-    `- Severity: ${finding.severity}`,
-    `- Area: ${finding.area}`,
-    `- Screen: ${finding.screen ?? "Unknown"}`,
-    finding.observation ? `- Observation: ${finding.observation}` : null,
-    finding.why ? `- Why it matters: ${finding.why}` : null,
-    finding.recommendation ? `- Recommendation: ${finding.recommendation}` : null,
-    finding.businessImpact ? `- Business impact: ${finding.businessImpact}` : null,
-    finding.a11yImpact ? `- Accessibility impact: ${finding.a11yImpact}` : null,
-    `- Review basis:\n${renderBasis(finding.reviewBasis)}`,
-  ].filter(Boolean).join("\n");
+  const renderFinding = (finding: ReviewExportRecord, index: number) => {
+    const metadata = readAiMetadata(finding);
+
+    return [
+      `### ${index + 1}. ${finding.title}`,
+      `- Severity: ${finding.severity}`,
+      `- Area: ${finding.area}`,
+      `- Screen: ${finding.screen ?? "Unknown"}`,
+      finding.observation ? `- Observation: ${finding.observation}` : null,
+      finding.why ? `- Why it matters: ${finding.why}` : null,
+      includeRecommendations && finding.recommendation ? `- Recommendation: ${finding.recommendation}` : null,
+      includeRecommendations && metadata.acceptanceCriteria.length > 0
+        ? `- Acceptance criteria:\n${metadata.acceptanceCriteria.map((item) => `  - ${item}`).join("\n")}`
+        : null,
+      includeRequirements && metadata.requirementTraceability ? `- Requirement traceability: ${metadata.requirementTraceability}` : null,
+      includeBusinessImpact && finding.businessImpact ? `- Business impact: ${finding.businessImpact}` : null,
+      includeAccessibility && finding.a11yImpact ? `- Accessibility impact: ${finding.a11yImpact}` : null,
+      includeAccessibility && metadata.wcagCriteria ? `- WCAG: ${metadata.wcagCriteria}` : null,
+      `- Review basis:\n${renderBasis(finding.reviewBasis)}`,
+    ].filter(Boolean).join("\n");
+  };
 
   return [
     `# ${review.name} — Final UX Review`,
@@ -233,6 +274,7 @@ export const ReviewsService = {
     reviewType?: string;
     owner?: string;
     criteria?: string[];
+    findingMetadataOptions?: string[];
     depth?: ReviewDepth;
     confidenceThreshold?: number;
   }) {
@@ -247,6 +289,7 @@ export const ReviewsService = {
       reviewType: data.reviewType,
       owner: data.owner,
       criteria: data.criteria,
+      findingMetadataOptions: data.findingMetadataOptions,
       depth: data.depth,
       confidenceThreshold: data.confidenceThreshold,
       stage: data.stage,

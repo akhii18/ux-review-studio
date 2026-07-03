@@ -1,6 +1,7 @@
 import { prisma } from "../config/prisma";
 
 type ReviewDepth = "quick" | "standard" | "deep";
+type FindingMetadataOptions = string[];
 
 export const ReviewsRepository = {
   async list(userId: string) {
@@ -32,6 +33,7 @@ export const ReviewsRepository = {
     reviewType?: string;
     owner?: string;
     criteria?: string[];
+    findingMetadataOptions?: FindingMetadataOptions;
     depth?: ReviewDepth;
     confidenceThreshold?: number;
   }) {
@@ -44,6 +46,7 @@ export const ReviewsRepository = {
         reviewType:          data.reviewType ?? "full",
         owner:               data.owner ?? "User",
         criteria:            data.criteria ?? [],
+        findingMetadataOptions: data.findingMetadataOptions ?? undefined,
         depth:               data.depth ?? "standard",
         confidenceThreshold: data.confidenceThreshold ?? 75,
         status:              "draft",
@@ -58,6 +61,7 @@ export const ReviewsRepository = {
     reviewType?: string;
     owner?: string;
     criteria?: string[];
+    findingMetadataOptions?: FindingMetadataOptions;
     depth?: ReviewDepth;
     confidenceThreshold?: number;
     stage?: string;
@@ -69,6 +73,7 @@ export const ReviewsRepository = {
       reviewType: data.reviewType ?? "full",
       owner: data.owner ?? "User",
       criteria: data.criteria ?? [],
+      findingMetadataOptions: data.findingMetadataOptions ?? undefined,
       depth: data.depth ?? "standard",
       confidenceThreshold: data.confidenceThreshold ?? 75,
       status: "draft",

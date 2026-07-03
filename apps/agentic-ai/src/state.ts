@@ -49,6 +49,13 @@ const replace = <T>(_old: T, incoming: T): T => incoming;
  */
 export type SelectedPrinciples = Partial<Record<SubcategoryKey, boolean>>;
 
+export type FindingOutputOptionKey =
+  | "recommendationsWithAcceptanceCriteria"
+  | "linkedPrinciple"
+  | "requirementTraceability"
+  | "accessibilityImpactWcag"
+  | "businessImpactEstimate";
+
 export const GraphState = Annotation.Root({
   // ── Set once by run.ts, never changed ──────────────────────────────────────
   screenshots: Annotation<string[]>({
@@ -68,6 +75,10 @@ export const GraphState = Annotation.Root({
     default: () => "standard",
   }),
   selectedPrinciples: Annotation<SelectedPrinciples | null>({
+    reducer: replace,
+    default: () => null,
+  }),
+  findingMetadataOptions: Annotation<FindingOutputOptionKey[] | null>({
     reducer: replace,
     default: () => null,
   }),
