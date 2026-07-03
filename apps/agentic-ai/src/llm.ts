@@ -37,6 +37,10 @@ export function resolveReviewModel(reviewDepth?: string | null): string {
   return REVIEW_DEPTH_MODELS[normalizeReviewDepth(reviewDepth)];
 }
 
+export function getDeploymentNameForDepth(reviewDepth?: string | null): string {
+  return resolveReviewModel(reviewDepth);
+}
+
 export function createLlmForReviewDepth(reviewDepth?: string | null): AzureChatOpenAI {
   const model = resolveReviewModel(reviewDepth);
 
@@ -46,4 +50,8 @@ export function createLlmForReviewDepth(reviewDepth?: string | null): AzureChatO
     azureOpenAIApiDeploymentName: model,
     azureOpenAIApiVersion: process.env.AZURE_OPENAI_API_VERSION ?? "2024-12-01-preview",
   });
+}
+
+export function createLlm(reviewDepth?: string | null): AzureChatOpenAI {
+  return createLlmForReviewDepth(reviewDepth);
 }
