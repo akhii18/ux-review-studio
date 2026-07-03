@@ -31,6 +31,15 @@ export type DocxExtractionResult = {
   images: DocxImageFile[];
 };
 
+const TEXT_CANVAS_WIDTH = 1600;
+const TEXT_CANVAS_HEIGHT = 2200;
+const TEXT_MARGIN_X = 80;
+const TEXT_MARGIN_Y = 90;
+const TEXT_LINE_HEIGHT = 36;
+const TEXT_MAX_LINES = 52;
+const TEXT_MAX_CHARS_PER_LINE = 110;
+const MAX_TEXT_IMAGE_PAGES = 4;
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 /** Map common MIME types to file extensions. */
@@ -60,6 +69,11 @@ function base64ToBlob(base64: string, mimeType: string): Blob {
  */
 function htmlToSimpleMarkdown(html: string): string {
   let md = html;
+
+  // Preserve image references before stripping generic HTML tags.
+  md = md.replace(/<img[^>]*src=["']([^"']+)["'][^>]*>/gi, (_full, src: string) => {
+    return src.includes("@@DOCX_IMG_PLACEHOLDER@@") ? `\n${src}\n` : "\n[IMAGE_REF: embedded-image]\n";
+  });
 
   // Headings
   md = md.replace(/<h1[^>]*>(.*?)<\/h1>/gi, "\n# $1\n");
@@ -103,6 +117,97 @@ function htmlToSimpleMarkdown(html: string): string {
   md = md.replace(/\n{3,}/g, "\n\n");
 
   return md.trim();
+}
+
+function splitLongLine(line: string, maxChars: number): string[] {
+  if (line.length <= maxChars) return [line];
+
+  const words = line.split(/\s+/).filter(Boolean);
+  const wrapped: string[] = [];
+  let current = "";
+
+  for (const word of words) {
+    const candidate = current ? `${current} ${word}` : word;
+    if (candidate.length <= maxChars) {
+      current = candidate;
+      continue;
+    }
+
+    if (current) {
+      wrapped.push(current);
+      current = word;
+    } else {
+      wrapped.push(word.slice(0, maxChars));
+      current = word.slice(maxChars);
+    }
+  }
+
+  if (current) wrapped.push(current);
+  return wrapped.length > 0 ? wrapped : [line.slice(0, maxChars)];
+}
+
+async function renderTextAsImageFiles(stem: string, markdown: string): Promise<DocxImageFile[]> {
+  const normalizedLines = markdown
+    .split("\n")
+    .flatMap((line) => splitLongLine(line.trimEnd(), TEXT_MAX_CHARS_PER_LINE));
+
+  if (normalizedLines.length === 0) {
+    normalizedLines.push("(No readable text extracted)");
+  }
+
+  const pages: string[][] = [];
+  for (let i = 0; i < normalizedLines.length && pages.length < MAX_TEXT_IMAGE_PAGES; i += TEXT_MAX_LINES) {
+    pages.push(normalizedLines.slice(i, i + TEXT_MAX_LINES));
+  }
+
+  const files: DocxImageFile[] = [];
+
+  for (let pageIndex = 0; pageIndex < pages.length; pageIndex++) {
+    const canvas = document.createElement("canvas");
+    canvas.width = TEXT_CANVAS_WIDTH;
+    canvas.height = TEXT_CANVAS_HEIGHT;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) {
+      throw new Error("Could not render extracted Word text preview image");
+    }
+
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    ctx.fillStyle = "#0f172a";
+    ctx.font = "600 32px sans-serif";
+    ctx.fillText(`Extracted Word Content (${pageIndex + 1}/${pages.length})`, TEXT_MARGIN_X, 56);
+
+    ctx.fillStyle = "#111827";
+    ctx.font = "26px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
+
+    const lines = pages[pageIndex];
+    lines.forEach((line, lineIndex) => {
+      const y = TEXT_MARGIN_Y + (lineIndex * TEXT_LINE_HEIGHT);
+      ctx.fillText(line || " ", TEXT_MARGIN_X, y);
+    });
+
+    const blob = await new Promise<Blob>((resolve, reject) => {
+      canvas.toBlob((b) => {
+        if (b) resolve(b);
+        else reject(new Error("Failed to create text preview image"));
+      }, "image/png");
+    });
+
+    const fileName = `${stem}_text_page_${String(pageIndex + 1).padStart(2, "0")}.png`;
+    const syntheticFile = new File([blob], fileName, { type: "image/png" });
+
+    files.push({
+      id: `docx-text-${pageIndex + 1}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      name: fileName,
+      type: "Screenshot",
+      status: "Ready",
+      file: syntheticFile,
+      previewUrl: URL.createObjectURL(blob),
+    });
+  }
+
+  return files;
 }
 
 // ── Main export ───────────────────────────────────────────────────────────────
@@ -169,6 +274,11 @@ export async function processDocx(docxFile: File): Promise<DocxExtractionResult>
     "g"
   );
   markdown = markdown.replace(placeholderRegex, "[IMAGE_REF: $1]");
+
+  if (images.length === 0) {
+    const textScreenshotFiles = await renderTextAsImageFiles(stem, markdown);
+    images.push(...textScreenshotFiles);
+  }
 
   return {
     markdown: markdown || `(No readable text extracted from ${docxFile.name})`,

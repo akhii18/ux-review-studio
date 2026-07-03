@@ -20,6 +20,7 @@ dotenv.config({ path: path.resolve(process.cwd(), "../../.env") });
 dotenv.config();
 import { readFileSync, existsSync, mkdirSync, writeFileSync } from "fs";
 import { buildGraph, type ReviewAgentName } from "./graph.js";
+import { getDeploymentNameForDepth, normalizeReviewDepth, type ReviewDepth } from "./llm.js";
 import type { GraphStateType, SelectedPrinciples } from "./state.js";
 import {
   getScreenMetadata,
@@ -92,6 +93,8 @@ if (IMAGE_PATHS.length === 0) {
 const REVIEW_CONTEXT = (process.env.REVIEW_CONTEXT ?? "").trim() ||
   "Analyze the uploaded UI assets against selected UX and accessibility principles.";
 
+const REVIEW_DEPTH: ReviewDepth = normalizeReviewDepth(process.env.REVIEW_DEPTH);
+
 // ─── Agent Selection ───────────────────────────────────────────────────────
 // Pick a subset to run only those reviewers, or include all 6 for a full review.
 
@@ -159,6 +162,8 @@ function saveFinalState(params: {
       issueReviewJsonPath,
       selectedAgents: SELECTED_REVIEW_AGENTS,
       selectedPrinciples: SELECTED_PRINCIPLES,
+      reviewDepth: REVIEW_DEPTH,
+      llmDeployment: getDeploymentNameForDepth(REVIEW_DEPTH),
     },
     finalState: {
       ...finalState,
@@ -292,10 +297,12 @@ async function main() {
 
   // Run the graph
   console.log(`\nRunning agents (${SELECTED_REVIEW_AGENTS.length} reviewer LLM calls in parallel)...`);
+  console.log(`[LLM] Review depth: ${REVIEW_DEPTH} -> deployment: ${getDeploymentNameForDepth(REVIEW_DEPTH)}`);
   const graph = buildGraph({ selectedAgents: SELECTED_REVIEW_AGENTS });
 
   const finalState = await graph.invoke({
     screenshots,
+    reviewDepth: REVIEW_DEPTH,
     imagePaths: IMAGE_PATHS,
     screenMetadata,
     geometryOutput,

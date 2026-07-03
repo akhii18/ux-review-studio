@@ -14,7 +14,7 @@
  */
 
 import { HumanMessage, SystemMessage } from "@langchain/core/messages";
-import { llm } from "../llm.js";
+import { getLlmForState } from "../llm.js";
 import { ContentMicrocopyOutputSchema, type ContentMicrocopyOutput } from "../schemas.js";
 import type { GraphStateType } from "../state.js";
 import type { SubcategoryKey } from "../principles.js";
@@ -75,7 +75,7 @@ export async function contentMicrocopyAgent(
   };
 
   try {
-    const structuredLLM = llm.withStructuredOutput(ContentMicrocopyOutputSchema);
+    const structuredLLM = getLlmForState(state).withStructuredOutput(ContentMicrocopyOutputSchema);
 
     const result = await structuredLLM.invoke([
       new SystemMessage(systemPrompt),
