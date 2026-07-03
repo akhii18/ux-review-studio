@@ -187,7 +187,13 @@ function AuthPageContent() {
   };
 
   return (
-    <div className="flex h-screen overflow-hidden items-center justify-center bg-[#efeeee] px-4">
+    <div
+      className={`flex justify-center bg-[#efeeee] px-4 ${
+        tab === "signin"
+          ? "h-screen overflow-hidden items-center"
+          : "min-h-screen overflow-y-auto items-start py-6"
+      }`}
+    >
       <div className="w-full max-w-md text-center">
 
         {/* Logo */}
