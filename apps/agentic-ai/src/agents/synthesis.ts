@@ -17,7 +17,7 @@
  */
 
 import { HumanMessage, SystemMessage } from "@langchain/core/messages";
-import { llm } from "../llm.js";
+import { createLlmForReviewDepth } from "../llm.js";
 import {
   SynthesisOutputSchema,
   type SynthesisOutput,
@@ -214,7 +214,7 @@ export async function synthesisAgent(
   };
 
   try {
-    const structuredLLM = llm.withStructuredOutput(SynthesisOutputSchema);
+    const structuredLLM = createLlmForReviewDepth(state.reviewDepth).withStructuredOutput(SynthesisOutputSchema);
 
     const result = await structuredLLM.invoke([
       new SystemMessage(

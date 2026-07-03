@@ -14,7 +14,7 @@
  */
 
 import { HumanMessage, SystemMessage } from "@langchain/core/messages";
-import { llm } from "../llm.js";
+import { createLlmForReviewDepth } from "../llm.js";
 import { VisualDesignOutputSchema, type VisualDesignOutput } from "../schemas.js";
 import type { GraphStateType } from "../state.js";
 import type { SubcategoryKey } from "../principles.js";
@@ -75,7 +75,7 @@ export async function visualDesignAgent(
   };
 
   try {
-    const structuredLLM = llm.withStructuredOutput(VisualDesignOutputSchema);
+    const structuredLLM = createLlmForReviewDepth(state.reviewDepth).withStructuredOutput(VisualDesignOutputSchema);
 
     const result = await structuredLLM.invoke([
       new SystemMessage(systemPrompt),

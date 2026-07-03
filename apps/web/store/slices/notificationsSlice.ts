@@ -3,7 +3,6 @@ import { createSlice, PayloadAction } from "@reduxjs/toolkit";
 export type NotificationType =
   | "draft_saved"
   | "review_started"
-  | "review_resumed"
   | "review_completed"
   | "review_failed"
   | "report_exported";
@@ -35,36 +34,31 @@ export type AddNotificationPayload = {
   createdAt?: string;
 };
 
-const LEGACY_STORAGE_KEY = "uxm:notif-items";
+const STORAGE_KEY = "uxm:notif-items";
 const MAX_NOTIFICATIONS = 20;
+const VALID_NOTIFICATION_TYPES = new Set<NotificationType>([
+  "draft_saved",
+  "review_started",
+  "review_completed",
+  "review_failed",
+  "report_exported",
+]);
 
 function createId() {
   return globalThis.crypto?.randomUUID?.() ?? `notif-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-function getCurrentUserId(): string | null {
-  if (typeof window === "undefined") return null;
-
-  const raw = window.localStorage.getItem("current_user");
-  if (!raw) return null;
-
-  try {
-    const parsed = JSON.parse(raw);
-    return typeof parsed?.id === "string" ? parsed.id : null;
-  } catch {
-    return null;
-  }
+function normalizeNotificationHref(type: NotificationType, href?: string, reviewId?: string): string | undefined {
+  if (type === "review_started" && reviewId) return `/new-review?reviewId=${reviewId}`;
+  if ((type === "review_completed" || type === "report_exported") && reviewId) return `/workspace?reviewId=${reviewId}`;
+  if ((type === "draft_saved" || type === "review_failed") && reviewId) return `/new-review?reviewId=${reviewId}`;
+  return href;
 }
 
-export function getNotificationsStorageKey() {
-  const userId = getCurrentUserId();
-  return userId ? `uxm:notif-items:${userId}` : LEGACY_STORAGE_KEY;
-}
-
-function readStoredNotifications(storageKey: string): AppNotification[] {
+export function loadStoredNotifications(): AppNotification[] {
   if (typeof window === "undefined") return [];
 
-  const raw = window.localStorage.getItem(storageKey);
+  const raw = window.localStorage.getItem(STORAGE_KEY);
   if (!raw) return [];
 
   try {
@@ -72,8 +66,7 @@ function readStoredNotifications(storageKey: string): AppNotification[] {
     if (!Array.isArray(parsed)) return [];
 
     return parsed
-      .filter((item) => item && typeof item.id === "string" && typeof item.type === "string")
-      .filter((item) => item.type !== "review_resumed")
+      .filter((item) => item && typeof item.id === "string" && VALID_NOTIFICATION_TYPES.has(item.type))
       .map((item) => ({
         id: item.id,
         type: item.type,
@@ -84,6 +77,10 @@ function readStoredNotifications(storageKey: string): AppNotification[] {
         href: typeof item.href === "string" ? item.href : undefined,
         reviewId: typeof item.reviewId === "string" ? item.reviewId : undefined,
         dedupeKey: typeof item.dedupeKey === "string" ? item.dedupeKey : undefined,
+      }))
+      .map((item) => ({
+        ...item,
+        href: normalizeNotificationHref(item.type, typeof item.href === "string" ? item.href : undefined, item.reviewId),
       }))
       .slice(0, MAX_NOTIFICATIONS);
   } catch {
@@ -99,7 +96,7 @@ export const notificationsSlice = createSlice({
   name: "notifications",
   initialState,
   reducers: {
-    setNotifications(state, action: PayloadAction<AppNotification[]>) {
+    hydrateNotifications(state, action: PayloadAction<AppNotification[]>) {
       state.items = action.payload.slice(0, MAX_NOTIFICATIONS);
     },
     addNotification(state, action: PayloadAction<AddNotificationPayload>) {
@@ -109,7 +106,7 @@ export const notificationsSlice = createSlice({
         type: payload.type,
         title: payload.title,
         message: payload.message,
-        href: payload.href,
+        href: normalizeNotificationHref(payload.type, payload.href, payload.reviewId),
         reviewId: payload.reviewId,
         dedupeKey: payload.dedupeKey,
         createdAt: payload.createdAt ?? new Date().toISOString(),
@@ -145,7 +142,7 @@ export const notificationsSlice = createSlice({
 });
 
 export const {
-  setNotifications,
+  hydrateNotifications,
   addNotification,
   markNotificationRead,
   markAllNotificationsRead,
@@ -153,5 +150,5 @@ export const {
   clearNotifications,
 } = notificationsSlice.actions;
 
-export const notificationsStorageKey = getNotificationsStorageKey;
+export const notificationsStorageKey = STORAGE_KEY;
 export default notificationsSlice.reducer;

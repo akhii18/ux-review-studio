@@ -1,17 +1,21 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { AppHeader } from "@/components/ui/AppHeader";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { FileText, Download, Eye } from "lucide-react";
+import { FileText, Download, Eye, ChevronDown } from "lucide-react";
 import { exportReviewReport, listReviews } from "@/lib/api";
+import { downloadReport } from "@/lib/reportExport";
 import { toast } from "sonner";
+import { marked } from "marked";
+import DOMPurify from "dompurify";
 
 function ReportsPageContent() {
   const searchParams = useSearchParams();
@@ -20,6 +24,12 @@ function ReportsPageContent() {
   const [loading, setLoading]   = useState(true);
   const [selected, setSelected] = useState<any | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
+
+  const selectedReportHtml = useMemo(() => {
+    if (!selected?.contentMd) return "<p>No content</p>";
+    const parsedHtml = marked.parse(selected.contentMd, { gfm: true, breaks: true });
+    return DOMPurify.sanitize(typeof parsedHtml === "string" ? parsedHtml : String(parsedHtml));
+  }, [selected]);
 
   useEffect(() => {
     listReviews()
@@ -33,14 +43,12 @@ function ReportsPageContent() {
     openReport(reviewId);
   }, [reviewId]);
 
-  function downloadReport(report: any) {
-    const blob = new Blob([report.contentMd], { type: "text/markdown" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${report.name ?? "report"}.md`;
-    a.click();
-    URL.revokeObjectURL(url);
+  function handleDownload(report: any, format: "pdf" | "word") {
+    try {
+      downloadReport(report, format);
+    } catch (error: any) {
+      toast.error(error?.message ?? "Failed to download report");
+    }
   }
 
   async function openReport(reviewId: string) {
@@ -89,16 +97,37 @@ function ReportsPageContent() {
                     <Button size="sm" variant="outline" className="flex-1" onClick={() => openReport(r.id)}>
                       <Eye className="mr-1.5 h-3.5 w-3.5" /> View
                     </Button>
-                    <Button size="sm" variant="outline" onClick={async () => {
-                      try {
-                        const report = await exportReviewReport(r.id);
-                        downloadReport(report);
-                      } catch (error: any) {
-                        toast.error(error?.message ?? "Failed to export report");
-                      }
-                    }}>
-                      <Download className="h-3.5 w-3.5" />
-                    </Button>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button size="sm" variant="outline">
+                          <Download className="mr-1 h-3.5 w-3.5" />
+                          Download
+                          <ChevronDown className="ml-1 h-3.5 w-3.5" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem onSelect={async () => {
+                          try {
+                            const report = await exportReviewReport(r.id);
+                            handleDownload(report, "pdf");
+                          } catch (error: any) {
+                            toast.error(error?.message ?? "Failed to export report");
+                          }
+                        }}>
+                          Download as PDF
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onSelect={async () => {
+                          try {
+                            const report = await exportReviewReport(r.id);
+                            handleDownload(report, "word");
+                          } catch (error: any) {
+                            toast.error(error?.message ?? "Failed to export report");
+                          }
+                        }}>
+                          Download as Word
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                   </div>
                 </CardContent>
               </Card>
@@ -114,19 +143,147 @@ function ReportsPageContent() {
             <SheetTitle className="text-base">{selected?.name ?? "Report"}</SheetTitle>
           </SheetHeader>
           <ScrollArea className="flex-1 px-6 py-4">
-            <pre className="whitespace-pre-wrap text-sm font-mono leading-relaxed text-foreground">
-              {selected?.contentMd ?? "No content"}
-            </pre>
+            <article className="report-html" dangerouslySetInnerHTML={{ __html: selectedReportHtml }} />
           </ScrollArea>
           {selected && (
             <div className="px-6 py-4 border-t border-border shrink-0">
-              <Button variant="outline" onClick={() => downloadReport(selected)}>
-                <Download className="mr-2 h-4 w-4" /> Download Markdown
-              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline">
+                    <Download className="mr-2 h-4 w-4" />
+                    Download
+                    <ChevronDown className="ml-2 h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start">
+                  <DropdownMenuItem onSelect={() => handleDownload(selected, "pdf")}>
+                    Download as PDF
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => handleDownload(selected, "word")}>
+                    Download as Word
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
           )}
         </SheetContent>
       </Sheet>
+
+      <style jsx global>{`
+        .report-html {
+          color: hsl(var(--foreground));
+          font-size: 14px;
+          line-height: 1.7;
+        }
+
+        .report-html > *:first-child {
+          margin-top: 0;
+        }
+
+        .report-html h1,
+        .report-html h2,
+        .report-html h3,
+        .report-html h4 {
+          color: hsl(var(--foreground));
+          font-weight: 600;
+          line-height: 1.3;
+          margin-top: 1.35em;
+          margin-bottom: 0.55em;
+        }
+
+        .report-html h1 { font-size: 1.5rem; }
+        .report-html h2 { font-size: 1.25rem; }
+        .report-html h3 { font-size: 1.1rem; }
+        .report-html h4 { font-size: 1rem; }
+
+        .report-html p {
+          margin: 0.7em 0;
+          color: hsl(var(--foreground));
+        }
+
+        .report-html ul,
+        .report-html ol {
+          margin: 0.75em 0;
+          padding-left: 1.2rem;
+        }
+
+        .report-html li {
+          margin: 0.3em 0;
+        }
+
+        .report-html blockquote {
+          margin: 0.9em 0;
+          border-left: 3px solid hsl(var(--border));
+          padding-left: 0.85rem;
+          color: hsl(var(--muted-foreground));
+        }
+
+        .report-html hr {
+          border: none;
+          border-top: 1px solid hsl(var(--border));
+          margin: 1.25em 0;
+        }
+
+        .report-html a {
+          color: hsl(var(--primary));
+          text-decoration: underline;
+          text-underline-offset: 2px;
+        }
+
+        .report-html code {
+          background: hsl(var(--secondary));
+          border: 1px solid hsl(var(--border));
+          border-radius: 6px;
+          padding: 0.1rem 0.35rem;
+          font-size: 12px;
+          font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+        }
+
+        .report-html pre {
+          background: hsl(var(--secondary));
+          border: 1px solid hsl(var(--border));
+          border-radius: 10px;
+          padding: 0.85rem;
+          margin: 0.9em 0;
+          overflow: auto;
+        }
+
+        .report-html pre code {
+          border: 0;
+          background: transparent;
+          padding: 0;
+          font-size: 12px;
+        }
+
+        .report-html table {
+          width: 100%;
+          border-collapse: collapse;
+          margin: 0.95em 0;
+          border: 1px solid hsl(var(--border));
+          border-radius: 8px;
+          overflow: hidden;
+        }
+
+        .report-html th,
+        .report-html td {
+          border: 1px solid hsl(var(--border));
+          padding: 0.5rem 0.6rem;
+          text-align: left;
+          vertical-align: top;
+        }
+
+        .report-html th {
+          background: hsl(var(--secondary));
+          font-weight: 600;
+        }
+
+        .report-html img {
+          max-width: 100%;
+          height: auto;
+          border-radius: 8px;
+          margin: 0.7em 0;
+        }
+      `}</style>
     </>
   );
 }

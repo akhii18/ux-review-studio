@@ -1,15 +1,12 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
-import { createPortal } from "react-dom";
-import { usePathname, useRouter } from "next/navigation";
 import { Bell, CheckCheck, Clock3, FileCheck2, Save, Sparkles, TriangleAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { RouteLoadingOverlay } from "@/components/ui/RouteLoadingOverlay";
 import { useAppDispatch, useAppSelector } from "@/store/hooks";
-import { clearNotifications, markAllNotificationsRead, markNotificationRead, type AppNotification } from "@/store/slices/notificationsSlice";
-import { getReview } from "@/lib/api";
+import { addNotification, clearNotifications, markAllNotificationsRead, markNotificationRead, type AppNotification } from "@/store/slices/notificationsSlice";
 import { cn } from "@/lib/utils";
 
 function formatRelativeTime(iso: string): string {
@@ -27,7 +24,6 @@ function formatRelativeTime(iso: string): string {
 function iconForNotification(type: AppNotification["type"]) {
   switch (type) {
     case "review_started":
-    case "review_resumed":
       return Sparkles;
     case "review_completed":
     case "report_exported":
@@ -57,46 +53,15 @@ function accentForNotification(type: AppNotification["type"]) {
 
 export function NotificationBellMenu() {
   const dispatch = useAppDispatch();
-  const pathname = usePathname();
-  const router = useRouter();
+  const [hasMounted, setHasMounted] = useState(false);
+  const [hoveredNotificationId, setHoveredNotificationId] = useState<string | null>(null);
   const notifications = useAppSelector((state) => state.notifications.items);
-  const unreadCount = notifications.filter((item) => !item.read).length;
-  const [isNavigating, setIsNavigating] = useState(false);
+  const storedUnreadCount = notifications.filter((item) => !item.read).length;
+  const unreadCount = hasMounted ? storedUnreadCount : 0;
 
   useEffect(() => {
-    setIsNavigating(false);
-  }, [pathname]);
-
-  const handleNotificationOpen = async (notification: AppNotification) => {
-    setIsNavigating(true);
-    dispatch(markNotificationRead(notification.id));
-
-    if (!notification.reviewId) {
-      if (notification.href) {
-        router.push(notification.href);
-      }
-      return;
-    }
-
-    const fallbackHref = notification.type === "draft_saved"
-      ? `/new-review?reviewId=${notification.reviewId}`
-      : `/workspace?reviewId=${notification.reviewId}`;
-
-    try {
-      const review = await getReview(notification.reviewId);
-      const status = String(review?.status ?? "").toLowerCase();
-      const targetHref = notification.type === "draft_saved" && status === "draft"
-        ? `/new-review?reviewId=${notification.reviewId}`
-        : status === "draft" || status === "in_progress"
-          ? `/new-review?reviewId=${notification.reviewId}`
-          : `/workspace?reviewId=${notification.reviewId}`;
-
-      router.push(targetHref);
-    } catch {
-      setIsNavigating(false);
-      router.push(fallbackHref);
-    }
-  };
+    setHasMounted(true);
+  }, []);
 
   return (
     <DropdownMenu>
@@ -108,11 +73,14 @@ export function NotificationBellMenu() {
           className="relative h-11 w-11"
         >
           <Bell className="h-4 w-4" aria-hidden />
-          {unreadCount > 0 && (
-            <span className="absolute right-2 top-2 min-w-4 rounded-full bg-red-500 px-1 text-[10px] font-semibold leading-4 text-white">
-              {unreadCount > 9 ? "9+" : unreadCount}
-            </span>
-          )}
+          <span
+            className={cn(
+              "absolute right-2 top-2 min-w-4 rounded-full bg-red-500 px-1 text-[10px] font-semibold leading-4 text-white",
+              unreadCount === 0 && "hidden",
+            )}
+          >
+            {unreadCount > 9 ? "9+" : unreadCount}
+          </span>
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-96 p-0">
@@ -162,9 +130,15 @@ export function NotificationBellMenu() {
             notifications.map((notification) => {
               const Icon = iconForNotification(notification.type);
               const iconClassName = accentForNotification(notification.type);
+              const isHighlighted = hoveredNotificationId === notification.id;
 
               const content = (
-                <div className="flex w-full items-start gap-3 rounded-md px-3 py-2 text-left">
+                <div
+                  className={cn(
+                    "flex w-full items-start gap-3 rounded-md border border-transparent px-3 py-2 text-left transition-colors",
+                    isHighlighted && "border-blue-400 bg-blue-50 shadow-sm ring-1 ring-blue-300",
+                  )}
+                >
                   <div className={cn("mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full", iconClassName)}>
                     <Icon className="h-4 w-4" aria-hidden />
                   </div>
@@ -179,14 +153,37 @@ export function NotificationBellMenu() {
                 </div>
               );
 
+              if (notification.href) {
+                return (
+                  <DropdownMenuItem
+                    key={notification.id}
+                    asChild
+                    className="rounded-md p-0 data-[highlighted]:bg-transparent data-[highlighted]:text-popover-foreground focus:bg-transparent focus:text-popover-foreground"
+                  >
+                    <Link
+                      href={notification.href}
+                      className="w-full"
+                      onMouseEnter={() => setHoveredNotificationId(notification.id)}
+                      onMouseLeave={() => setHoveredNotificationId(null)}
+                      onFocus={() => setHoveredNotificationId(notification.id)}
+                      onBlur={() => setHoveredNotificationId(null)}
+                      onClick={() => dispatch(markNotificationRead(notification.id))}
+                    >
+                      {content}
+                    </Link>
+                  </DropdownMenuItem>
+                );
+              }
+
               return (
                 <DropdownMenuItem
                   key={notification.id}
-                  className="p-0 rounded-lg transition-all data-[highlighted]:bg-sky-500/10 data-[highlighted]:text-sky-950 data-[highlighted]:shadow-[inset_0_0_0_1px_rgba(56,189,248,0.7)] dark:data-[highlighted]:text-sky-50"
-                  onSelect={(event) => {
-                    event.preventDefault();
-                    void handleNotificationOpen(notification);
-                  }}
+                  className="rounded-md p-0 data-[highlighted]:bg-transparent data-[highlighted]:text-popover-foreground focus:bg-transparent focus:text-popover-foreground"
+                  onMouseEnter={() => setHoveredNotificationId(notification.id)}
+                  onMouseLeave={() => setHoveredNotificationId(null)}
+                  onFocus={() => setHoveredNotificationId(notification.id)}
+                  onBlur={() => setHoveredNotificationId(null)}
+                  onSelect={() => dispatch(markNotificationRead(notification.id))}
                 >
                   {content}
                 </DropdownMenuItem>
@@ -195,9 +192,6 @@ export function NotificationBellMenu() {
           )}
         </div>
       </DropdownMenuContent>
-      {isNavigating && typeof document !== "undefined"
-        ? createPortal(<RouteLoadingOverlay label="Opening review" />, document.body)
-        : null}
     </DropdownMenu>
   );
 }

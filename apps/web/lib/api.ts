@@ -1,3 +1,5 @@
+import type { FindingOutputOptionKey } from "@uxm/shared";
+
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 
 function getAuthToken(): string | null {
@@ -10,7 +12,6 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let res: Response;
   try {
     res = await fetch(`${BASE}${path}`, {
-      cache: "no-store",
       credentials: "include",
       headers: {
         "Content-Type": "application/json",
@@ -74,6 +75,8 @@ export function resetPassword(token: string, password: string) {
 
 // ── Reviews ───────────────────────────────────────────────────────────────────
 
+export type ReviewDepth = "quick" | "standard" | "deep";
+
 export function listReviews() {
   return request<any[]>("/api/reviews");
 }
@@ -89,7 +92,8 @@ export function createReview(data: {
   reviewType?: string;
   owner?: string;
   criteria?: string[];
-  depth?: string;
+  findingMetadataOptions?: FindingOutputOptionKey[];
+  depth?: ReviewDepth;
   confidenceThreshold?: number;
 }) {
   return request<any>("/api/reviews", { method: "POST", body: JSON.stringify(data) });
@@ -103,7 +107,8 @@ export function saveReviewDraft(data: {
   reviewType?: string;
   owner?: string;
   criteria?: string[];
-  depth?: string;
+  findingMetadataOptions?: FindingOutputOptionKey[];
+  depth?: ReviewDepth;
   confidenceThreshold?: number;
   stage?: string;
   assets?: Array<{
@@ -133,6 +138,17 @@ export function saveAsset(reviewId: string, asset: {
   return request<any>(`/api/reviews/${reviewId}/assets`, { method: "POST", body: JSON.stringify(asset) });
 }
 
+export function convertLegacyDocAsset(payload: {
+  name: string;
+  mimeType: string;
+  base64Data: string;
+}) {
+  return request<{ markdown: string; images: Array<{ name: string; mimeType: string; base64Data: string; sizeBytes: number }> }>(
+    "/api/reviews/convert-legacy-doc",
+    { method: "POST", body: JSON.stringify(payload) }
+  );
+}
+
 export function startReview(id: string) {
   return request<any>(`/api/reviews/${id}/start`, { method: "POST" });
 }
@@ -150,44 +166,9 @@ export function getReviewProgress(id: string) {
   );
 }
 
-export function getAnalytics() {
-  return request<any>("/api/reviews/analytics");
-}
-
-// ── Notifications ────────────────────────────────────────────────────────────
-
-export type NotificationPayload = {
-  type: string;
-  title: string;
-  message: string;
-  href?: string;
-  reviewId?: string;
-  dedupeKey?: string;
-  read?: boolean;
-  createdAt?: string;
-};
-
-export function listNotifications() {
-  return request<any[]>("/api/notifications");
-}
-
-export function createNotification(data: NotificationPayload) {
-  return request<any>("/api/notifications", {
-    method: "POST",
-    body: JSON.stringify(data),
-  });
-}
-
-export function markNotificationRead(id: string) {
-  return request<any>(`/api/notifications/${id}/read`, { method: "PATCH" });
-}
-
-export function markAllNotificationsRead() {
-  return request<any>("/api/notifications/read-all", { method: "PATCH" });
-}
-
-export function clearNotifications() {
-  return request<any>("/api/notifications", { method: "DELETE" });
+export function getAnalytics(params?: Record<string, string>) {
+  const qs = params ? "?" + new URLSearchParams(params).toString() : "";
+  return request<any>(`/api/reviews/analytics${qs}`);
 }
 
 // ── Findings ──────────────────────────────────────────────────────────────────

@@ -23,6 +23,7 @@
  */
 
 import { Annotation } from "@langchain/langgraph";
+import type { ReviewDepth } from "./llm.js";
 import type { SubcategoryKey } from "./principles.js";
 import type { 
   GroundingOutput, 
@@ -47,17 +48,32 @@ const replace = <T>(_old: T, incoming: T): T => incoming;
  */
 export type SelectedPrinciples = Partial<Record<SubcategoryKey, boolean>>;
 
+export type FindingOutputOptionKey =
+  | "recommendationsWithAcceptanceCriteria"
+  | "linkedPrinciple"
+  | "requirementTraceability"
+  | "accessibilityImpactWcag"
+  | "businessImpactEstimate";
+
 export const GraphState = Annotation.Root({
   // ── Set once by run.ts, never changed ──────────────────────────────────────
   screenshots: Annotation<string[]>({
     reducer: replace,
     default: () => [],
   }),
+  reviewDepth: Annotation<ReviewDepth>({
+    reducer: replace,
+    default: () => "standard",
+  }),
   context: Annotation<string>({
     reducer: replace,
     default: () => "",
   }),
   selectedPrinciples: Annotation<SelectedPrinciples | null>({
+    reducer: replace,
+    default: () => null,
+  }),
+  findingMetadataOptions: Annotation<FindingOutputOptionKey[] | null>({
     reducer: replace,
     default: () => null,
   }),

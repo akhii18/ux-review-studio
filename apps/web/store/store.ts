@@ -7,55 +7,21 @@ import reviewReducer from "./slices/reviewSlice";
 import findingsReducer from "./slices/findingsSlice";
 import checklistsReducer from "./slices/checklistsSlice";
 import settingsReducer from "./slices/settingsSlice";
-import notificationsReducer, {
-  addNotification,
-  clearNotifications,
-  getNotificationsStorageKey,
-  markAllNotificationsRead,
-  markNotificationRead,
-} from "./slices/notificationsSlice";
-import {
-  clearNotifications as clearNotificationsRemote,
-  createNotification as createNotificationRemote,
-  markAllNotificationsRead as markAllNotificationsReadRemote,
-  markNotificationRead as markNotificationReadRemote,
-} from "../lib/api";
+import notificationsReducer, { notificationsStorageKey } from "./slices/notificationsSlice";
 
 function persistNotifications(items: unknown) {
   if (typeof window === "undefined") return;
   try {
-    window.localStorage.setItem(getNotificationsStorageKey(), JSON.stringify(items));
+    window.localStorage.setItem(notificationsStorageKey, JSON.stringify(items));
   } catch {
     // Ignore storage failures.
   }
 }
 
-function syncNotificationToServer(action: any) {
-  if (typeof window === "undefined") return;
-
-  if (addNotification.match(action)) {
-    void createNotificationRemote(action.payload).catch(() => undefined);
-    return;
-  }
-
-  if (markNotificationRead.match(action)) {
-    void markNotificationReadRemote(action.payload).catch(() => undefined);
-    return;
-  }
-
-  if (markAllNotificationsRead.match(action)) {
-    void markAllNotificationsReadRemote().catch(() => undefined);
-    return;
-  }
-
-  if (clearNotifications.match(action)) {
-    void clearNotificationsRemote().catch(() => undefined);
-  }
-}
-
 const notificationsPersistenceMiddleware = (storeApi: any) => (next: any) => (action: any) => {
   const result = next(action);
-  syncNotificationToServer(action);
+  if (!action.type?.startsWith("notifications/")) return result;
+
   const notifications = storeApi.getState().notifications;
   persistNotifications(notifications.items);
   return result;

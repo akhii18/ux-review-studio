@@ -4,6 +4,9 @@ import { getSignedStorageReadUrl, uploadReviewAssetToStorage } from "./supabaseS
 import { config } from "../config";
 import { prisma } from "../config/prisma";
 import crypto from "crypto";
+import { convertLegacyDoc } from "./docConversion.service";
+
+type ReviewDepth = "quick" | "standard" | "deep";
 
 type ReviewAssetRecord = {
   storageRef?: string | null;
@@ -33,6 +36,49 @@ type FindingAnalyticsRecord = {
     product: string;
   };
 };
+
+type AnalyticsRange = "1m" | "3m" | "6m" | "1y" | "custom";
+
+type AnalyticsQueryOptions = {
+  range?: AnalyticsRange;
+  startDate?: string;
+  endDate?: string;
+  product?: string;
+  domain?: string;
+  reviewType?: string;
+  owner?: string;
+};
+
+function parseIsoDateToUtcBoundary(value: string, endOfDay: boolean): Date | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+  const date = new Date(`${value}T${endOfDay ? "23:59:59.999" : "00:00:00.000"}Z`);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function resolveAnalyticsDateRange(options?: AnalyticsQueryOptions): { gte: Date; lte: Date } {
+  const now = new Date();
+  const selectedRange = options?.range ?? "1y";
+
+  if (selectedRange === "custom") {
+    const startDate = options?.startDate ? parseIsoDateToUtcBoundary(options.startDate, false) : null;
+    const endDate = options?.endDate ? parseIsoDateToUtcBoundary(options.endDate, true) : null;
+    if (!startDate || !endDate || startDate > endDate) {
+      throw new AppError(400, "Invalid custom date range");
+    }
+    return { gte: startDate, lte: endDate };
+  }
+
+  const monthsByRange: Record<Exclude<AnalyticsRange, "custom">, number> = {
+    "1m": 1,
+    "3m": 3,
+    "6m": 6,
+    "1y": 12,
+  };
+
+  const startDate = new Date(now);
+  startDate.setUTCMonth(startDate.getUTCMonth() - monthsByRange[selectedRange]);
+  return { gte: startDate, lte: now };
+}
 
 function monthKey(date: Date): string {
   const year = date.getUTCFullYear();
@@ -73,7 +119,8 @@ type DraftReviewInput = {
   reviewType?: string;
   owner?: string;
   criteria?: string[];
-  depth?: string;
+  findingMetadataOptions?: string[];
+  depth?: ReviewDepth;
   confidenceThreshold?: number;
   stage?: string;
   assets?: DraftAssetInput[];
@@ -90,9 +137,36 @@ type ReviewExportRecord = {
   recommendation: string | null;
   businessImpact: string | null;
   a11yImpact: string | null;
+  aiMetadata: unknown;
   status: string;
   reviewBasis: Array<{ type: string; name: string; explanation: string }>;
 };
+
+function normalizeStringArray(value: unknown): string[] | null {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : null;
+}
+
+function hasFindingMetadataOption(review: { findingMetadataOptions?: unknown }, option: string): boolean {
+  const options = normalizeStringArray(review.findingMetadataOptions);
+  return options ? options.includes(option) : true;
+}
+
+function readAiMetadata(finding: ReviewExportRecord): {
+  acceptanceCriteria: string[];
+  requirementTraceability?: string;
+  wcagCriteria?: string;
+} {
+  if (!finding.aiMetadata || typeof finding.aiMetadata !== "object") {
+    return { acceptanceCriteria: [] };
+  }
+
+  const metadata = finding.aiMetadata as Record<string, unknown>;
+  return {
+    acceptanceCriteria: normalizeStringArray(metadata.acceptanceCriteria) ?? [],
+    requirementTraceability: typeof metadata.requirementTraceability === "string" ? metadata.requirementTraceability : undefined,
+    wcagCriteria: typeof metadata.wcagCriteria === "string" ? metadata.wcagCriteria : undefined,
+  };
+}
 
 function isExportableFindings(findings: ReviewExportRecord[]): boolean {
   const proposedCount = findings.filter((finding) => finding.status === "PROPOSED").length;
@@ -100,28 +174,41 @@ function isExportableFindings(findings: ReviewExportRecord[]): boolean {
   return proposedCount === 0 && approved.length > 0 && approved.every((finding) => finding.reviewBasis.length > 0);
 }
 
-function buildExportMarkdown(review: { name: string; product: string; domain: string; reviewType: string; uxScore: number | null; stage: string | null }, findings: ReviewExportRecord[]) {
+function buildExportMarkdown(review: { name: string; product: string; domain: string; reviewType: string; uxScore: number | null; stage: string | null; findingMetadataOptions?: unknown }, findings: ReviewExportRecord[]) {
   const included = findings.filter((finding) => finding.status === "ACCEPTED" || finding.status === "EDITED");
   const dismissed = findings.filter((finding) => finding.status === "DISMISSED");
   const escalated = findings.filter((finding) => finding.status === "ESCALATED");
+  const includeRecommendations = hasFindingMetadataOption(review, "recommendationsWithAcceptanceCriteria");
+  const includeRequirements = hasFindingMetadataOption(review, "requirementTraceability");
+  const includeAccessibility = hasFindingMetadataOption(review, "accessibilityImpactWcag");
+  const includeBusinessImpact = hasFindingMetadataOption(review, "businessImpactEstimate");
 
   const renderBasis = (basis: ReviewExportRecord["reviewBasis"]) =>
     basis.length > 0
       ? basis.map((item) => `- **${item.name}** (${item.type})${item.explanation ? `: ${item.explanation}` : ""}`).join("\n")
       : "- Basis not provided";
 
-  const renderFinding = (finding: ReviewExportRecord, index: number) => [
-    `### ${index + 1}. ${finding.title}`,
-    `- Severity: ${finding.severity}`,
-    `- Area: ${finding.area}`,
-    `- Screen: ${finding.screen ?? "Unknown"}`,
-    finding.observation ? `- Observation: ${finding.observation}` : null,
-    finding.why ? `- Why it matters: ${finding.why}` : null,
-    finding.recommendation ? `- Recommendation: ${finding.recommendation}` : null,
-    finding.businessImpact ? `- Business impact: ${finding.businessImpact}` : null,
-    finding.a11yImpact ? `- Accessibility impact: ${finding.a11yImpact}` : null,
-    `- Review basis:\n${renderBasis(finding.reviewBasis)}`,
-  ].filter(Boolean).join("\n");
+  const renderFinding = (finding: ReviewExportRecord, index: number) => {
+    const metadata = readAiMetadata(finding);
+
+    return [
+      `### ${index + 1}. ${finding.title}`,
+      `- Severity: ${finding.severity}`,
+      `- Area: ${finding.area}`,
+      `- Screen: ${finding.screen ?? "Unknown"}`,
+      finding.observation ? `- Observation: ${finding.observation}` : null,
+      finding.why ? `- Why it matters: ${finding.why}` : null,
+      includeRecommendations && finding.recommendation ? `- Recommendation: ${finding.recommendation}` : null,
+      includeRecommendations && metadata.acceptanceCriteria.length > 0
+        ? `- Acceptance criteria:\n${metadata.acceptanceCriteria.map((item) => `  - ${item}`).join("\n")}`
+        : null,
+      includeRequirements && metadata.requirementTraceability ? `- Requirement traceability: ${metadata.requirementTraceability}` : null,
+      includeBusinessImpact && finding.businessImpact ? `- Business impact: ${finding.businessImpact}` : null,
+      includeAccessibility && finding.a11yImpact ? `- Accessibility impact: ${finding.a11yImpact}` : null,
+      includeAccessibility && metadata.wcagCriteria ? `- WCAG: ${metadata.wcagCriteria}` : null,
+      `- Review basis:\n${renderBasis(finding.reviewBasis)}`,
+    ].filter(Boolean).join("\n");
+  };
 
   return [
     `# ${review.name} — Final UX Review`,
@@ -187,7 +274,8 @@ export const ReviewsService = {
     reviewType?: string;
     owner?: string;
     criteria?: string[];
-    depth?: string;
+    findingMetadataOptions?: string[];
+    depth?: ReviewDepth;
     confidenceThreshold?: number;
   }) {
     return ReviewsRepository.create(userId, data);
@@ -201,6 +289,7 @@ export const ReviewsService = {
       reviewType: data.reviewType,
       owner: data.owner,
       criteria: data.criteria,
+      findingMetadataOptions: data.findingMetadataOptions,
       depth: data.depth,
       confidenceThreshold: data.confidenceThreshold,
       stage: data.stage,
@@ -281,6 +370,29 @@ export const ReviewsService = {
     });
   },
 
+  async convertLegacyDoc(_userId: string, payload: {
+    name: string;
+    mimeType: string;
+    base64Data: string;
+  }) {
+    const isLegacyDocMime = payload.mimeType === "application/msword";
+    const isLegacyDocName = payload.name.toLowerCase().endsWith(".doc");
+
+    if (!isLegacyDocMime && !isLegacyDocName) {
+      throw new AppError(400, "Only legacy .doc files are supported by this converter route");
+    }
+
+    try {
+      return await convertLegacyDoc({
+        fileName: payload.name,
+        base64Data: payload.base64Data,
+      });
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "Unknown conversion error";
+      throw new AppError(422, `Failed to convert legacy .doc: ${detail}`);
+    }
+  },
+
   async startReview(reviewId: string, userId: string) {
     const review = await ReviewsRepository.findById(reviewId, userId);
     if (!review) throw new AppError(404, "Review not found");
@@ -349,15 +461,37 @@ export const ReviewsService = {
     });
   },
 
-  async getAnalytics(userId: string) {
-    const [reviews, findings]: [ReviewAnalyticsRecord[], FindingAnalyticsRecord[]] = await Promise.all([
+  async getAnalytics(userId: string, options?: AnalyticsQueryOptions) {
+    const dateRange = resolveAnalyticsDateRange(options);
+
+    const reviewFieldFilters: Record<string, string> = {};
+    if (options?.product && options.product !== "all") reviewFieldFilters.product = options.product;
+    if (options?.domain && options.domain !== "all") reviewFieldFilters.domain = options.domain;
+    if (options?.reviewType && options.reviewType !== "all") reviewFieldFilters.reviewType = options.reviewType;
+    if (options?.owner && options.owner !== "all") reviewFieldFilters.owner = options.owner;
+
+    const [reviews, findings, allReviewMeta]: [
+      ReviewAnalyticsRecord[],
+      FindingAnalyticsRecord[],
+      Array<{ product: string; domain: string; reviewType: string; owner: string }>
+    ] = await Promise.all([
       prisma.review.findMany({
-        where: { userId },
+        where: {
+          userId,
+          createdAt: dateRange,
+          ...reviewFieldFilters,
+        },
         include: { _count: { select: { findings: true } } },
         orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
       }),
       prisma.finding.findMany({
-        where: { review: { userId } },
+        where: {
+          review: {
+            userId,
+            ...reviewFieldFilters,
+          },
+          createdAt: dateRange,
+        },
         select: {
           severity: true,
           area: true,
@@ -370,7 +504,23 @@ export const ReviewsService = {
           },
         },
       }),
+      prisma.review.findMany({
+        where: { userId },
+        select: {
+          product: true,
+          domain: true,
+          reviewType: true,
+          owner: true,
+        },
+      }),
     ]);
+
+    const filterOptions = {
+      products: Array.from(new Set(allReviewMeta.map((review) => (review.product || "").trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b)),
+      domains: Array.from(new Set(allReviewMeta.map((review) => (review.domain || "").trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b)),
+      reviewTypes: Array.from(new Set(allReviewMeta.map((review) => (review.reviewType || "").trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b)),
+      owners: Array.from(new Set(allReviewMeta.map((review) => (review.owner || "").trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b)),
+    };
 
     const completed = reviews.filter((r) => String(r.status).toLowerCase() === "completed");
     const avgUxScore = completed.length
@@ -490,6 +640,7 @@ export const ReviewsService = {
       a11yTrend,
       recentReviews:  recent,
       needsAttention: findings.filter((f) => f.severity === "P0" && f.status === "PROPOSED").length,
+      filterOptions,
     };
   },
 };

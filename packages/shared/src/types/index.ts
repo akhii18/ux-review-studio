@@ -30,6 +30,19 @@ export type PrincipleCategory =
 
 export type ReviewStatus = "draft" | "in_progress" | "completed" | "failed" | "archived";
 
+export type FindingOutputOptionKey =
+  | "recommendationsWithAcceptanceCriteria"
+  | "linkedPrinciple"
+  | "requirementTraceability"
+  | "accessibilityImpactWcag"
+  | "businessImpactEstimate";
+
+export interface FindingAiMetadata {
+  acceptanceCriteria?: string[];
+  requirementTraceability?: string;
+  wcagCriteria?: string;
+}
+
 // ── Domain Types ─────────────────────────────────────────────────────────────
 
 export interface Finding {
@@ -46,6 +59,7 @@ export interface Finding {
   why?: string;
   businessImpact?: string;
   a11yImpact?: string;
+  aiMetadata?: FindingAiMetadata | null;
   status: FindingStatus;
   confidence: number;
   notes?: string;
@@ -122,6 +136,7 @@ export interface Review {
   stage?: string;
   uxScore?: number;
   criteria: string[];
+  findingMetadataOptions?: FindingOutputOptionKey[];
   depth: string;
   confidenceThreshold: number;
   createdAt: string;

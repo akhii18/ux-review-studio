@@ -21,7 +21,7 @@
  */
 
 import { HumanMessage, SystemMessage } from "@langchain/core/messages";
-import { llm } from "../llm.js";
+import { createLlmForReviewDepth } from "../llm.js";
 import { AccessibilityOutputSchema, type AccessibilityOutput } from "../schemas.js";
 import type { GraphStateType } from "../state.js";
 import type { SubcategoryKey } from "../principles.js";
@@ -84,7 +84,7 @@ export async function accessibilityAgent(
   };
 
   try {
-    const structuredLLM = llm.withStructuredOutput(AccessibilityOutputSchema);
+    const structuredLLM = createLlmForReviewDepth(state.reviewDepth).withStructuredOutput(AccessibilityOutputSchema);
 
     const result = await structuredLLM.invoke([
       new SystemMessage(systemPrompt),

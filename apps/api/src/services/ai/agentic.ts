@@ -71,6 +71,15 @@ type SynthesizedFinding = {
   id: string;
   region: string;
   elementRefs: string[];
+  bboxRefs?: Array<{
+    screenIndex: number;
+    bbox: {
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+    };
+  }>;
   issue: string;
   principle: string;
   why: string;
@@ -80,9 +89,28 @@ type SynthesizedFinding = {
   sources: string[];
   mergedFrom: string[];
   agreementCount: number;
+  acceptanceCriteria?: string[];
+  requirementTraceability?: string | null;
+  wcagCriteria?: string | null;
+  businessImpact?: string | null;
+  a11yImpact?: string | null;
+};
+
+type GroundingElement = {
+  elementId: string;
+  screenIndex: number;
+  bbox: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  };
 };
 
 type AgenticRunResult = {
+  groundingOutput?: {
+    elements: GroundingElement[];
+  } | null;
   synthesisOutput?: {
     findings: SynthesizedFinding[];
     totalRawFindings: number;
@@ -102,15 +130,15 @@ type ReviewAssetRecord = {
 // ── Module loader ─────────────────────────────────────────────────────────────
 
 const agenticSourcePath = path.resolve(__dirname, "../../../../agentic-ai/src/index.ts");
-// In production this file is compiled under apps/api/dist/src/services/ai,
-// so the agentic-ai package lives one level higher than the source-time path.
-const agenticBuildPath = path.resolve(__dirname, "../../../../../agentic-ai/dist/index.js");
+const agenticBuildPath = path.resolve(__dirname, "../../../../agentic-ai/dist/index.js");
 
 let agenticModulePromise: Promise<{ runReviewGraph: (params: {
   screenshots: string[];
   context: string;
+  reviewDepth?: string | null;
   selectedAgents?: string[];
   selectedPrinciples?: unknown;
+  findingMetadataOptions?: string[] | null;
 }) => Promise<AgenticRunResult> }> | null = null;
 
 async function loadAgenticModule() {
@@ -128,6 +156,92 @@ async function loadAgenticModule() {
 function clampConfidence(confidence: number): number {
   if (Number.isNaN(confidence)) return 80;
   return Math.min(100, Math.max(0, Math.round(confidence * 100)));
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function normalizePersistableBBoxRef(ref: unknown) {
+  if (!isRecord(ref) || !isRecord(ref.bbox)) return null;
+
+  const screenIndex = Number(ref.screenIndex);
+  const x = Number(ref.bbox.x);
+  const y = Number(ref.bbox.y);
+  const width = Number(ref.bbox.width);
+  const height = Number(ref.bbox.height);
+
+  if (
+    !Number.isFinite(screenIndex) ||
+    !Number.isFinite(x) ||
+    !Number.isFinite(y) ||
+    !Number.isFinite(width) ||
+    !Number.isFinite(height)
+  ) {
+    return null;
+  }
+
+  const safeX = Math.min(1, Math.max(0, x));
+  const safeY = Math.min(1, Math.max(0, y));
+  const safeWidth = Math.min(1 - safeX, Math.max(0, width));
+  const safeHeight = Math.min(1 - safeY, Math.max(0, height));
+
+  if (safeWidth <= 0 || safeHeight <= 0 || safeX >= 1 || safeY >= 1) return null;
+
+  return {
+    screenIndex: Math.max(0, Math.floor(screenIndex)),
+    bbox: {
+      x: safeX,
+      y: safeY,
+      width: safeWidth,
+      height: safeHeight,
+    },
+  };
+}
+
+function normalizePersistableBBoxRefs(finding: SynthesizedFinding, groundingElements: GroundingElement[]) {
+  const explicitRefs: unknown[] = Array.isArray(finding.bboxRefs) ? finding.bboxRefs : [];
+  const elementLookup = new Map(groundingElements.map((element) => [element.elementId, element]));
+  const fallbackRefs = explicitRefs.length > 0
+    ? []
+    : finding.elementRefs
+        .map((elementRef) => elementLookup.get(elementRef))
+        .filter((element): element is GroundingElement => Boolean(element))
+        .map((element) => ({
+          screenIndex: element.screenIndex,
+          bbox: element.bbox,
+        }));
+
+  const sourceRefs = explicitRefs.length > 0 ? explicitRefs : fallbackRefs;
+  if (sourceRefs.length === 0) return undefined;
+
+  const refs = sourceRefs
+    .map(normalizePersistableBBoxRef)
+    .filter((ref): ref is NonNullable<ReturnType<typeof normalizePersistableBBoxRef>> => Boolean(ref));
+
+  return refs.length > 0 ? refs : undefined;
+}
+
+function normalizeStringArray(value: unknown): string[] | null {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : null;
+}
+
+function hasFindingMetadataOption(review: NonNullable<ReviewRecord>, option: string): boolean {
+  const options = normalizeStringArray(review.findingMetadataOptions);
+  return options ? options.includes(option) : true;
+}
+
+function buildFindingAiMetadata(finding: SynthesizedFinding) {
+  const acceptanceCriteria = Array.isArray(finding.acceptanceCriteria)
+    ? finding.acceptanceCriteria.filter((item) => item.trim().length > 0)
+    : [];
+
+  const metadata: Record<string, string | string[]> = {};
+  if (acceptanceCriteria.length > 0) metadata.acceptanceCriteria = acceptanceCriteria;
+  if (finding.requirementTraceability) metadata.requirementTraceability = finding.requirementTraceability;
+  if (finding.wcagCriteria) metadata.wcagCriteria = finding.wcagCriteria;
+
+  return Object.keys(metadata).length > 0 ? metadata : undefined;
 }
 
 /**
@@ -234,6 +348,11 @@ function buildReportMarkdown(params: {
   deduplicationNote: string;
 }): { executiveSummary: string; contentMd: string } {
   const { review, findings, uxScore, deduplicationNote } = params;
+  const includeRecommendations = hasFindingMetadataOption(review, "recommendationsWithAcceptanceCriteria");
+  const includeLinkedPrinciple = hasFindingMetadataOption(review, "linkedPrinciple");
+  const includeRequirements = hasFindingMetadataOption(review, "requirementTraceability");
+  const includeAccessibility = hasFindingMetadataOption(review, "accessibilityImpactWcag");
+  const includeBusinessImpact = hasFindingMetadataOption(review, "businessImpactEstimate");
   const p0 = findings.filter((finding) => finding.severity === "P0");
   const p1 = findings.filter((finding) => finding.severity === "P1");
   const p2 = findings.filter((finding) => finding.severity === "P2");
@@ -254,12 +373,19 @@ function buildReportMarkdown(params: {
       `### ${index + 1}. ${finding.issue}`,
       `- Region: ${finding.region}`,
       `- Severity: ${finding.severity}`,
-      `- Principle: ${finding.principle}`,
-      `- Why it matters: ${finding.why}`,
-      `- Recommendation: ${finding.fix}`,
+      includeLinkedPrinciple ? `- Principle: ${finding.principle}` : null,
+      includeLinkedPrinciple ? `- Why it matters: ${finding.why}` : null,
+      includeRecommendations ? `- Recommendation: ${finding.fix}` : null,
+      includeRecommendations && finding.acceptanceCriteria?.length
+        ? `- Acceptance criteria:\n${finding.acceptanceCriteria.map((item) => `  - ${item}`).join("\n")}`
+        : null,
+      includeRequirements && finding.requirementTraceability ? `- Requirement traceability: ${finding.requirementTraceability}` : null,
+      includeAccessibility && finding.a11yImpact ? `- Accessibility impact: ${finding.a11yImpact}` : null,
+      includeAccessibility && finding.wcagCriteria ? `- WCAG: ${finding.wcagCriteria}` : null,
+      includeBusinessImpact && finding.businessImpact ? `- Business impact: ${finding.businessImpact}` : null,
       `- Sources: ${sources}`,
       `- Merged from: ${mergedFrom}`,
-    ].join("\n");
+    ].filter(Boolean).join("\n");
   }).join("\n\n");
 
   const contentMd = [
@@ -314,8 +440,9 @@ async function persistFindings(params: {
   reviewId: string;
   findings: SynthesizedFinding[];
   imageAssetNames: string[];
+  groundingElements: GroundingElement[];
 }) {
-  const { reviewId, findings, imageAssetNames } = params;
+  const { reviewId, findings, imageAssetNames, groundingElements } = params;
 
   for (const finding of findings) {
     const screenName = extractScreenName(finding, imageAssetNames);
@@ -332,10 +459,13 @@ async function persistFindings(params: {
         principle: finding.principle,
         observation: finding.issue,
         why: finding.why,
+        businessImpact: finding.businessImpact ?? undefined,
+        a11yImpact: finding.a11yImpact ?? undefined,
+        aiMetadata: buildFindingAiMetadata(finding),
         confidence: clampConfidence(finding.confidence),
         status: "PROPOSED",
         isAiGenerated: true,
-        // bboxRefs: finding.bboxRefs && finding.bboxRefs.length > 0 ? finding.bboxRefs : undefined,
+        bboxRefs: normalizePersistableBBoxRefs(finding, groundingElements),
       },
     });
 
@@ -368,11 +498,6 @@ function buildReviewContext(review: NonNullable<ReviewRecord>): string {
     `Owner: ${review.owner}`,
     `Criteria: ${criteria}`,
   ].join("\n");
-}
-
-function formatPipelineFailure(err: unknown): string {
-  const message = err instanceof Error ? err.message : String(err);
-  return message.replace(/\s+/g, " ").slice(0, 240);
 }
 
 // ── Main pipeline ─────────────────────────────────────────────────────────────
@@ -429,12 +554,14 @@ export async function runReviewPipeline(reviewId: string): Promise<void> {
     const finalState = await module.runReviewGraph({
       screenshots,
       context,
+      reviewDepth: review.depth ?? "standard",
       // Only pass selectedAgents when the user actually chose subcategories.
       // If criteria is empty, run all agents (full review).
       selectedAgents: selectedAgents.length > 0 ? selectedAgents : undefined,
       // Pass the subcategory boolean map so each agent knows which
       // principle blocks to inject into its system prompt.
       selectedPrinciples: Object.keys(selectedPrinciples).length > 0 ? selectedPrinciples : undefined,
+      findingMetadataOptions: normalizeStringArray(review.findingMetadataOptions),
     });
 
     const synthesis = finalState.synthesisOutput;
@@ -454,7 +581,12 @@ export async function runReviewPipeline(reviewId: string): Promise<void> {
       prisma.report.deleteMany({ where: { reviewId } }),
     ]);
 
-    await persistFindings({ reviewId, findings, imageAssetNames });
+    await persistFindings({
+      reviewId,
+      findings,
+      imageAssetNames,
+      groundingElements: finalState.groundingOutput?.elements ?? [],
+    });
 
     await prisma.review.update({ where: { id: reviewId }, data: { stage: "generating_report", uxScore } });
 
@@ -486,12 +618,11 @@ export async function runReviewPipeline(reviewId: string): Promise<void> {
       },
     });
   } catch (err) {
-    const failureReason = formatPipelineFailure(err);
     await prisma.review.update({
       where: { id: reviewId },
       data: {
         status: "failed",
-        stage: `failed:${failureReason}`,
+        stage: "failed",
       },
     }).catch(() => undefined);
 

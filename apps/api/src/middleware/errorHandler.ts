@@ -17,6 +17,14 @@ export function errorHandler(
   res: Response,
   _next: NextFunction
 ): void {
+  if (err.name === "PrismaClientInitializationError") {
+    res.status(503).json({
+      success: false,
+      error: "Database connection is unavailable. Check DATABASE_URL and Supabase project status.",
+    });
+    return;
+  }
+
   if (err instanceof ZodError) {
     res.status(400).json({
       success: false,

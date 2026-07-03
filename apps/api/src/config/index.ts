@@ -29,7 +29,6 @@ export const config = {
   directUrl: process.env.DIRECT_URL ?? process.env.DATABASE_URL,
   azureOpenAiEndpoint: process.env.AZURE_OPENAI_ENDPOINT,
   azureOpenAiKey: process.env.AZURE_OPENAI_API_KEY,
-  azureOpenAiDeployment: process.env.AZURE_OPENAI_DEPLOYMENT,
   azureOpenAiApiVersion: process.env.AZURE_OPENAI_API_VERSION ?? "2024-12-01-preview",
   supabaseUrl: process.env.SUPABASE_URL,
   supabaseServiceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY,

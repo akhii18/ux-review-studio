@@ -67,7 +67,6 @@ model User {
   reviews    Review[]
   checklists Checklist[]
   settings   Setting[]
-  notifications Notification[]
 
   @@map("users")
 }
@@ -146,12 +145,12 @@ model Finding {
   why              String?
   businessImpact   String?
   a11yImpact       String?
+  aiMetadata        Json?
   status           FindingStatus @default(PROPOSED)
   confidence       Int           @default(80)
   notes            String?
   escalationReason String?
   isAiGenerated    Boolean       @default(true)
-  aiMetadata       Json?
   bboxRefs         Json?         // Normalised bounding-boxes refs from AI grounding (array of {screenIndex, bbox:{x,y,width,height}})
   createdAt        DateTime      @default(now())
   updatedAt        DateTime      @updatedAt
@@ -255,24 +254,4 @@ model Setting {
   @@index([userId])
 
   @@map("settings")
-}
-
-model Notification {
-  id        String   @id @default(cuid())
-  userId    String
-  type      String
-  title     String
-  message   String   @db.Text
-  href      String?
-  reviewId  String?
-  dedupeKey String?
-  readAt    DateTime?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([userId, createdAt])
-  @@unique([userId, dedupeKey])
-  @@map("notifications")
 }

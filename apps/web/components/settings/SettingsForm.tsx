@@ -267,8 +267,8 @@ export function SettingsForm() {
           </CardTitle>
         </CardHeader>
         <CardContent className="text-xs text-muted-foreground space-y-1">
-          <p>Endpoint and API key are configured via server environment variables.</p>
-          <p className="font-mono">AZURE_OPENAI_ENDPOINT · AZURE_OPENAI_API_KEY · AZURE_OPENAI_DEPLOYMENT</p>
+          <p>Endpoint and API key are configured via server environment variables; model routing follows review depth.</p>
+          <p className="font-mono">AZURE_OPENAI_ENDPOINT · AZURE_OPENAI_API_KEY · AZURE_OPENAI_API_VERSION</p>
         </CardContent>
       </Card>
 
