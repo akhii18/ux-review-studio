@@ -388,7 +388,17 @@ export default function AnalyticsPage() {
                   <ResponsiveContainer>
                     <BarChart data={data.byCategory}>
                       <CartesianGrid vertical={false} stroke="var(--border)" />
-                      <XAxis dataKey="c" tickLine={false} axisLine={false} fontSize={11} />
+                      <XAxis
+                        dataKey="c"
+                        tickLine={false}
+                        axisLine={false}
+                        fontSize={10}
+                        interval={0}
+                        angle={-30}
+                        textAnchor="end"
+                        height={72}
+                        tickMargin={6}
+                      />
                       <YAxis tickLine={false} axisLine={false} fontSize={11} />
                       <ChartTooltip content={<ChartTooltipContent labelFormatter={(label) => formatMonthLabel(String(label))} />} />
                       <Bar dataKey="n" fill="#ef4444" radius={[6, 6, 0, 0]} />

@@ -282,7 +282,7 @@ export default function HistoryPage() {
       setReportSheetOpen(true);
     } catch (err) {
       console.error(err);
-      toast.error("Failed to load report");
+      toast.error((err as any)?.message ?? "Triage or review the findings for report export");
     } finally {
       setLoadingReportReviewId(null);
     }
