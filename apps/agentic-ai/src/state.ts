@@ -25,6 +25,7 @@
 import { Annotation } from "@langchain/langgraph";
 import type { ReviewDepth } from "./llm.js";
 import type { SubcategoryKey } from "./principles.js";
+import type { ReviewDepth } from "./llm.js";
 import type { 
   GroundingOutput, 
   NielsenOutput, 
@@ -61,6 +62,10 @@ export const GraphState = Annotation.Root({
   context: Annotation<string>({
     reducer: replace,
     default: () => "",
+  }),
+  reviewDepth: Annotation<ReviewDepth | string>({
+    reducer: replace,
+    default: () => "standard",
   }),
   selectedPrinciples: Annotation<SelectedPrinciples | null>({
     reducer: replace,

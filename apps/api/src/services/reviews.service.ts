@@ -6,6 +6,8 @@ import { prisma } from "../config/prisma";
 import crypto from "crypto";
 import { convertLegacyDoc } from "./docConversion.service";
 
+type ReviewDepth = "quick" | "standard" | "deep";
+
 type ReviewAssetRecord = {
   storageRef?: string | null;
   blobUrl: string | null;
@@ -117,7 +119,7 @@ type DraftReviewInput = {
   reviewType?: string;
   owner?: string;
   criteria?: string[];
-  depth?: string;
+  depth?: ReviewDepth;
   confidenceThreshold?: number;
   stage?: string;
   assets?: DraftAssetInput[];
@@ -231,7 +233,7 @@ export const ReviewsService = {
     reviewType?: string;
     owner?: string;
     criteria?: string[];
-    depth?: string;
+    depth?: ReviewDepth;
     confidenceThreshold?: number;
   }) {
     return ReviewsRepository.create(userId, data);

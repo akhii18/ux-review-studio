@@ -21,7 +21,7 @@
  */
 
 import { HumanMessage, SystemMessage } from "@langchain/core/messages";
-import { getLlmForState } from "../llm.js";
+import { createLlmForReviewDepth } from "../llm.js";
 import { NielsenOutputSchema, type NielsenOutput } from "../schemas.js";
 import type { GraphStateType } from "../state.js";
 import type { SubcategoryKey } from "../principles.js";
@@ -82,7 +82,7 @@ export async function usabilityAgent(
   };
 
   try {
-    const structuredLLM = getLlmForState(state).withStructuredOutput(NielsenOutputSchema);
+    const structuredLLM = createLlmForReviewDepth(state.reviewDepth).withStructuredOutput(NielsenOutputSchema);
 
     const result = await structuredLLM.invoke([
       new SystemMessage(systemPrompt),

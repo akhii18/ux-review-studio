@@ -73,6 +73,8 @@ export function resetPassword(token: string, password: string) {
 
 // ── Reviews ───────────────────────────────────────────────────────────────────
 
+export type ReviewDepth = "quick" | "standard" | "deep";
+
 export function listReviews() {
   return request<any[]>("/api/reviews");
 }
@@ -88,7 +90,7 @@ export function createReview(data: {
   reviewType?: string;
   owner?: string;
   criteria?: string[];
-  depth?: string;
+  depth?: ReviewDepth;
   confidenceThreshold?: number;
 }) {
   return request<any>("/api/reviews", { method: "POST", body: JSON.stringify(data) });
@@ -102,7 +104,7 @@ export function saveReviewDraft(data: {
   reviewType?: string;
   owner?: string;
   criteria?: string[];
-  depth?: string;
+  depth?: ReviewDepth;
   confidenceThreshold?: number;
   stage?: string;
   assets?: Array<{

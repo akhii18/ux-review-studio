@@ -1,11 +1,8 @@
 import path from "path";
 import dotenv from "dotenv";
-import { fileURLToPath } from "node:url";
 import { AzureChatOpenAI } from "@langchain/openai";
 
-const moduleDir = path.dirname(fileURLToPath(import.meta.url));
-
-dotenv.config({ path: path.resolve(moduleDir, "../../../../.env") });
+dotenv.config({ path: path.resolve(__dirname, "../../../../.env") });
 dotenv.config({ path: path.resolve(process.cwd(), "../../.env") });
 dotenv.config();
 
@@ -16,56 +13,37 @@ if (!process.env.AZURE_OPENAI_API_KEY || !process.env.AZURE_OPENAI_ENDPOINT) {
   );
 }
 
-export const REVIEW_DEPTHS = ["quick", "standard", "deep"] as const;
+export type ReviewDepth = "quick" | "standard" | "deep";
 
-export type ReviewDepth = typeof REVIEW_DEPTHS[number];
-
-type StateWithReviewDepth = {
-  reviewDepth?: string;
+const REVIEW_DEPTH_MODELS: Record<ReviewDepth, string> = {
+  quick: "gpt-4.1-mini",
+  standard: "DeepSeek-V4-Pro",
+  deep: "gpt-5.5",
 };
 
-const DEPLOYMENT_ENV_BY_DEPTH: Record<ReviewDepth, string> = {
-  quick: "AZURE_OPENAI_DEPLOYMENT_QUICK",
-  standard: "AZURE_OPENAI_DEPLOYMENT_STANDARD",
-  deep: "AZURE_OPENAI_DEPLOYMENT_DEEP",
-};
-
-export function normalizeReviewDepth(depth?: string | null): ReviewDepth {
-  if (depth === "quick" || depth === "standard" || depth === "deep") {
-    return depth;
+export function normalizeReviewDepth(reviewDepth?: string | null): ReviewDepth {
+  switch (reviewDepth?.trim().toLowerCase()) {
+    case "quick":
+      return "quick";
+    case "deep":
+      return "deep";
+    case "standard":
+    default:
+      return "standard";
   }
-
-  return "standard";
 }
 
-export function getDeploymentNameForDepth(depth?: string | null): string {
-  const normalizedDepth = normalizeReviewDepth(depth);
-  const deployment = process.env[DEPLOYMENT_ENV_BY_DEPTH[normalizedDepth]]
-    ?? (normalizedDepth === "deep" ? process.env.AZURE_OPENAI_DEPLOYMENT : undefined)
-    ?? process.env.AZURE_OPENAI_DEPLOYMENT;
-
-  if (!deployment) {
-    throw new Error(
-      `Missing Azure deployment mapping for review depth \"${normalizedDepth}\". ` +
-      `Set ${DEPLOYMENT_ENV_BY_DEPTH[normalizedDepth]} in your .env file.`
-    );
-  }
-
-  return deployment;
+export function resolveReviewModel(reviewDepth?: string | null): string {
+  return REVIEW_DEPTH_MODELS[normalizeReviewDepth(reviewDepth)];
 }
 
-export function createLlm(reviewDepth?: string | null): AzureChatOpenAI {
-  const deployment = getDeploymentNameForDepth(reviewDepth);
+export function createLlmForReviewDepth(reviewDepth?: string | null): AzureChatOpenAI {
+  const model = resolveReviewModel(reviewDepth);
 
   return new AzureChatOpenAI({
     azureOpenAIApiKey: process.env.AZURE_OPENAI_API_KEY,
     azureOpenAIEndpoint: process.env.AZURE_OPENAI_ENDPOINT,
-    azureOpenAIApiDeploymentName: deployment,
+    azureOpenAIApiDeploymentName: model,
     azureOpenAIApiVersion: process.env.AZURE_OPENAI_API_VERSION ?? "2024-12-01-preview",
-    model: deployment,
   });
-}
-
-export function getLlmForState(state: StateWithReviewDepth): AzureChatOpenAI {
-  return createLlm(state.reviewDepth);
 }

@@ -9,6 +9,11 @@ function getUserId(req: Request): string {
   return userId;
 }
 
+const ReviewDepthSchema = z.preprocess(
+  (value) => typeof value === "string" ? value.trim().toLowerCase() : value,
+  z.enum(["quick", "standard", "deep"]).catch("standard").default("standard"),
+);
+
 const CreateReviewSchema = z.object({
   name:                z.string().min(1),
   product:             z.string().min(1),
@@ -16,7 +21,7 @@ const CreateReviewSchema = z.object({
   reviewType:          z.string().optional(),
   owner:               z.string().optional(),
   criteria:            z.array(z.string()).optional(),
-  depth:               z.string().optional(),
+  depth:               ReviewDepthSchema,
   confidenceThreshold: z.number().int().min(0).max(100).optional(),
 });
 
@@ -37,7 +42,7 @@ const SaveDraftSchema = z.object({
   reviewType: z.string().optional(),
   owner: z.string().optional(),
   criteria: z.array(z.string()).optional(),
-  depth: z.string().optional(),
+  depth: ReviewDepthSchema,
   confidenceThreshold: z.number().int().min(0).max(100).optional(),
   stage: z.string().optional(),
   assets: z.array(SaveAssetSchema).optional(),

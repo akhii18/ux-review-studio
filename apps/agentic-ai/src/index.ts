@@ -1,6 +1,7 @@
 import { buildGraph, type ReviewAgentName } from "./graph.js";
 import { normalizeReviewDepth, type ReviewDepth } from "./llm.js";
 import type { SelectedPrinciples, GraphStateType } from "./state.js";
+import type { ReviewDepth } from "./llm.js";
 
 export type RunReviewGraphInput = {
   screenshots: string[];
@@ -8,6 +9,7 @@ export type RunReviewGraphInput = {
   reviewDepth?: ReviewDepth | string;
   selectedAgents?: ReviewAgentName[];
   selectedPrinciples?: SelectedPrinciples | null;
+  reviewDepth?: ReviewDepth | string | null;
   imagePaths?: string[];
 };
 
@@ -21,6 +23,7 @@ export async function runReviewGraph(input: RunReviewGraphInput): Promise<GraphS
     screenMetadata: [],
     geometryOutput: null,
     context: input.context,
+    reviewDepth: input.reviewDepth ?? "standard",
     selectedPrinciples: input.selectedPrinciples ?? null,
   });
 }

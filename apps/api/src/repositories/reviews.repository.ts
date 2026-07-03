@@ -1,5 +1,7 @@
 import { prisma } from "../config/prisma";
 
+type ReviewDepth = "quick" | "standard" | "deep";
+
 export const ReviewsRepository = {
   async list(userId: string) {
     return prisma.review.findMany({
@@ -30,7 +32,7 @@ export const ReviewsRepository = {
     reviewType?: string;
     owner?: string;
     criteria?: string[];
-    depth?: string;
+    depth?: ReviewDepth;
     confidenceThreshold?: number;
   }) {
     return prisma.review.create({
@@ -56,7 +58,7 @@ export const ReviewsRepository = {
     reviewType?: string;
     owner?: string;
     criteria?: string[];
-    depth?: string;
+    depth?: ReviewDepth;
     confidenceThreshold?: number;
     stage?: string;
   }) {
