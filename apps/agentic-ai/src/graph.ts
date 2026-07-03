@@ -29,6 +29,7 @@ import { contentMicrocopyAgent } from "./agents/contentMicrocopy.js";
 import { gestaltAgent } from "./agents/gestalt.js";
 import { visualDesignAgent } from "./agents/visualDesign.js";
 import { synthesisAgent } from "./agents/synthesis.js";
+import { outputEnrichmentAgent } from "./agents/outputEnrichment.js";
 
 export const REVIEW_AGENT_NAMES = [
   "usability",
@@ -50,7 +51,8 @@ export function buildGraph(options?: { selectedAgents?: ReviewAgentName[] }) {
   const graph = new StateGraph(GraphState)
     // Register always-on nodes.
     .addNode("grounding",            groundingAgent)
-    .addNode("synthesis",            synthesisAgent);
+    .addNode("synthesis",            synthesisAgent)
+    .addNode("outputEnrichment",      outputEnrichmentAgent);
 
   // LangGraph's compile-time node-name inference is strict for dynamic graphs.
   // We build edges dynamically at runtime based on user selection.
@@ -101,7 +103,8 @@ export function buildGraph(options?: { selectedAgents?: ReviewAgentName[] }) {
     g.addEdge("grounding", "synthesis");
   }
 
-  g.addEdge("synthesis", END);
+  g.addEdge("synthesis", "outputEnrichment");
+  g.addEdge("outputEnrichment", END);
 
   return g.compile();
 }

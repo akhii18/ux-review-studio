@@ -15,7 +15,7 @@
  */
 
 import { HumanMessage, SystemMessage } from "@langchain/core/messages";
-import { getLlmForState } from "../llm.js";
+import { createLlmForReviewDepth } from "../llm.js";
 import { GroundingOutputSchema, type GroundingOutput } from "../schemas.js";
 import type { GraphStateType } from "../state.js";
 import {
@@ -106,7 +106,7 @@ export async function groundingAgent(
   };
 
   try {
-    const structuredLLM = getLlmForState(state).withStructuredOutput(GroundingOutputSchema);
+    const structuredLLM = createLlmForReviewDepth(state.reviewDepth).withStructuredOutput(GroundingOutputSchema);
 
     const result = await structuredLLM.invoke([
       new SystemMessage(GROUNDING_SYSTEM_PROMPT),

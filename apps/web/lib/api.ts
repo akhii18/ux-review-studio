@@ -1,3 +1,5 @@
+import type { FindingOutputOptionKey } from "@uxm/shared";
+
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 
 function getAuthToken(): string | null {
@@ -73,6 +75,8 @@ export function resetPassword(token: string, password: string) {
 
 // ── Reviews ───────────────────────────────────────────────────────────────────
 
+export type ReviewDepth = "quick" | "standard" | "deep";
+
 export function listReviews() {
   return request<any[]>("/api/reviews");
 }
@@ -88,7 +92,8 @@ export function createReview(data: {
   reviewType?: string;
   owner?: string;
   criteria?: string[];
-  depth?: string;
+  findingMetadataOptions?: FindingOutputOptionKey[];
+  depth?: ReviewDepth;
   confidenceThreshold?: number;
 }) {
   return request<any>("/api/reviews", { method: "POST", body: JSON.stringify(data) });
@@ -102,7 +107,8 @@ export function saveReviewDraft(data: {
   reviewType?: string;
   owner?: string;
   criteria?: string[];
-  depth?: string;
+  findingMetadataOptions?: FindingOutputOptionKey[];
+  depth?: ReviewDepth;
   confidenceThreshold?: number;
   stage?: string;
   assets?: Array<{

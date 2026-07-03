@@ -2,12 +2,21 @@ import { Request, Response } from "express";
 import { ReviewsService } from "../services/reviews.service";
 import { z } from "zod";
 import { AppError } from "../middleware/errorHandler";
+import { DEFAULT_FINDING_OUTPUT_OPTIONS, FINDING_OUTPUT_OPTIONS } from "@uxm/shared";
 
 function getUserId(req: Request): string {
   const userId = req.user?.sub;
   if (!userId) throw new AppError(401, "Authentication required");
   return userId;
 }
+
+const ReviewDepthSchema = z.preprocess(
+  (value) => typeof value === "string" ? value.trim().toLowerCase() : value,
+  z.enum(["quick", "standard", "deep"]).catch("standard").default("standard"),
+);
+
+const FindingOutputOptionSchema = z.enum(FINDING_OUTPUT_OPTIONS.map((option) => option.key) as [string, ...string[]]);
+const FindingMetadataOptionsSchema = z.array(FindingOutputOptionSchema).default([...DEFAULT_FINDING_OUTPUT_OPTIONS]);
 
 const CreateReviewSchema = z.object({
   name:                z.string().min(1),
@@ -16,7 +25,8 @@ const CreateReviewSchema = z.object({
   reviewType:          z.string().optional(),
   owner:               z.string().optional(),
   criteria:            z.array(z.string()).optional(),
-  depth:               z.string().optional(),
+  findingMetadataOptions: FindingMetadataOptionsSchema,
+  depth:               ReviewDepthSchema,
   confidenceThreshold: z.number().int().min(0).max(100).optional(),
 });
 
@@ -37,7 +47,8 @@ const SaveDraftSchema = z.object({
   reviewType: z.string().optional(),
   owner: z.string().optional(),
   criteria: z.array(z.string()).optional(),
-  depth: z.string().optional(),
+  findingMetadataOptions: FindingMetadataOptionsSchema,
+  depth: ReviewDepthSchema,
   confidenceThreshold: z.number().int().min(0).max(100).optional(),
   stage: z.string().optional(),
   assets: z.array(SaveAssetSchema).optional(),

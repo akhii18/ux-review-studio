@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.DEFAULT_SETTINGS = exports.REVIEW_BASIS_LIBRARY = exports.PRINCIPLE_CATEGORY_LABELS = exports.REVIEW_AREA_LABELS = exports.REVIEW_AREAS = exports.SEVERITY_LABELS = void 0;
+exports.DEFAULT_SETTINGS = exports.REVIEW_BASIS_LIBRARY = exports.PRINCIPLE_CATEGORY_LABELS = exports.DEFAULT_FINDING_OUTPUT_OPTIONS = exports.FINDING_OUTPUT_OPTIONS = exports.REVIEW_AREA_LABELS = exports.REVIEW_AREAS = exports.SEVERITY_LABELS = void 0;
 // ── Severity / Priority labels ────────────────────────────────────────────────
 exports.SEVERITY_LABELS = {
     P0: "P0 · Blocker",
@@ -24,6 +24,14 @@ exports.REVIEW_AREA_LABELS = {
     RISK: "Risk",
     RECOMMENDATIONS: "Recommendations",
 };
+exports.FINDING_OUTPUT_OPTIONS = [
+    { key: "recommendationsWithAcceptanceCriteria", label: "Recommendations with acceptance criteria" },
+    { key: "linkedPrinciple", label: "Linked principle for each finding" },
+    { key: "requirementTraceability", label: "Requirement traceability" },
+    { key: "accessibilityImpactWcag", label: "Accessibility impact (WCAG)" },
+    { key: "businessImpactEstimate", label: "Business impact estimate" },
+];
+exports.DEFAULT_FINDING_OUTPUT_OPTIONS = exports.FINDING_OUTPUT_OPTIONS.map((option) => option.key);
 // ── Principle categories ──────────────────────────────────────────────────────
 exports.PRINCIPLE_CATEGORY_LABELS = {
     NIELSEN_HEURISTICS: "Nielsen Heuristics",

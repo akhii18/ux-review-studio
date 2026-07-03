@@ -1,7 +1,12 @@
-import type { PrincipleCategory, ReviewArea } from "../types";
+import type { FindingOutputOptionKey, PrincipleCategory, ReviewArea } from "../types";
 export declare const SEVERITY_LABELS: Record<string, string>;
 export declare const REVIEW_AREAS: ReviewArea[];
 export declare const REVIEW_AREA_LABELS: Record<ReviewArea, string>;
+export declare const FINDING_OUTPUT_OPTIONS: Array<{
+    key: FindingOutputOptionKey;
+    label: string;
+}>;
+export declare const DEFAULT_FINDING_OUTPUT_OPTIONS: FindingOutputOptionKey[];
 export declare const PRINCIPLE_CATEGORY_LABELS: Record<PrincipleCategory, string>;
 export interface ReviewBasisSeed {
     name: string;

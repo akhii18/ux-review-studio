@@ -14,7 +14,7 @@
  */
 
 import { HumanMessage, SystemMessage } from "@langchain/core/messages";
-import { getLlmForState } from "../llm.js";
+import { createLlmForReviewDepth } from "../llm.js";
 import { CognitiveInteractionOutputSchema, type CognitiveInteractionOutput } from "../schemas.js";
 import type { GraphStateType } from "../state.js";
 import type { SubcategoryKey } from "../principles.js";
@@ -75,7 +75,7 @@ export async function cognitiveInteractionAgent(
   };
 
   try {
-    const structuredLLM = getLlmForState(state).withStructuredOutput(CognitiveInteractionOutputSchema);
+    const structuredLLM = createLlmForReviewDepth(state.reviewDepth).withStructuredOutput(CognitiveInteractionOutputSchema);
 
     const result = await structuredLLM.invoke([
       new SystemMessage(systemPrompt),

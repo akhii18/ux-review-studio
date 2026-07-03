@@ -83,6 +83,7 @@ model Review {
   stage               String?
   uxScore             Int?
   criteria            String[]      @default([])
+  findingMetadataOptions Json?
   depth               String        @default("standard")
   confidenceThreshold Int           @default(75)
   createdAt           DateTime      @default(now())
@@ -144,6 +145,7 @@ model Finding {
   why              String?
   businessImpact   String?
   a11yImpact       String?
+  aiMetadata        Json?
   status           FindingStatus @default(PROPOSED)
   confidence       Int           @default(80)
   notes            String?
