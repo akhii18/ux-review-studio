@@ -1,10 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-// import { processPdf } from "@/lib/pdfToPageFiles";
+import { processPdf } from "@/lib/pdfToPageFiles";
 import { processDocx } from "@/lib/docxToMarkdown";
 import { useRouter, useSearchParams } from "next/navigation";
-import { getReview, saveReviewDraft, startReview, getReviewProgress } from "@/lib/api";
+import { convertLegacyDocAsset, getReview, saveReviewDraft, startReview, getReviewProgress } from "@/lib/api";
 import { AppHeader } from "@/components/ui/AppHeader";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -106,6 +106,8 @@ type ReviewFileEntry = {
   mimeType?: string;
   contentText?: string;
   sizeBytes?: number;
+  visibleInUi?: boolean;
+  sourceDocumentId?: string;
 };
 
 /** Derive the unique backend agent names from any set of selected subcategory IDs */
@@ -235,6 +237,17 @@ function getReviewTypeFromCriteria(values: string[]): string {
 }
 
 export default function NewReviewPage() {
+  type UploadAsset = {
+    id: string;
+    name: string;
+    type: string;
+    status: string;
+    file?: File;
+    previewUrl?: string;
+    visibleInUi?: boolean;
+    sourceDocumentId?: string;
+  };
+
   const [step, setStep] = useState(0);
   const router = useRouter();
   const dispatch = useAppDispatch();
@@ -270,14 +283,19 @@ export default function NewReviewPage() {
   const [activeDocumentIndex, setActiveDocumentIndex] = useState(0);
   const criteriaTouchedRef = useRef(false);
 
-  const screenshotFiles = useMemo(
-    () => files.filter((file) => file.type === "Screenshot" && Boolean(file.previewUrl)),
+  const visibleFiles = useMemo(
+    () => files.filter((file) => file.visibleInUi !== false),
     [files]
   );
 
+  const screenshotFiles = useMemo(
+    () => visibleFiles.filter((file) => file.type === "Screenshot" && Boolean(file.previewUrl)),
+    [visibleFiles]
+  );
+
   const documentFiles = useMemo(
-    () => files.filter((file) => (file.type === "PDF" || file.type === "Word") && Boolean(file.previewUrl)),
-    [files]
+    () => visibleFiles.filter((file) => (file.type === "PDF" || file.type === "Word") && Boolean(file.previewUrl)),
+    [visibleFiles]
   );
 
   const reviewTypeOptions = [
@@ -486,59 +504,104 @@ export default function NewReviewPage() {
    * treats them identically to uploaded screenshots.
    */
   const addFiles = async (picked: File[]) => {
-    const entries: Array<{ id: string; name: string; type: string; status: string; file?: File; previewUrl?: string }> = [];
+    const entries: UploadAsset[] = [];
     const hasPdf = picked.some(
       (f) => f.type === "application/pdf" || f.name.toLowerCase().endsWith(".pdf")
     );
-    const hasDocx = picked.some(
-      (f) => f.type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" || f.name.toLowerCase().endsWith(".docx")
+    const hasWord = picked.some(
+      (f) =>
+        f.type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
+        f.type === "application/msword" ||
+        f.name.toLowerCase().endsWith(".docx") ||
+        f.name.toLowerCase().endsWith(".doc")
     );
-    const needsDocProcessing = hasPdf || hasDocx;
+    const needsDocProcessing = hasPdf || hasWord;
     const markdownChunks: string[] = [];
 
     if (needsDocProcessing) {
       setIsDocProcessing(true);
-      const label = hasPdf && hasDocx ? "PDF & Word document" : hasPdf ? "PDF" : "Word document";
+      const label = hasPdf && hasWord ? "PDF & Word document" : hasPdf ? "PDF" : "Word document";
       toast.info(`Extracting text & images from ${label} — this may take a moment…`);
     }
 
     try {
       for (const file of picked) {
         const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
-        const isDocx = file.type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" || file.name.toLowerCase().endsWith(".docx");
+        const isDocx =
+          file.type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
+          file.name.toLowerCase().endsWith(".docx");
+        const isDoc =
+          file.type === "application/msword" ||
+          file.name.toLowerCase().endsWith(".doc");
+        const isWord = isDocx || isDoc;
         const isScreenshot = file.type.startsWith("image/");
 
-        // if (isPdf) {
-        //   // Extract text + images separately from each PDF.
-        //   try {
-        //     const result = await processPdf(file);
-        //     entries.push(...result.images);
-        //     if (result.markdown.trim()) {
-        //       markdownChunks.push(result.markdown);
-        //     }
-        //   } catch (err) {
-        //     console.error(`Failed to process PDF "${file.name}":`, err);
-        //     // Fall back to treating the PDF as a raw upload so the user isn't blocked.
-        //     entries.push({
-        //       id: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
-        //       name: file.name,
-        //       type: "PDF",
-        //       status: "Ready",
-        //       file,
-        //       previewUrl: URL.createObjectURL(file),
-        //     });
-        //   }
-        if (isDocx) {
-          // Extract text + images separately from each Word document.
+        if (isPdf) {
+          const pdfEntryId = `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+          entries.push({
+            id: pdfEntryId,
+            name: file.name,
+            type: "PDF",
+            status: "Ready",
+            file,
+            previewUrl: URL.createObjectURL(file),
+            visibleInUi: true,
+          });
+
+          // Extract text + images separately from each PDF.
           try {
-            const result = await processDocx(file);
-            entries.push(...result.images);
+            const result = await processPdf(file);
+            entries.push(
+              ...result.images.map((image) => ({
+                ...image,
+                visibleInUi: false,
+                sourceDocumentId: pdfEntryId,
+              }))
+            );
             if (result.markdown.trim()) {
               markdownChunks.push(result.markdown);
             }
           } catch (err) {
+            console.error(`Failed to process PDF "${file.name}":`, err);
+            // Keep the original PDF visible even if extraction fails.
+          }
+        } else if (isWord) {
+          // Extract text + images separately from each Word document.
+          try {
+            if (isDoc) {
+              const base64Data = await toBase64(file);
+              const result = await convertLegacyDocAsset({
+                name: file.name,
+                mimeType: file.type || "application/msword",
+                base64Data,
+              });
+
+              for (const image of result.images) {
+                const convertedFile = base64ToFile(image.base64Data, image.name, image.mimeType);
+                entries.push({
+                  id: `doc-legacy-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+                  name: image.name,
+                  type: "Screenshot",
+                  status: "Ready",
+                  file: convertedFile,
+                  previewUrl: URL.createObjectURL(convertedFile),
+                  visibleInUi: false,
+                });
+              }
+
+              if (result.markdown.trim()) {
+                markdownChunks.push(`--- ${file.name} ---\n${result.markdown}`);
+              }
+            } else {
+              const result = await processDocx(file);
+              entries.push(...result.images.map((image) => ({ ...image, visibleInUi: false })));
+              if (result.markdown.trim()) {
+                markdownChunks.push(`--- ${file.name} ---\n${result.markdown}`);
+              }
+            }
+          } catch (err) {
             console.error(`Failed to process Word document "${file.name}":`, err);
-            // Fall back to treating the DOCX as a raw upload so the user isn't blocked.
+            // Fall back to treating the Word file as a raw upload so the user isn't blocked.
             entries.push({
               id: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
               name: file.name,
@@ -546,6 +609,10 @@ export default function NewReviewPage() {
               status: "Ready",
               file,
             });
+
+            if (isDoc) {
+              toast.error(`Could not parse legacy Word file ${file.name}. Please retry or convert it to .docx.`);
+            }
           }
         } else {
           entries.push({
@@ -555,6 +622,7 @@ export default function NewReviewPage() {
             status: "Ready",
             file,
             previewUrl: isScreenshot ? URL.createObjectURL(file) : undefined,
+            visibleInUi: true,
           });
         }
       }
@@ -572,7 +640,7 @@ export default function NewReviewPage() {
 
       if (needsDocProcessing) {
         const imageCount = entries.filter((e) => e.type === "Screenshot").length;
-        const label = hasPdf && hasDocx ? "Documents" : hasPdf ? "PDF" : "Word document";
+        const label = hasPdf && hasWord ? "Documents" : hasPdf ? "PDF" : "Word document";
         toast.success(`${label} processed — ${imageCount} image${imageCount === 1 ? "" : "s"} extracted, text added to flow notes.`);
       }
     } finally {
@@ -582,11 +650,20 @@ export default function NewReviewPage() {
 
   const removeFile = (fileId: string) => {
     setFiles((current) => {
-      const fileToRemove = current.find((file) => file.id === fileId);
-      if (fileToRemove?.previewUrl) {
-        URL.revokeObjectURL(fileToRemove.previewUrl);
-      }
-      return current.filter((file) => file.id !== fileId);
+      const idsToRemove = new Set<string>([fileId]);
+      current.forEach((file) => {
+        if (file.sourceDocumentId === fileId) {
+          idsToRemove.add(file.id);
+        }
+      });
+
+      current.forEach((file) => {
+        if (idsToRemove.has(file.id) && file.previewUrl) {
+          URL.revokeObjectURL(file.previewUrl);
+        }
+      });
+
+      return current.filter((file) => !idsToRemove.has(file.id));
     });
   };
 
@@ -650,6 +727,15 @@ export default function NewReviewPage() {
       r.onerror = rej;
       r.readAsDataURL(f);
     });
+
+  const base64ToFile = (base64Data: string, fileName: string, mimeType: string): File => {
+    const binary = atob(base64Data);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    return new File([bytes], fileName, { type: mimeType });
+  };
 
   const persistDraft = async () => {
     setIsSavingDraft(true);
@@ -730,6 +816,12 @@ export default function NewReviewPage() {
   };
 
   const runReview = async () => {
+    if (!validStep1) {
+      toast.error("Add at least one screenshot image before starting the review.");
+      setStep(1);
+      return;
+    }
+
     setRunning(true);
     setStageIdx(0);
     setCurrentStageLabel("Saving review…");
@@ -794,7 +886,9 @@ export default function NewReviewPage() {
   };
 
   const validStep0 = name.trim().length > 0 && product.trim().length > 0;
-  const validStep1 = files.length > 0;
+  const validStep1 = files.some(
+    (asset) => asset.type === "Screenshot" && ((Boolean(asset.file) && (asset.file?.type.startsWith("image/") ?? false)) || Boolean(asset.blobUrl || asset.previewUrl))
+  );
   const validStep2 = criteria.length > 0;
   const progressPercent = Math.min(100, Math.max(0, Math.round(((stageIdx + 1) / progressStages.length) * 100)));
   const canNavigateToStep = (targetStep: number) => {
@@ -981,11 +1075,11 @@ export default function NewReviewPage() {
                       <Video className="h-4 w-4" aria-hidden="true" />Drop a recording here once enabled.
                     </div>
                   </Field>
-                  {files.length > 0 && (
+                  {visibleFiles.length > 0 && (
                     <div>
-                      <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">Uploaded assets ({files.length})</p>
+                      <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">Uploaded assets ({visibleFiles.length})</p>
                       <div className="grid gap-2 md:grid-cols-2">
-                        {files.map((f) => (
+                        {visibleFiles.map((f) => (
                           <div
                             key={f.id}
                             role="button"
@@ -1191,7 +1285,7 @@ export default function NewReviewPage() {
                         <Sparkles className="h-5 w-5" aria-hidden="true" />
                       </div>
                       <h3 className="mt-3 text-base font-semibold">Ready to run AI review</h3>
-                      <p className="mt-1 text-sm text-muted-foreground">{files.length} inputs · {criteria.length} subcategories · {getAgentsFromSubcategories(criteria).length} agents · {depth} depth · ~2–4 min estimated</p>
+                      <p className="mt-1 text-sm text-muted-foreground">{visibleFiles.length} inputs · {criteria.length} subcategories · {getAgentsFromSubcategories(criteria).length} agents · {depth} depth · ~2–4 min estimated</p>
                       <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
                         <Button size="lg" className="min-h-11" onClick={runReview}>
                           <Sparkles className="mr-1.5 h-4 w-4" aria-hidden="true" />Run analysis
@@ -1233,8 +1327,8 @@ export default function NewReviewPage() {
                 <SumRow label="Name" value={name || "—"} />
                 <SumRow label="Product" value={product || "—"} />
                 <SumRow label="Domain" value={domain} capitalize />
+                <SumRow label="Inputs" value={`${visibleFiles.length}`} />
                 <SumRow label="Type" value={formatReviewTypeLabel(reviewType)} />
-                <SumRow label="Inputs" value={`${files.length}`} />
                 <SumRow label="Criteria" value={`${criteria.length}`} />
                 <SumRow label="Depth" value={depth} capitalize />
                 <SumRow label="Confidence" value={`≥ ${confidence[0]}%`} />

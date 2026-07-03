@@ -8,6 +8,7 @@ const router = Router();
 router.get(    "/",                       ReviewsController.list);
 router.post(   "/",                       ReviewsController.create);
 router.post(   "/draft",                  ReviewsController.saveDraft);
+router.post(   "/convert-legacy-doc",     ReviewsController.convertLegacyDoc);
 router.get(    "/analytics",              ReviewsController.getAnalytics);
 router.get(    "/:id",                    ReviewsController.getById);
 router.delete( "/:id",                    ReviewsController.delete);

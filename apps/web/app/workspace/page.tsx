@@ -55,6 +55,10 @@ interface Finding {
   confidence: number;
   notes?: string;
   reviewBasis: ReviewBasisItem[];
+  bboxRefs?: Array<{
+    screenIndex: number;
+    bbox: { x: number; y: number; width: number; height: number };
+  }>;
 }
 
 interface WorkspaceScreen {
@@ -63,6 +67,7 @@ interface WorkspaceScreen {
   imageUrl?: string;
   issues: number;
   p0: number;
+  screenIndex?: number;
 }
 
 const pinTone: Record<"P0" | "P1" | "P2", string> = {
@@ -86,6 +91,45 @@ function findingMatchesScreen(findingScreen?: string, screenName?: string): bool
   if (!fs || fs === "unknown") return false;
   if (fs === "multiple") return true;
   return fs === sn || fs.includes(sn) || sn.includes(fs);
+}
+
+function findingBelongsToScreen(finding: Finding, screenName?: string, screenIndex?: number): boolean {
+  if (!screenName) return false;
+
+  if (typeof screenIndex === "number" && finding.bboxRefs && finding.bboxRefs.length > 0) {
+    return finding.bboxRefs.some((ref) => ref.screenIndex === screenIndex);
+  }
+
+  return findingMatchesScreen(finding.screen, screenName);
+}
+
+function getFindingBoxForScreen(finding: Finding, screenName?: string, screenIndex?: number) {
+  if (!screenName || !finding.bboxRefs || finding.bboxRefs.length === 0) return null;
+  if (!findingBelongsToScreen(finding, screenName, screenIndex)) return null;
+
+  if (typeof screenIndex === "number") {
+    const matched = finding.bboxRefs.find((ref) => ref.screenIndex === screenIndex);
+    return matched?.bbox ?? null;
+  }
+
+  return finding.bboxRefs[0]?.bbox ?? null;
+}
+
+function getFindingPinPosition(finding: Finding, screenName: string, index: number, screenIndex?: number) {
+  const box = getFindingBoxForScreen(finding, screenName, screenIndex);
+  if (box) {
+    return {
+      left: `${(box.x + box.width / 2) * 100}%`,
+      top: `${(box.y + box.height / 2) * 100}%`,
+      box,
+    };
+  }
+
+  return {
+    left: `${20 + ((index * 13) % 70)}%`,
+    top: `${20 + ((index * 21) % 60)}%`,
+    box: null,
+  };
 }
 
 function WorkspaceContent() {
@@ -137,11 +181,12 @@ function WorkspaceContent() {
     const imageAssets = assetsList.filter((a: any) => a.mimeType?.startsWith("image/"));
 
     if (imageAssets.length > 0) {
-      return imageAssets.map((asset: any) => {
-        const screenFindings = allFindings.filter((f) => findingMatchesScreen(f.screen, asset.name));
+      return imageAssets.map((asset: any, assetIndex: number) => {
+        const screenFindings = allFindings.filter((f) => findingBelongsToScreen(f, asset.name, assetIndex));
         return {
           id: asset.id,
           name: stripExtension(asset.name),
+          screenIndex: assetIndex,
           imageUrl: asset.blobUrl
             ? asset.blobUrl
             : asset.base64Data
@@ -171,7 +216,7 @@ function WorkspaceContent() {
     }
 
     return screenNames.map((name, i) => {
-      const screenFindings = allFindings.filter((f) => findingMatchesScreen(f.screen, name));
+      const screenFindings = allFindings.filter((f) => findingBelongsToScreen(f, name));
       return {
         id: `screen-${i}`,
         name,
@@ -196,7 +241,7 @@ function WorkspaceContent() {
 
   const screenFindings = useMemo(() => {
     if (!screen) return allFindings;
-    return allFindings.filter((f) => findingMatchesScreen(f.screen, screen.name));
+    return allFindings.filter((f) => findingBelongsToScreen(f, screen.name, screen.screenIndex));
   }, [allFindings, screen]);
 
   const triage = useMemo(() => {
@@ -305,11 +350,11 @@ function WorkspaceContent() {
   const reviewSubtitle = `${reviewData.product} · ${screens.length} screen${screens.length === 1 ? "" : "s"} · ${allFindings.length} findings · UX score ${reviewData.uxScore ?? "—"}`;
 
   return (
-    <>
+    <div className="flex min-h-0 flex-1 flex-col">
       <AppHeader title={reviewTitle} subtitle={reviewSubtitle} />
 
       {/* Summary bar */}
-      <div className="flex flex-wrap items-center gap-x-6 gap-y-2 border-b border-border bg-card px-4 py-2.5 md:px-6">
+      <div className="shrink-0 flex flex-wrap items-center gap-x-6 gap-y-2 border-b border-border bg-card px-4 py-2.5 md:px-6">
         <Metric label="UX Score" value={String(reviewData.uxScore ?? "—")} accent />
         <Metric label="Findings" value={String(allFindings.length)} />
         <Metric label="P0" value={String(allFindings.filter((f) => f.severity === "P0").length)} tone="text-destructive" />
@@ -348,20 +393,20 @@ function WorkspaceContent() {
         </div>
       </div>
 
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex flex-1">
         {/* Screen thumbnails */}
-        <aside className="hidden w-48 shrink-0 overflow-y-auto border-r border-border bg-card/60 p-2 lg:block" aria-label="Screen list">
-          <p className="px-2 py-1.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Screens</p>
-          {screens.length === 0 ? (
-            <p className="px-2 py-4 text-[11px] text-muted-foreground">No screens uploaded.</p>
-          ) : (
-            <div className="space-y-1.5">
-              {screens.map((s) => (
+        <aside className="screens-panel-scroll hidden w-64 shrink-0 overflow-y-auto overscroll-contain border-r border-border bg-card/60 lg:block xl:w-72" aria-label="Screen list" style={{ maxHeight: "calc(100dvh - 170px)" }}>
+          <p className="sticky top-0 z-10 border-b border-border/70 bg-card/95 px-4 py-3 text-[10px] font-medium uppercase tracking-wider text-muted-foreground backdrop-blur-sm">Screens</p>
+          <div className="space-y-1.5 p-2">
+            {screens.length === 0 ? (
+              <p className="px-2 py-4 text-[11px] text-muted-foreground">No screens uploaded.</p>
+            ) : (
+              screens.map((s) => (
                 <button
                   key={s.id}
                   onClick={() => setSelectedScreen(s.id)}
                   className={cn(
-                    "group flex w-full flex-col gap-1.5 rounded-lg border p-2 text-left transition",
+                    "group flex w-full min-w-0 flex-col gap-1.5 rounded-lg border p-2 text-left transition",
                     selectedScreen === s.id ? "border-accent bg-accent/5 shadow-sm" : "border-transparent hover:border-border hover:bg-secondary/50",
                   )}
                   aria-current={selectedScreen === s.id}
@@ -379,13 +424,13 @@ function WorkspaceContent() {
                   </div>
                   <span className="text-[10px] text-muted-foreground">{s.issues} finding{s.issues === 1 ? "" : "s"}</span>
                 </button>
-              ))}
-            </div>
-          )}
+              ))
+            )}
+          </div>
         </aside>
 
         {/* Canvas */}
-        <section aria-label="Screen canvas" className="flex flex-1 flex-col overflow-hidden bg-secondary/30">
+        <section aria-label="Screen canvas" className="flex flex-1 flex-col bg-secondary/30">
           {screen ? (
             <>
               <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-border bg-card px-3 py-2 md:px-4">
@@ -402,7 +447,7 @@ function WorkspaceContent() {
                 <span className="text-xs text-muted-foreground md:hidden">{screenFindings.filter(f => f.status !== "DISMISSED").length} pins</span>
               </div>
 
-              <div className="flex flex-1 items-center justify-center overflow-auto p-6">
+              <div className="flex flex-1 items-center justify-center p-6">
                 <div className="relative w-full max-w-3xl">
                   <div className="relative flex aspect-[4/3] items-center justify-center overflow-hidden rounded-xl border border-border bg-card shadow-sm">
                     {screen.imageUrl ? (
@@ -423,22 +468,28 @@ function WorkspaceContent() {
 
                     <TooltipProvider>
                       {screenFindings.filter((f) => f.status !== "DISMISSED").map((f, i) => {
-                        const pos = { x: 20 + ((i * 13) % 70), y: 20 + ((i * 21) % 60) };
+                        const pos = getFindingPinPosition(f, screen.name, i, screen.screenIndex);
                         return (
                           <Tooltip key={f.id}>
-                            <TooltipTrigger asChild>
-                              <button
-                                onClick={() => setOpen(f)}
-                                className={cn(
-                                  "absolute z-10 flex h-7 w-7 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full text-[10px] font-bold text-white shadow-md ring-2 ring-card transition hover:scale-110",
-                                  pinTone[f.severity],
-                                )}
-                                style={{ left: `${pos.x}%`, top: `${pos.y}%` }}
-                                aria-label={`Finding ${i + 1} (${f.severity}): ${f.title}`}
-                              >
-                                {i + 1}
-                              </button>
-                            </TooltipTrigger>
+                            <>
+                              <TooltipTrigger asChild>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setSelectedScreen(screen.id);
+                                    setOpen(f);
+                                  }}
+                                  className={cn(
+                                    "absolute z-10 flex h-7 w-7 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full text-[10px] font-bold text-white shadow-md ring-2 ring-card transition hover:scale-110",
+                                    pinTone[f.severity],
+                                  )}
+                                  style={{ left: pos.left, top: pos.top }}
+                                  aria-label={`Finding ${i + 1} (${f.severity}): ${f.title}`}
+                                >
+                                  {i + 1}
+                                </button>
+                              </TooltipTrigger>
+                            </>
                             <TooltipContent side="top" className="max-w-xs">
                               <p className="text-xs font-medium">{f.title}</p>
                               <p className="text-[10px] text-muted-foreground">{f.severity} · {f.area}</p>
@@ -482,7 +533,7 @@ function WorkspaceContent() {
           )}
         </SheetContent>
       </Sheet>
-    </>
+    </div>
   );
 }
 

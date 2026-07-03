@@ -4,6 +4,7 @@ import { getSignedStorageReadUrl, uploadReviewAssetToStorage } from "./supabaseS
 import { config } from "../config";
 import { prisma } from "../config/prisma";
 import crypto from "crypto";
+import { convertLegacyDoc } from "./docConversion.service";
 
 type ReviewAssetRecord = {
   storageRef?: string | null;
@@ -279,6 +280,29 @@ export const ReviewsService = {
       contentText: asset.contentText,
       sizeBytes: asset.sizeBytes,
     });
+  },
+
+  async convertLegacyDoc(_userId: string, payload: {
+    name: string;
+    mimeType: string;
+    base64Data: string;
+  }) {
+    const isLegacyDocMime = payload.mimeType === "application/msword";
+    const isLegacyDocName = payload.name.toLowerCase().endsWith(".doc");
+
+    if (!isLegacyDocMime && !isLegacyDocName) {
+      throw new AppError(400, "Only legacy .doc files are supported by this converter route");
+    }
+
+    try {
+      return await convertLegacyDoc({
+        fileName: payload.name,
+        base64Data: payload.base64Data,
+      });
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "Unknown conversion error";
+      throw new AppError(422, `Failed to convert legacy .doc: ${detail}`);
+    }
   },
 
   async startReview(reviewId: string, userId: string) {

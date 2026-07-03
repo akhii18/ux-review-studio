@@ -23,6 +23,7 @@
  */
 
 import { Annotation } from "@langchain/langgraph";
+import type { ReviewDepth } from "./llm.js";
 import type { SubcategoryKey } from "./principles.js";
 import type { 
   GroundingOutput, 
@@ -52,6 +53,10 @@ export const GraphState = Annotation.Root({
   screenshots: Annotation<string[]>({
     reducer: replace,
     default: () => [],
+  }),
+  reviewDepth: Annotation<ReviewDepth>({
+    reducer: replace,
+    default: () => "standard",
   }),
   context: Annotation<string>({
     reducer: replace,

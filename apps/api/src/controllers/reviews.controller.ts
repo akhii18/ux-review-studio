@@ -43,6 +43,12 @@ const SaveDraftSchema = z.object({
   assets: z.array(SaveAssetSchema).optional(),
 });
 
+const ConvertLegacyDocSchema = z.object({
+  name: z.string().min(1),
+  mimeType: z.string().min(1),
+  base64Data: z.string().min(1),
+});
+
 export const ReviewsController = {
   async list(req: Request, res: Response) {
     const reviews = await ReviewsService.list(getUserId(req));
@@ -70,6 +76,12 @@ export const ReviewsController = {
     const asset = SaveAssetSchema.parse(req.body);
     const result = await ReviewsService.saveAsset(getUserId(req), req.params.id as string, asset);
     res.status(201).json({ success: true, data: result });
+  },
+
+  async convertLegacyDoc(req: Request, res: Response) {
+    const payload = ConvertLegacyDocSchema.parse(req.body);
+    const result = await ReviewsService.convertLegacyDoc(getUserId(req), payload);
+    res.status(200).json({ success: true, data: result });
   },
 
   async start(req: Request, res: Response) {

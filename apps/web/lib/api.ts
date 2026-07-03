@@ -132,6 +132,17 @@ export function saveAsset(reviewId: string, asset: {
   return request<any>(`/api/reviews/${reviewId}/assets`, { method: "POST", body: JSON.stringify(asset) });
 }
 
+export function convertLegacyDocAsset(payload: {
+  name: string;
+  mimeType: string;
+  base64Data: string;
+}) {
+  return request<{ markdown: string; images: Array<{ name: string; mimeType: string; base64Data: string; sizeBytes: number }> }>(
+    "/api/reviews/convert-legacy-doc",
+    { method: "POST", body: JSON.stringify(payload) }
+  );
+}
+
 export function startReview(id: string) {
   return request<any>(`/api/reviews/${id}/start`, { method: "POST" });
 }

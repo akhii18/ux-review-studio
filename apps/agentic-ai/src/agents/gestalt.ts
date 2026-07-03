@@ -15,7 +15,7 @@
  */
 
 import { HumanMessage, SystemMessage } from "@langchain/core/messages";
-import { llm } from "../llm.js";
+import { getLlmForState } from "../llm.js";
 import { GestaltOutputSchema, type GestaltOutput } from "../schemas.js";
 import type { GraphStateType } from "../state.js";
 import type { SubcategoryKey } from "../principles.js";
@@ -76,7 +76,7 @@ export async function gestaltAgent(
   };
 
   try {
-    const structuredLLM = llm.withStructuredOutput(GestaltOutputSchema);
+    const structuredLLM = getLlmForState(state).withStructuredOutput(GestaltOutputSchema);
 
     const result = await structuredLLM.invoke([
       new SystemMessage(systemPrompt),

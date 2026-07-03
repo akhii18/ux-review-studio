@@ -71,6 +71,10 @@ type SynthesizedFinding = {
   id: string;
   region: string;
   elementRefs: string[];
+  bboxRefs: Array<{
+    screenIndex: number;
+    bbox: { x: number; y: number; width: number; height: number };
+  }>;
   issue: string;
   principle: string;
   why: string;
@@ -83,6 +87,13 @@ type SynthesizedFinding = {
 };
 
 type AgenticRunResult = {
+  groundingOutput?: {
+    elements: Array<{
+      elementId: string;
+      screenIndex: number;
+      bbox: { x: number; y: number; width: number; height: number };
+    }>;
+  } | null;
   synthesisOutput?: {
     findings: SynthesizedFinding[];
     totalRawFindings: number;
@@ -109,6 +120,7 @@ const agenticBuildPath = path.resolve(__dirname, "../../../../../agentic-ai/dist
 let agenticModulePromise: Promise<{ runReviewGraph: (params: {
   screenshots: string[];
   context: string;
+  reviewDepth?: string;
   selectedAgents?: string[];
   selectedPrinciples?: unknown;
 }) => Promise<AgenticRunResult> }> | null = null;
@@ -150,6 +162,34 @@ function extractScreenName(finding: SynthesizedFinding, imageAssetNames: string[
   if (imageAssetNames.length === 1) return imageAssetNames[0];
   // Multi-screen but couldn't resolve → mark as Multiple so frontend shows on all screens
   return "Multiple";
+}
+
+function collectFindingBboxRefs(
+  finding: SynthesizedFinding,
+  elementLookup: Map<string, { screenIndex: number; bbox: { x: number; y: number; width: number; height: number } }>
+): Array<{ screenIndex: number; bbox: { x: number; y: number; width: number; height: number } }> {
+  if (finding.bboxRefs.length > 0) {
+    return finding.bboxRefs;
+  }
+
+  const refs = finding.elementRefs
+    .map((elementRef) => elementLookup.get(elementRef))
+    .filter((ref): ref is NonNullable<typeof ref> => Boolean(ref));
+
+  const seen = new Set<string>();
+  return refs.filter((ref) => {
+    const key = [
+      ref.screenIndex,
+      ref.bbox.x,
+      ref.bbox.y,
+      ref.bbox.width,
+      ref.bbox.height,
+    ].join(":");
+
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 function resolveArea(finding: SynthesizedFinding): "USABILITY" | "ACCESSIBILITY" | "CONSISTENCY" | "CONTENT_UX" | "RISK" | "RECOMMENDATIONS" {
@@ -314,11 +354,19 @@ async function persistFindings(params: {
   reviewId: string;
   findings: SynthesizedFinding[];
   imageAssetNames: string[];
+  groundingElements: Array<{ elementId: string; screenIndex: number; bbox: { x: number; y: number; width: number; height: number } }>;
 }) {
-  const { reviewId, findings, imageAssetNames } = params;
+  const { reviewId, findings, imageAssetNames, groundingElements } = params;
+  const elementLookup = new Map(
+    groundingElements.map((element) => [
+      element.elementId,
+      { screenIndex: element.screenIndex, bbox: element.bbox },
+    ])
+  );
 
   for (const finding of findings) {
     const screenName = extractScreenName(finding, imageAssetNames);
+    const bboxRefs = collectFindingBboxRefs(finding, elementLookup);
 
     const createdFinding = await prisma.finding.create({
       data: {
@@ -335,7 +383,7 @@ async function persistFindings(params: {
         confidence: clampConfidence(finding.confidence),
         status: "PROPOSED",
         isAiGenerated: true,
-        // bboxRefs: finding.bboxRefs && finding.bboxRefs.length > 0 ? finding.bboxRefs : undefined,
+        bboxRefs: bboxRefs.length > 0 ? bboxRefs : undefined,
       },
     });
 
@@ -429,6 +477,7 @@ export async function runReviewPipeline(reviewId: string): Promise<void> {
     const finalState = await module.runReviewGraph({
       screenshots,
       context,
+      reviewDepth: review.depth,
       // Only pass selectedAgents when the user actually chose subcategories.
       // If criteria is empty, run all agents (full review).
       selectedAgents: selectedAgents.length > 0 ? selectedAgents : undefined,
@@ -454,7 +503,12 @@ export async function runReviewPipeline(reviewId: string): Promise<void> {
       prisma.report.deleteMany({ where: { reviewId } }),
     ]);
 
-    await persistFindings({ reviewId, findings, imageAssetNames });
+    await persistFindings({
+      reviewId,
+      findings,
+      imageAssetNames,
+      groundingElements: finalState.groundingOutput?.elements ?? [],
+    });
 
     await prisma.review.update({ where: { id: reviewId }, data: { stage: "generating_report", uxScore } });
 
