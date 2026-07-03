@@ -3,7 +3,6 @@ import { createSlice, PayloadAction } from "@reduxjs/toolkit";
 export type NotificationType =
   | "draft_saved"
   | "review_started"
-  | "review_resumed"
   | "review_completed"
   | "review_failed"
   | "report_exported";
@@ -37,12 +36,19 @@ export type AddNotificationPayload = {
 
 const STORAGE_KEY = "uxm:notif-items";
 const MAX_NOTIFICATIONS = 20;
+const VALID_NOTIFICATION_TYPES = new Set<NotificationType>([
+  "draft_saved",
+  "review_started",
+  "review_completed",
+  "review_failed",
+  "report_exported",
+]);
 
 function createId() {
   return globalThis.crypto?.randomUUID?.() ?? `notif-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-function loadStoredNotifications(): AppNotification[] {
+export function loadStoredNotifications(): AppNotification[] {
   if (typeof window === "undefined") return [];
 
   const raw = window.localStorage.getItem(STORAGE_KEY);
@@ -53,7 +59,7 @@ function loadStoredNotifications(): AppNotification[] {
     if (!Array.isArray(parsed)) return [];
 
     return parsed
-      .filter((item) => item && typeof item.id === "string" && typeof item.type === "string")
+      .filter((item) => item && typeof item.id === "string" && VALID_NOTIFICATION_TYPES.has(item.type))
       .map((item) => ({
         id: item.id,
         type: item.type,
@@ -72,13 +78,16 @@ function loadStoredNotifications(): AppNotification[] {
 }
 
 const initialState: NotificationsState = {
-  items: loadStoredNotifications(),
+  items: [],
 };
 
 export const notificationsSlice = createSlice({
   name: "notifications",
   initialState,
   reducers: {
+    hydrateNotifications(state, action: PayloadAction<AppNotification[]>) {
+      state.items = action.payload.slice(0, MAX_NOTIFICATIONS);
+    },
     addNotification(state, action: PayloadAction<AddNotificationPayload>) {
       const payload = action.payload;
       const nextItem: AppNotification = {
@@ -122,6 +131,7 @@ export const notificationsSlice = createSlice({
 });
 
 export const {
+  hydrateNotifications,
   addNotification,
   markNotificationRead,
   markAllNotificationsRead,

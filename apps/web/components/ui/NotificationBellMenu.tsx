@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect, useState } from "react";
 import { Bell, CheckCheck, Clock3, FileCheck2, Save, Sparkles, TriangleAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -23,7 +24,6 @@ function formatRelativeTime(iso: string): string {
 function iconForNotification(type: AppNotification["type"]) {
   switch (type) {
     case "review_started":
-    case "review_resumed":
       return Sparkles;
     case "review_completed":
     case "report_exported":
@@ -45,7 +45,6 @@ function accentForNotification(type: AppNotification["type"]) {
     case "review_failed":
       return "text-destructive bg-destructive/10";
     case "review_started":
-    case "review_resumed":
       return "text-primary bg-primary/10";
     default:
       return "text-muted-foreground bg-muted";
@@ -54,8 +53,15 @@ function accentForNotification(type: AppNotification["type"]) {
 
 export function NotificationBellMenu() {
   const dispatch = useAppDispatch();
+  const [hasMounted, setHasMounted] = useState(false);
+  const [hoveredNotificationId, setHoveredNotificationId] = useState<string | null>(null);
   const notifications = useAppSelector((state) => state.notifications.items);
-  const unreadCount = notifications.filter((item) => !item.read).length;
+  const storedUnreadCount = notifications.filter((item) => !item.read).length;
+  const unreadCount = hasMounted ? storedUnreadCount : 0;
+
+  useEffect(() => {
+    setHasMounted(true);
+  }, []);
 
   return (
     <DropdownMenu>
@@ -67,11 +73,14 @@ export function NotificationBellMenu() {
           className="relative h-11 w-11"
         >
           <Bell className="h-4 w-4" aria-hidden />
-          {unreadCount > 0 && (
-            <span className="absolute right-2 top-2 min-w-4 rounded-full bg-red-500 px-1 text-[10px] font-semibold leading-4 text-white">
-              {unreadCount > 9 ? "9+" : unreadCount}
-            </span>
-          )}
+          <span
+            className={cn(
+              "absolute right-2 top-2 min-w-4 rounded-full bg-red-500 px-1 text-[10px] font-semibold leading-4 text-white",
+              unreadCount === 0 && "hidden",
+            )}
+          >
+            {unreadCount > 9 ? "9+" : unreadCount}
+          </span>
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-96 p-0">
@@ -121,9 +130,15 @@ export function NotificationBellMenu() {
             notifications.map((notification) => {
               const Icon = iconForNotification(notification.type);
               const iconClassName = accentForNotification(notification.type);
+              const isHighlighted = hoveredNotificationId === notification.id;
 
               const content = (
-                <div className="flex w-full items-start gap-3 rounded-md px-3 py-2 text-left">
+                <div
+                  className={cn(
+                    "flex w-full items-start gap-3 rounded-md border border-transparent px-3 py-2 text-left transition-colors",
+                    isHighlighted && "border-blue-400 bg-blue-50 shadow-sm ring-1 ring-blue-300",
+                  )}
+                >
                   <div className={cn("mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full", iconClassName)}>
                     <Icon className="h-4 w-4" aria-hidden />
                   </div>
@@ -143,9 +158,17 @@ export function NotificationBellMenu() {
                   <DropdownMenuItem
                     key={notification.id}
                     asChild
-                    className="p-0"
+                    className="rounded-md p-0 data-[highlighted]:bg-transparent data-[highlighted]:text-popover-foreground focus:bg-transparent focus:text-popover-foreground"
                   >
-                    <Link href={notification.href} className="w-full" onClick={() => dispatch(markNotificationRead(notification.id))}>
+                    <Link
+                      href={notification.href}
+                      className="w-full"
+                      onMouseEnter={() => setHoveredNotificationId(notification.id)}
+                      onMouseLeave={() => setHoveredNotificationId(null)}
+                      onFocus={() => setHoveredNotificationId(notification.id)}
+                      onBlur={() => setHoveredNotificationId(null)}
+                      onClick={() => dispatch(markNotificationRead(notification.id))}
+                    >
                       {content}
                     </Link>
                   </DropdownMenuItem>
@@ -155,7 +178,11 @@ export function NotificationBellMenu() {
               return (
                 <DropdownMenuItem
                   key={notification.id}
-                  className="p-0"
+                  className="rounded-md p-0 data-[highlighted]:bg-transparent data-[highlighted]:text-popover-foreground focus:bg-transparent focus:text-popover-foreground"
+                  onMouseEnter={() => setHoveredNotificationId(notification.id)}
+                  onMouseLeave={() => setHoveredNotificationId(null)}
+                  onFocus={() => setHoveredNotificationId(notification.id)}
+                  onBlur={() => setHoveredNotificationId(null)}
                   onSelect={() => dispatch(markNotificationRead(notification.id))}
                 >
                   {content}
