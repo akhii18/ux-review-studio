@@ -20,6 +20,8 @@ function persistNotifications(items: unknown) {
 
 const notificationsPersistenceMiddleware = (storeApi: any) => (next: any) => (action: any) => {
   const result = next(action);
+  if (!action.type?.startsWith("notifications/")) return result;
+
   const notifications = storeApi.getState().notifications;
   persistNotifications(notifications.items);
   return result;

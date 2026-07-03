@@ -263,7 +263,7 @@ export default function NewReviewPage() {
   const [owner, setOwner] = useState("");
   const [figmaUrl, setFigmaUrl] = useState("");
   const [designSystemUrl, setDesignSystemUrl] = useState("");
-  const [criteria, setCriteria] = useState<string[]>([]);
+  const [criteria, setCriteria] = useState<string[]>(REVIEW_TYPE_REQUIRED_CRITERIA.full);
   const [files, setFiles] = useState<ReviewFileEntry[]>([]);
   const [contextText, setContextText] = useState("");
   const [depth, setDepth] = useState("standard");
@@ -273,6 +273,7 @@ export default function NewReviewPage() {
   const [currentStageLabel, setCurrentStageLabel] = useState("");
   const stageIdxRef = useRef(0);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const redirectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const filesRef = useRef<ReviewFileEntry[]>([]);
   const [isDragging, setIsDragging] = useState(false);
@@ -345,9 +346,10 @@ export default function NewReviewPage() {
         setName(review.name ?? "");
         setProduct(review.product ?? "");
         setDomain(review.domain || "bfsi");
-        setReviewType(review.reviewType || "full");
+        const loadedReviewType = review.reviewType || "full";
+        setReviewType(loadedReviewType);
         setOwner(review.owner || "");
-        setCriteria(Array.isArray(review.criteria) ? review.criteria : []);
+        setCriteria(Array.isArray(review.criteria) && review.criteria.length > 0 ? review.criteria : REVIEW_TYPE_REQUIRED_CRITERIA[loadedReviewType] ?? []);
         setDepth(review.depth || "standard");
         setConfidence([typeof review.confidenceThreshold === "number" ? review.confidenceThreshold : 75]);
         criteriaTouchedRef.current = false;
@@ -391,15 +393,6 @@ export default function NewReviewPage() {
           const idx = typeof mappedIdx === "number" ? mappedIdx : 0;
           stageIdxRef.current = idx;
           setStageIdx(idx);
-
-          dispatch(addNotification({
-            type: "review_resumed",
-            title: "Review resumed",
-            message: `${review.name ?? "Your review"} is continuing from saved progress.`,
-            href: `/new-review?reviewId=${resolvedReviewId}`,
-            reviewId: resolvedReviewId,
-            dedupeKey: `review-resumed:${resolvedReviewId}`,
-          }));
 
           if (pollRef.current) clearInterval(pollRef.current);
 
@@ -472,6 +465,12 @@ export default function NewReviewPage() {
           URL.revokeObjectURL(file.previewUrl);
         }
       });
+      if (pollRef.current) {
+        clearInterval(pollRef.current);
+      }
+      if (redirectTimeoutRef.current) {
+        clearTimeout(redirectTimeoutRef.current);
+      }
     };
   }, []);
 
@@ -737,7 +736,7 @@ export default function NewReviewPage() {
     return new File([bytes], fileName, { type: mimeType });
   };
 
-  const persistDraft = async () => {
+  const persistDraft = async ({ notify = true }: { notify?: boolean } = {}) => {
     setIsSavingDraft(true);
     const assets: Array<{
       name: string;
@@ -789,14 +788,16 @@ export default function NewReviewPage() {
 
       if (savedReview?.id) {
         setDraftReviewId(savedReview.id);
-        dispatch(addNotification({
-          type: "draft_saved",
-          title: "Draft saved",
-          message: `${name || "Your review"} was saved as a draft.`,
-          href: `/new-review?reviewId=${savedReview.id}`,
-          reviewId: savedReview.id,
-          dedupeKey: `draft-saved:${savedReview.id}`,
-        }));
+        if (notify) {
+          dispatch(addNotification({
+            type: "draft_saved",
+            title: "Draft saved",
+            message: `${name || "Your review"} was saved as a draft.`,
+            href: `/new-review?reviewId=${savedReview.id}`,
+            reviewId: savedReview.id,
+            dedupeKey: `draft-saved:${savedReview.id}`,
+          }));
+        }
       }
 
       return savedReview?.id as string | undefined;
@@ -827,7 +828,7 @@ export default function NewReviewPage() {
     setCurrentStageLabel("Saving review…");
 
     try {
-      const reviewId = await persistDraft();
+      const reviewId = await persistDraft({ notify: false });
 
       if (!reviewId) {
         throw new Error("Did not receive a valid review ID from the server");
@@ -837,7 +838,7 @@ export default function NewReviewPage() {
         type: "review_started",
         title: "Review started",
         message: `${name || "Your review"} is now running.`,
-        href: `/new-review?reviewId=${reviewId}`,
+        href: `/workspace?reviewId=${reviewId}`,
         reviewId,
         dedupeKey: `review-started:${reviewId}`,
       }));
@@ -845,7 +846,8 @@ export default function NewReviewPage() {
       setCurrentStageLabel("Starting review…");
       await startReview(reviewId);
 
-      pollRef.current = setInterval(async () => {
+      let completionHandled = false;
+      const pollProgress = async () => {
         try {
           const progress = await getReviewProgress(reviewId);
 
@@ -859,12 +861,22 @@ export default function NewReviewPage() {
           setCurrentStageLabel(formatBackendStage(progress.stage));
 
           if (progress.status === "completed") {
+            if (completionHandled) return;
+            completionHandled = true;
             if (pollRef.current) clearInterval(pollRef.current);
             stageIdxRef.current = progressStages.length - 1;
             setStageIdx(progressStages.length - 1);
             setCurrentStageLabel("Completed");
+            dispatch(addNotification({
+              type: "review_completed",
+              title: "Review completed",
+              message: `${name || "Your review"} finished with ${progress.findingCount || 0} findings.`,
+              href: `/workspace?reviewId=${reviewId}`,
+              reviewId,
+              dedupeKey: `review-completed:${reviewId}`,
+            }));
             toast.success(`Review complete — ${progress.findingCount || 0} findings generated.`);
-            setTimeout(() => {
+            redirectTimeoutRef.current = setTimeout(() => {
               router.push(`/workspace?reviewId=${reviewId}`);
             }, 600);
           } else if (progress.status === "failed") {
@@ -877,7 +889,10 @@ export default function NewReviewPage() {
         } catch (err) {
           // Ignore transient polling errors
         }
-      }, 2000);
+      };
+
+      pollRef.current = setInterval(pollProgress, 2000);
+      void pollProgress();
 
     } catch (err: any) {
       toast.error(err.message || "Failed to start review");
@@ -910,12 +925,19 @@ export default function NewReviewPage() {
   return (
     <>
       <AppHeader title="New Review" subtitle="Set up an AI-assisted UX review in 5 guided steps" />
-      <div className="flex-1 p-4 pb-28 md:p-6 md:pb-28">
-        {isLoadingDraft && (
-          <div className="mb-4 rounded-xl border border-border bg-card p-4 text-sm text-muted-foreground shadow-card">
-            Loading saved draft settings…
+      {isLoadingDraft ? (
+        <div className="flex min-h-[calc(100dvh-4rem)] flex-1 items-center justify-center p-6">
+          <div className="flex max-w-sm flex-col items-center text-center">
+            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/10 text-primary">
+              <Loader2 className="h-5 w-5 animate-spin" aria-hidden="true" />
+            </div>
+            <h2 className="mt-4 text-base font-semibold text-foreground">Loading saved review</h2>
+            <p className="mt-1 text-sm text-muted-foreground">Preparing your draft and opening the step where you left off.</p>
           </div>
-        )}
+        </div>
+      ) : (
+        <>
+      <div className="flex-1 p-4 pb-28 md:p-6 md:pb-28">
         {/* Stepper */}
         <div className="sticky top-16 z-20 -mx-4 bg-background/90 px-4 py-3 backdrop-blur-lg supports-[backdrop-filter]:bg-background/75 md:-mx-6 md:px-6">
           <ol className="flex flex-nowrap items-center gap-2 overflow-x-auto whitespace-nowrap [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" role="list" aria-label="Wizard progress">
@@ -1580,6 +1602,8 @@ export default function NewReviewPage() {
           )}
         </DialogContent>
       </Dialog>
+        </>
+      )}
     </>
   );
 }
