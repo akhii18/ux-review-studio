@@ -3,8 +3,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 // import { processPdf } from "@/lib/pdfToPageFiles";
 import { processDocx } from "@/lib/docxToMarkdown";
-import { useRouter } from "next/navigation";
-import { createReview, saveAsset, startReview, getReviewProgress, type ReviewDepth } from "@/lib/api";
+import { useRouter, useSearchParams } from "next/navigation";
+import { getReview, getReviewProgress, saveReviewDraft, startReview, type ReviewDepth } from "@/lib/api";
 import { AppHeader } from "@/components/ui/AppHeader";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -97,6 +97,18 @@ const SUBCATEGORY_GROUPS = [
 
 type SubcategoryId = typeof SUBCATEGORY_GROUPS[number]["items"][number]["id"];
 
+type ReviewFileEntry = {
+  id: string;
+  name: string;
+  type: string;
+  status: string;
+  file?: File;
+  previewUrl?: string;
+  blobUrl?: string;
+  contentText?: string;
+  sizeBytes?: number;
+};
+
 /** Derive the unique backend agent names from any set of selected subcategory IDs */
 function getAgentsFromSubcategories(subcategoryIds: string[]): string[] {
   const agents = new Set<string>();
@@ -109,6 +121,7 @@ function getAgentsFromSubcategories(subcategoryIds: string[]): string[] {
 }
 
 const REVIEW_TYPE_REQUIRED_CRITERIA: Record<string, string[]> = {
+  partial: [],
   full: [
     "nielsensHeuristics", "navigationLogic", "taskFlowEfficiency", "recognitionOverRecall",
     "wcagConformance", "keyboardNavigation", "screenReaderInterpretation", "touchTargets",
@@ -173,11 +186,34 @@ function toAlphaNumeric(value: string): string {
   return value.replace(/[^a-zA-Z0-9 ]/g, "").replace(/\s{2,}/g, " ");
 }
 
+function formatReviewTypeLabel(value: string): string {
+  const label = value.replaceAll("_", " ").trim().toLowerCase();
+  if (!label) return "—";
+  if (label === "partial") return "Custom";
+  if (label === "a11y") return "A11y";
+  if (label === "prd") return "PRD";
+  return label.charAt(0).toUpperCase() + label.slice(1);
+}
+
+function getAssetType(asset: { name?: string; mimeType?: string | null }) {
+  const mimeType = asset.mimeType ?? "";
+  const name = asset.name ?? "";
+  if (mimeType.startsWith("image/")) return "Screenshot";
+  if (mimeType === "application/pdf" || name.toLowerCase().endsWith(".pdf")) return "PDF";
+  if (mimeType.includes("wordprocessingml") || name.toLowerCase().endsWith(".docx")) return "Word";
+  return "PRD";
+}
+
 const REVIEW_DEPTH_OPTIONS = ["quick", "standard", "deep"] as const satisfies readonly ReviewDepth[];
 
 export default function NewReviewPage() {
   const [step, setStep] = useState(0);
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const initialReviewId = searchParams.get("reviewId");
+  const [draftReviewId, setDraftReviewId] = useState<string | null>(initialReviewId);
+  const [isLoadingDraft, setIsLoadingDraft] = useState(Boolean(initialReviewId));
+  const [isSavingDraft, setIsSavingDraft] = useState(false);
   const [name, setName] = useState("");
   const [product, setProduct] = useState("");
   const [domain, setDomain] = useState("bfsi");
@@ -189,7 +225,7 @@ export default function NewReviewPage() {
   const [findingMetadataOptions, setFindingMetadataOptions] = useState<FindingOutputOptionKey[]>([
     ...DEFAULT_FINDING_OUTPUT_OPTIONS,
   ]);
-  const [files, setFiles] = useState<Array<{ id: string; name: string; type: string; status: string; file?: File; previewUrl?: string }>>([]);
+  const [files, setFiles] = useState<ReviewFileEntry[]>([]);
   const [contextText, setContextText] = useState("");
   const [depth, setDepth] = useState<ReviewDepth>("standard");
   const [confidence, setConfidence] = useState([75]);
@@ -199,13 +235,14 @@ export default function NewReviewPage() {
   const stageIdxRef = useRef(0);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const filesRef = useRef<Array<{ id: string; name: string; type: string; status: string; file?: File; previewUrl?: string }>>([]);
+  const filesRef = useRef<ReviewFileEntry[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [isDocProcessing, setIsDocProcessing] = useState(false);
   const [isScreenshotModalOpen, setIsScreenshotModalOpen] = useState(false);
   const [activeScreenshotIndex, setActiveScreenshotIndex] = useState(0);
   const [isPdfModalOpen, setIsPdfModalOpen] = useState(false);
   const [activePdfIndex, setActivePdfIndex] = useState(0);
+  const [uploadedAssetsStart, setUploadedAssetsStart] = useState(0);
 
   const screenshotFiles = useMemo(
     () => files.filter((file) => file.type === "Screenshot" && Boolean(file.previewUrl)),
@@ -216,6 +253,13 @@ export default function NewReviewPage() {
     () => files.filter((file) => file.type === "PDF" && Boolean(file.previewUrl)),
     [files]
   );
+
+  const visibleUploadedAssets = useMemo(
+    () => files.slice(uploadedAssetsStart, uploadedAssetsStart + 3),
+    [files, uploadedAssetsStart]
+  );
+
+  const maxUploadedAssetsStart = Math.max(0, files.length - 3);
 
   useEffect(() => {
     const requiredForType = REVIEW_TYPE_REQUIRED_CRITERIA[reviewType] ?? [];
@@ -230,6 +274,152 @@ export default function NewReviewPage() {
   useEffect(() => {
     filesRef.current = files;
   }, [files]);
+
+  useEffect(() => {
+    const syncOwnerFromSignedInUser = () => {
+      if (typeof window === "undefined") return;
+
+      const raw = localStorage.getItem("current_user");
+      if (!raw) {
+        setOwner("User");
+        return;
+      }
+
+      try {
+        const parsed = JSON.parse(raw) as { name?: string };
+        setOwner((parsed.name ?? "User").trim() || "User");
+      } catch {
+        setOwner("User");
+      }
+    };
+
+    syncOwnerFromSignedInUser();
+
+    const handleStorage = () => syncOwnerFromSignedInUser();
+
+    window.addEventListener("storage", handleStorage);
+    window.addEventListener("uxm:user-updated", handleStorage as EventListener);
+
+    return () => {
+      window.removeEventListener("storage", handleStorage);
+      window.removeEventListener("uxm:user-updated", handleStorage as EventListener);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!initialReviewId) {
+      setIsLoadingDraft(false);
+      return;
+    }
+
+    let cancelled = false;
+    setIsLoadingDraft(true);
+
+    getReview(initialReviewId)
+      .then((review) => {
+        if (cancelled) return;
+
+        const resolvedReviewId = review.id ?? initialReviewId;
+
+        setDraftReviewId(resolvedReviewId);
+        setName(review.name ?? "");
+        setProduct(review.product ?? "");
+        setDomain(review.domain || "bfsi");
+        setReviewType(review.reviewType || "full");
+        setOwner(review.owner || "");
+        setCriteria(Array.isArray(review.criteria) && review.criteria.length > 0 ? review.criteria : REVIEW_TYPE_REQUIRED_CRITERIA[review.reviewType || "full"] ?? []);
+        setDepth((review.depth as ReviewDepth) || "standard");
+        setConfidence([typeof review.confidenceThreshold === "number" ? review.confidenceThreshold : 75]);
+
+        const loadedFiles: ReviewFileEntry[] = [];
+        const noteBlocks: string[] = [];
+
+        for (const asset of review.assets ?? []) {
+          const isContextNote = asset.name === "Context notes" && asset.contentText;
+          if (isContextNote) {
+            noteBlocks.push(asset.contentText);
+            continue;
+          }
+
+          loadedFiles.push({
+            id: asset.id ?? `${asset.name}-${asset.createdAt ?? Math.random()}`,
+            name: asset.name ?? "Saved asset",
+            type: getAssetType(asset),
+            status: "Saved",
+            previewUrl: asset.blobUrl ?? undefined,
+            blobUrl: asset.storageRef ?? asset.blobUrl ?? undefined,
+            contentText: asset.contentText ?? undefined,
+            sizeBytes: asset.sizeBytes ?? undefined,
+          });
+        }
+
+        setFiles(loadedFiles);
+        setContextText(noteBlocks.join("\n\n"));
+
+        const stepMatch = typeof review.stage === "string" ? review.stage.match(/^step-(\d+)$/) : null;
+        if (stepMatch) {
+          setStep(Math.max(0, Math.min(steps.length - 1, Number(stepMatch[1]) - 1)));
+        }
+
+        if (review.status === "completed") {
+          router.replace(`/workspace?reviewId=${resolvedReviewId}`);
+          return;
+        }
+
+        if (review.status === "in_progress") {
+          setRunning(true);
+          setStep(4);
+          setCurrentStageLabel(formatBackendStage(review.stage) || "AI agent at work…");
+          const mappedIdx = typeof review.stage === "string" ? backendStageToUiIndex[review.stage] : undefined;
+          const idx = typeof mappedIdx === "number" ? mappedIdx : 0;
+          stageIdxRef.current = idx;
+          setStageIdx(idx);
+
+          if (pollRef.current) clearInterval(pollRef.current);
+
+          const pollProgress = async () => {
+            try {
+              const progress = await getReviewProgress(resolvedReviewId);
+              const progressIdx = backendStageToUiIndex[progress.stage ?? ""];
+              const nextIdx = typeof progressIdx === "number" ? progressIdx : stageIdxRef.current;
+
+              stageIdxRef.current = nextIdx;
+              setStageIdx(nextIdx);
+              setCurrentStageLabel(formatBackendStage(progress.stage));
+
+              if (progress.status === "completed") {
+                if (pollRef.current) clearInterval(pollRef.current);
+                stageIdxRef.current = progressStages.length - 1;
+                setStageIdx(progressStages.length - 1);
+                setCurrentStageLabel("Completed");
+                setRunning(false);
+                router.replace(`/workspace?reviewId=${resolvedReviewId}`);
+              } else if (progress.status === "failed") {
+                if (pollRef.current) clearInterval(pollRef.current);
+                setCurrentStageLabel("Failed");
+                setRunning(false);
+              }
+            } catch {
+              // Ignore transient polling errors
+            }
+          };
+
+          void pollProgress();
+          pollRef.current = setInterval(pollProgress, 2000);
+        }
+      })
+      .catch((error) => {
+        console.error(error);
+        toast.error("Failed to load draft review");
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoadingDraft(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [initialReviewId, router]);
 
   useEffect(() => {
     return () => {
@@ -262,6 +452,21 @@ export default function NewReviewPage() {
       setActivePdfIndex(pdfFiles.length - 1);
     }
   }, [activePdfIndex, isPdfModalOpen, pdfFiles]);
+
+  useEffect(() => {
+    if (uploadedAssetsStart > maxUploadedAssetsStart) {
+      setUploadedAssetsStart(maxUploadedAssetsStart);
+    }
+  }, [maxUploadedAssetsStart, uploadedAssetsStart]);
+
+  const reviewTypeOptions = [
+    { value: "partial", label: "Custom" },
+    { value: "full", label: "Full UX Review" },
+    { value: "prd", label: "PRD Alignment Review" },
+    { value: "a11y", label: "Accessibility Review" },
+    { value: "ds", label: "Design System Review" },
+    { value: "content", label: "Content & Microcopy Review" },
+  ];
 
   /**
    * Converts a raw File array into file-list entries.
@@ -426,6 +631,26 @@ export default function NewReviewPage() {
         : [...current, optionKey]
     );
 
+  const validStep0 = name.trim().length > 0 && product.trim().length > 0;
+  const validStep1 = files.length > 0;
+  const validStep2 = criteria.length > 0;
+
+  const canNavigateToStep = (targetStep: number) => {
+    if (running) {
+      return targetStep <= step;
+    }
+
+    if (targetStep <= step) {
+      return true;
+    }
+
+    if (targetStep >= 1 && !validStep0) return false;
+    if (targetStep >= 2 && !validStep1) return false;
+    if (targetStep >= 3 && !validStep2) return false;
+
+    return true;
+  };
+
   const handleFilePick = (e: React.ChangeEvent<HTMLInputElement>) => {
     const picked = Array.from(e.target.files ?? []);
     void addFiles(picked);
@@ -439,14 +664,43 @@ export default function NewReviewPage() {
       r.readAsDataURL(f);
     });
 
-  const runReview = async () => {
-    setRunning(true);
-    setStageIdx(0);
-    setCurrentStageLabel("Creating review…");
+  const persistDraft = async ({ notify = true }: { notify?: boolean } = {}) => {
+    setIsSavingDraft(true);
+
+    const assets: Array<{
+      name: string;
+      mimeType: string;
+      base64Data?: string;
+      blobUrl?: string;
+      contentText?: string;
+      sizeBytes?: number;
+    }> = await Promise.all(
+      files.map(async (f) => ({
+        name: f.name,
+        mimeType: f.file?.type || "application/octet-stream",
+        base64Data: f.file ? await toBase64(f.file) : undefined,
+        blobUrl: f.blobUrl,
+        contentText: f.contentText,
+        sizeBytes: f.file?.size ?? f.sizeBytes,
+      })),
+    );
+
+    const notes: string[] = [];
+    if (contextText.trim()) notes.push(contextText.trim());
+    if (figmaUrl.trim()) notes.push(`Figma URL: ${figmaUrl.trim()}`);
+    if (designSystemUrl.trim()) notes.push(`Design System URL: ${designSystemUrl.trim()}`);
+
+    if (notes.length > 0) {
+      assets.push({
+        name: "Context notes",
+        mimeType: "text/plain",
+        contentText: notes.join("\n\n"),
+      });
+    }
 
     try {
-      // 1. Create the review record
-      const reviewRes = await createReview({
+      const savedReview = await saveReviewDraft({
+        reviewId: draftReviewId ?? undefined,
         name,
         product,
         domain,
@@ -456,44 +710,54 @@ export default function NewReviewPage() {
         findingMetadataOptions,
         depth,
         confidenceThreshold: confidence[0],
+        stage: `step-${step + 1}`,
+        assets,
       });
-      const reviewId = reviewRes.id || reviewRes.reviewId;
+
+      if (savedReview?.id) {
+        setDraftReviewId(savedReview.id);
+        if (notify) {
+          toast.success("Draft saved");
+        }
+      }
+
+      return savedReview?.id as string | undefined;
+    } finally {
+      setIsSavingDraft(false);
+    }
+  };
+
+  const handleSaveDraft = async () => {
+    try {
+      await persistDraft();
+    } catch (error) {
+      toast.error("Failed to save draft");
+      console.error(error);
+    }
+  };
+
+  const runReview = async () => {
+    if (!validStep1) {
+      toast.error("Add at least one screenshot or file before starting the review.");
+      setStep(1);
+      return;
+    }
+
+    setRunning(true);
+    setStageIdx(0);
+    setCurrentStageLabel("Saving review…");
+
+    try {
+      const reviewId = await persistDraft({ notify: false });
 
       if (!reviewId) {
         throw new Error("Did not receive a valid review ID from the server");
       }
 
-      // 2. Upload assets
-      for (const f of files) {
-        if (f.file) {
-          const base64Data = await toBase64(f.file);
-          await saveAsset(reviewId, {
-            name: f.name,
-            mimeType: f.file.type || "application/octet-stream",
-            base64Data,
-            sizeBytes: f.file.size,
-          });
-        }
-      }
-
-      // Upload context text and external references if provided
-      const notes: string[] = [];
-      if (contextText.trim()) notes.push(contextText.trim());
-      if (figmaUrl.trim()) notes.push(`Figma URL: ${figmaUrl.trim()}`);
-      if (designSystemUrl.trim()) notes.push(`Design System URL: ${designSystemUrl.trim()}`);
-
-      if (notes.length > 0) {
-        await saveAsset(reviewId, {
-          name: "Context notes",
-          mimeType: "text/plain",
-          contentText: notes.join("\n\n"),
-        });
-      }
-
-      // 3. Start the pipeline
+      // 2. Start the pipeline
       await startReview(reviewId);
 
-      // 4. Poll progress every 2s
+      // 3. Poll progress every 2s
       pollRef.current = setInterval(async () => {
         try {
           const progress = await getReviewProgress(reviewId);
@@ -533,9 +797,19 @@ export default function NewReviewPage() {
     }
   };
 
-  const validStep0 = name.trim().length > 0 && product.trim().length > 0;
-  const validStep1 = files.length > 0;
-  const validStep2 = criteria.length > 0;
+  if (isLoadingDraft) {
+    return (
+      <div className="flex min-h-[calc(100dvh-4rem)] flex-1 items-center justify-center p-6">
+        <div className="flex max-w-sm flex-col items-center text-center">
+          <div className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/10 text-primary">
+            <Loader2 className="h-5 w-5 animate-spin" aria-hidden="true" />
+          </div>
+          <h2 className="mt-4 text-base font-semibold text-foreground">Loading saved review</h2>
+          <p className="mt-1 text-sm text-muted-foreground">Preparing your draft and opening the step where you left off.</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <>
@@ -548,13 +822,14 @@ export default function NewReviewPage() {
               <li key={s} className="flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => !running && setStep(i)}
+                  onClick={() => canNavigateToStep(i) && setStep(i)}
+                  disabled={!canNavigateToStep(i)}
                   aria-current={i === step ? "step" : undefined}
                   className={cn(
                     "flex min-h-9 items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium transition",
                     i === step ? "border-primary bg-primary text-primary-foreground"
                     : i < step ? "border-success/40 bg-success/10 text-success"
-                    : "border-border bg-card text-muted-foreground hover:bg-secondary",
+                    : canNavigateToStep(i) ? "border-border bg-card text-muted-foreground hover:bg-secondary" : "border-border bg-card text-muted-foreground/50 opacity-60",
                   )}
                 >
                   <span className={cn("flex h-5 w-5 items-center justify-center rounded-full text-[10px]",
@@ -611,11 +886,11 @@ export default function NewReviewPage() {
                     <Select value={reviewType} onValueChange={setReviewType}>
                       <SelectTrigger className="bg-background"><SelectValue /></SelectTrigger>
                       <SelectContent className="bg-popover text-popover-foreground">
-                        <SelectItem value="full">Full UX Review</SelectItem>
-                        <SelectItem value="prd">PRD Alignment Review</SelectItem>
-                        <SelectItem value="a11y">Accessibility Review</SelectItem>
-                        <SelectItem value="ds">Design System Review</SelectItem>
-                        <SelectItem value="content">Content & Microcopy Review</SelectItem>
+                        {reviewTypeOptions.map((option) => (
+                          <SelectItem key={option.value} value={option.value}>
+                            {option.label}
+                          </SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
                   </Field>
@@ -704,8 +979,36 @@ export default function NewReviewPage() {
                   {files.length > 0 && (
                     <div>
                       <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">Uploaded assets ({files.length})</p>
-                      <div className="grid gap-2 md:grid-cols-2">
-                        {files.map((f) => (
+                        <div className="mb-2 flex items-center justify-between gap-2">
+                          {files.length > 3 ? (
+                            <div className="flex items-center gap-1">
+                              <Button
+                                type="button"
+                                size="icon"
+                                variant="outline"
+                                className="h-8 w-8"
+                                onClick={() => setUploadedAssetsStart((current) => Math.max(0, current - 1))}
+                                disabled={uploadedAssetsStart === 0}
+                                aria-label="Show previous uploaded assets"
+                              >
+                                <ChevronLeft className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                type="button"
+                                size="icon"
+                                variant="outline"
+                                className="h-8 w-8"
+                                onClick={() => setUploadedAssetsStart((current) => Math.min(maxUploadedAssetsStart, current + 1))}
+                                disabled={uploadedAssetsStart >= maxUploadedAssetsStart}
+                                aria-label="Show next uploaded assets"
+                              >
+                                <ChevronRight className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          ) : <span />}
+                        </div>
+                        <div className="grid gap-2 md:grid-cols-3">
+                          {visibleUploadedAssets.map((f) => (
                           <div key={f.id} className="flex items-center gap-3 rounded-lg border border-border bg-card p-3">
                             {f.type === "Screenshot" && f.previewUrl ? (
                               <button
@@ -884,8 +1187,11 @@ export default function NewReviewPage() {
                       <h3 className="mt-3 text-base font-semibold">Ready to run AI review</h3>
                       <p className="mt-1 text-sm text-muted-foreground">{files.length} inputs · {criteria.length} subcategories · {getAgentsFromSubcategories(criteria).length} agents · {depth} depth · ~2–4 min estimated</p>
                       <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
-                        <Button size="lg" variant="outline" className="min-h-11" onClick={() => toast.success("Draft saved")}>
+                            <Button size="lg" variant="outline" className="min-h-11" onClick={() => void handleSaveDraft()} disabled={isSavingDraft}>
                           <Save className="mr-1.5 h-4 w-4" aria-hidden="true" />Save draft
+                        </Button>
+                        <Button size="lg" variant="outline" className="min-h-11" onClick={() => setStep((current) => Math.max(0, current - 1))}>
+                          <ChevronLeft className="mr-1.5 h-4 w-4" aria-hidden="true" />Back
                         </Button>
                         <Button size="lg" className="min-h-11" onClick={runReview}>
                           <Sparkles className="mr-1.5 h-4 w-4" aria-hidden="true" />Run analysis
@@ -924,7 +1230,7 @@ export default function NewReviewPage() {
                 <SumRow label="Name" value={name || "—"} />
                 <SumRow label="Product" value={product || "—"} />
                 <SumRow label="Domain" value={domain} capitalize />
-                <SumRow label="Type" value={reviewType} capitalize />
+                <SumRow label="Type" value={formatReviewTypeLabel(reviewType)} />
                 <SumRow label="Inputs" value={`${files.length}`} />
                 <SumRow label="Criteria" value={`${criteria.length}`} />
                 <SumRow label="Depth" value={depth} capitalize />
@@ -969,13 +1275,21 @@ export default function NewReviewPage() {
         {!running && step < steps.length - 1 && (
           <div className="fixed bottom-0 left-0 right-0 z-20 flex justify-end px-4 py-3 md:left-[var(--sidebar-width)] md:px-6 md:peer-data-[state=collapsed]:left-[var(--sidebar-width-icon)]">
             <div className="flex gap-2">
-              <Button variant="outline" className="min-h-10" onClick={() => toast.success("Draft saved")}>
+              <Button variant="outline" className="min-h-10" onClick={() => void handleSaveDraft()} disabled={isSavingDraft}>
                 <Save className="mr-1.5 h-4 w-4" aria-hidden="true" />Save draft
+              </Button>
+              <Button
+                variant="outline"
+                className="min-h-10"
+                onClick={() => setStep((current) => Math.max(0, current - 1))}
+                disabled={step === 0}
+              >
+                <ChevronLeft className="mr-1.5 h-4 w-4" aria-hidden="true" />Back
               </Button>
               <Button
                 className="min-h-10"
                 disabled={(step === 0 && !validStep0) || (step === 1 && !validStep1) || (step === 2 && !validStep2)}
-                onClick={() => setStep((s) => Math.min(steps.length - 1, s + 1))}
+                onClick={() => setStep((current) => Math.min(steps.length - 1, current + 1))}
               >
                 Continue<ArrowRight className="ml-1.5 h-4 w-4" aria-hidden="true" />
               </Button>
