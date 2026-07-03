@@ -74,6 +74,7 @@ export function loadStoredNotifications(): AppNotification[] {
         message: typeof item.message === "string" ? item.message : "",
         createdAt: typeof item.createdAt === "string" ? item.createdAt : new Date().toISOString(),
         read: Boolean(item.read),
+        href: typeof item.href === "string" ? item.href : undefined,
         reviewId: typeof item.reviewId === "string" ? item.reviewId : undefined,
         dedupeKey: typeof item.dedupeKey === "string" ? item.dedupeKey : undefined,
       }))
