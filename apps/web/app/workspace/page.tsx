@@ -22,6 +22,7 @@ import { PriorityBadge } from "@/components/ui/PriorityBadge";
 import { FindingStatusBadge } from "@/components/ui/FindingStatusBadge";
 import { cn } from "@/lib/utils";
 import { exportReviewReport, getReview, updateFinding, triageFinding } from "@/lib/api";
+import { downloadReport } from "@/lib/reportExport";
 import { useAppDispatch } from "@/store/hooks";
 import { addNotification } from "@/store/slices/notificationsSlice";
 import {
@@ -32,9 +33,6 @@ import {
 } from "@uxm/shared";
 import { toast } from "sonner";
 import Link from "next/link";
-import { marked } from "marked";
-import DOMPurify from "dompurify";
-import { jsPDF } from "jspdf";
 
 type TriageStatus = "PROPOSED" | "ACCEPTED" | "EDITED" | "DISMISSED" | "ESCALATED";
 
@@ -531,101 +529,9 @@ function WorkspaceContent() {
 
   const exportable = triage.proposed === 0 && allAcceptedHaveBasis && (triage.accepted + triage.edited > 0);
 
-  const getPlainTextFromMarkdown = useCallback((contentMd: string) => {
-    const parsedHtml = marked.parse(contentMd || "", { gfm: true, breaks: true });
-    const sanitizedHtml = DOMPurify.sanitize(typeof parsedHtml === "string" ? parsedHtml : String(parsedHtml));
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(sanitizedHtml, "text/html");
-    return (doc.body.textContent || "").trim();
-  }, []);
-
-  const sanitizeFileName = useCallback((value: string) => {
-    return value.replace(/[\\/:*?"<>|]/g, "-").replace(/\s+/g, " ").trim() || "report";
-  }, []);
-
-  const triggerBlobDownload = useCallback((blob: Blob, fileName: string) => {
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = fileName;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    URL.revokeObjectURL(url);
-  }, []);
-
-  const downloadPdfReport = useCallback((report: any) => {
-    const pdf = new jsPDF({ unit: "pt", format: "a4" });
-    const margin = 40;
-    const lineHeight = 16;
-    const pageWidth = pdf.internal.pageSize.getWidth();
-    const pageHeight = pdf.internal.pageSize.getHeight();
-
-    pdf.setFontSize(14);
-    pdf.text(String(report.name ?? "UX Report"), margin, margin);
-
-    pdf.setFontSize(10);
-    const plainText = getPlainTextFromMarkdown(String(report.contentMd ?? ""));
-    const wrappedLines = pdf.splitTextToSize(plainText || "No content", pageWidth - margin * 2);
-
-    let y = margin + 24;
-    for (const line of wrappedLines) {
-      if (y > pageHeight - margin) {
-        pdf.addPage();
-        y = margin;
-      }
-      pdf.text(String(line), margin, y);
-      y += lineHeight;
-    }
-
-    const safeName = sanitizeFileName(String(report.name ?? "report"));
-    const pdfBlob = pdf.output("blob");
-    triggerBlobDownload(pdfBlob, `${safeName}.pdf`);
-  }, [getPlainTextFromMarkdown, sanitizeFileName, triggerBlobDownload]);
-
-  const downloadWordReport = useCallback((report: any) => {
-    const parsedHtml = marked.parse(String(report.contentMd ?? ""), { gfm: true, breaks: true });
-    const reportHtml = DOMPurify.sanitize(typeof parsedHtml === "string" ? parsedHtml : String(parsedHtml));
-
-    const wordHtml = `
-      <html xmlns:o="urn:schemas-microsoft-com:office:office"
-            xmlns:w="urn:schemas-microsoft-com:office:word"
-            xmlns="http://www.w3.org/TR/REC-html40">
-      <head>
-        <meta charset="utf-8" />
-        <title>${String(report.name ?? "UX Report")}</title>
-        <style>
-          body { font-family: Calibri, Arial, sans-serif; font-size: 11pt; line-height: 1.5; color: #1f2937; }
-          h1, h2, h3, h4 { color: #111827; margin-top: 18px; margin-bottom: 8px; }
-          p { margin: 8px 0; }
-          table { border-collapse: collapse; width: 100%; margin: 10px 0; }
-          th, td { border: 1px solid #d1d5db; padding: 6px; text-align: left; vertical-align: top; }
-          code { background: #f3f4f6; padding: 1px 4px; border-radius: 4px; }
-          pre { background: #f3f4f6; padding: 10px; border-radius: 6px; }
-        </style>
-      </head>
-      <body>
-        <h1>${String(report.name ?? "UX Report")}</h1>
-        ${report.executiveSummary ? `<p><strong>Executive Summary:</strong> ${String(report.executiveSummary)}</p>` : ""}
-        ${reportHtml}
-      </body>
-      </html>
-    `;
-
-    const wordBlob = new Blob([wordHtml], {
-      type: "application/msword;charset=utf-8",
-    });
-    const safeName = sanitizeFileName(String(report.name ?? "report"));
-    triggerBlobDownload(wordBlob, `${safeName}.doc`);
-  }, [sanitizeFileName, triggerBlobDownload]);
-
   const handleDownload = useCallback((report: any, format: "pdf" | "word") => {
-    if (format === "pdf") {
-      downloadPdfReport(report);
-    } else {
-      downloadWordReport(report);
-    }
-  }, [downloadPdfReport, downloadWordReport]);
+    downloadReport(report, format);
+  }, []);
 
   const handleExport = useCallback(async (format: "pdf" | "word") => {
     if (!reviewId) return;
