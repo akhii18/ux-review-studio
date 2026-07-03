@@ -111,6 +111,7 @@ type AgenticRunResult = {
   groundingOutput?: {
     elements: GroundingElement[];
   } | null;
+  flowDiscoveryOutput?: FlowDiscoveryOutput | null;
   synthesisOutput?: {
     findings: SynthesizedFinding[];
     totalRawFindings: number;
@@ -127,6 +128,22 @@ type ReviewAssetRecord = {
   contentText: string | null;
 };
 
+type DocumentPageMetadata = {
+  pageNumber: number;
+  assetName: string;
+};
+
+type DiscoveredFlow = {
+  flowName: string;
+  description: string;
+  pageNumbers: number[];
+};
+
+type FlowDiscoveryOutput = {
+  flows: DiscoveredFlow[];
+  routingRationale: string;
+};
+
 // ── Module loader ─────────────────────────────────────────────────────────────
 
 const agenticSourcePath = path.resolve(__dirname, "../../../../agentic-ai/src/index.ts");
@@ -139,6 +156,8 @@ let agenticModulePromise: Promise<{ runReviewGraph: (params: {
   selectedAgents?: string[];
   selectedPrinciples?: unknown;
   findingMetadataOptions?: string[] | null;
+  keyFlowsOnly?: boolean;
+  documentPages?: DocumentPageMetadata[];
 }) => Promise<AgenticRunResult> }> | null = null;
 
 async function loadAgenticModule() {
@@ -236,10 +255,99 @@ function buildFindingAiMetadata(finding: SynthesizedFinding) {
     ? finding.acceptanceCriteria.filter((item) => item.trim().length > 0)
     : [];
 
-  const metadata: Record<string, string | string[]> = {};
+  const metadata: Record<string, string | string[] | number[]> = {};
   if (acceptanceCriteria.length > 0) metadata.acceptanceCriteria = acceptanceCriteria;
   if (finding.requirementTraceability) metadata.requirementTraceability = finding.requirementTraceability;
   if (finding.wcagCriteria) metadata.wcagCriteria = finding.wcagCriteria;
+
+  return Object.keys(metadata).length > 0 ? metadata : undefined;
+}
+
+function extractScreenIndex(finding: SynthesizedFinding): number | null {
+  const explicitRef = Array.isArray(finding.bboxRefs) ? finding.bboxRefs[0] : undefined;
+  if (explicitRef && Number.isInteger(explicitRef.screenIndex)) {
+    return explicitRef.screenIndex;
+  }
+
+  for (const ref of finding.elementRefs) {
+    const match = ref.match(/^screen(\d+)-el-/);
+    if (match) {
+      const screenIndex = parseInt(match[1], 10) - 1;
+      if (screenIndex >= 0) return screenIndex;
+    }
+  }
+
+  return null;
+}
+
+function buildIndependentFlowDiscovery(imageAssetNames: string[]): FlowDiscoveryOutput {
+  return {
+    flows: imageAssetNames.map((assetName, index) => {
+      const stem = assetName.replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ").trim();
+      return {
+        flowName: stem ? `Page ${index + 1} - ${stem}` : `Page ${index + 1}`,
+        description: "Independent page-level asset because Key Flows Only was not enabled.",
+        pageNumbers: [index + 1],
+      };
+    }),
+    routingRationale: "Key Flows Only was disabled, so each page was treated as an independent asset.",
+  };
+}
+
+function normalizeFlowDiscoveryOutput(
+  output: FlowDiscoveryOutput | null | undefined,
+  imageAssetNames: string[],
+  keyFlowsOnly: boolean
+): FlowDiscoveryOutput {
+  const fallback = buildIndependentFlowDiscovery(imageAssetNames);
+  if (!keyFlowsOnly || !output?.flows?.length) return fallback;
+
+  const pageCount = imageAssetNames.length;
+  const assigned = new Set<number>();
+  const flows: DiscoveredFlow[] = [];
+
+  for (const flow of output.flows) {
+    const pageNumbers = Array.from(new Set(flow.pageNumbers ?? []))
+      .filter((pageNumber) => Number.isInteger(pageNumber) && pageNumber >= 1 && pageNumber <= pageCount && !assigned.has(pageNumber))
+      .sort((a, b) => a - b);
+
+    if (pageNumbers.length === 0) continue;
+    pageNumbers.forEach((pageNumber) => assigned.add(pageNumber));
+    flows.push({
+      flowName: flow.flowName?.trim() || `Flow ${flows.length + 1}`,
+      description: flow.description?.trim() || "AI-discovered journey grouping.",
+      pageNumbers,
+    });
+  }
+
+  for (const fallbackFlow of fallback.flows) {
+    if (!assigned.has(fallbackFlow.pageNumbers[0])) {
+      flows.push(fallbackFlow);
+    }
+  }
+
+  return {
+    flows: flows.length > 0 ? flows : fallback.flows,
+    routingRationale: output.routingRationale?.trim() || "Pages were grouped by inferred user intent and task continuity.",
+  };
+}
+
+function findFlowForFinding(finding: SynthesizedFinding, flowDiscovery: FlowDiscoveryOutput): DiscoveredFlow | null {
+  const screenIndex = extractScreenIndex(finding);
+  if (screenIndex === null) return null;
+  const pageNumber = screenIndex + 1;
+  return flowDiscovery.flows.find((flow) => flow.pageNumbers.includes(pageNumber)) ?? null;
+}
+
+function buildFindingAiMetadataWithFlow(finding: SynthesizedFinding, flowDiscovery: FlowDiscoveryOutput) {
+  const metadata: Record<string, string | string[] | number[]> = buildFindingAiMetadata(finding) ?? {};
+  const flow = findFlowForFinding(finding, flowDiscovery);
+
+  if (flow) {
+    metadata.flowName = flow.flowName;
+    metadata.flowDescription = flow.description;
+    metadata.flowPageNumbers = flow.pageNumbers;
+  }
 
   return Object.keys(metadata).length > 0 ? metadata : undefined;
 }
@@ -441,8 +549,9 @@ async function persistFindings(params: {
   findings: SynthesizedFinding[];
   imageAssetNames: string[];
   groundingElements: GroundingElement[];
+  flowDiscovery: FlowDiscoveryOutput;
 }) {
-  const { reviewId, findings, imageAssetNames, groundingElements } = params;
+  const { reviewId, findings, imageAssetNames, groundingElements, flowDiscovery } = params;
 
   for (const finding of findings) {
     const screenName = extractScreenName(finding, imageAssetNames);
@@ -461,7 +570,7 @@ async function persistFindings(params: {
         why: finding.why,
         businessImpact: finding.businessImpact ?? undefined,
         a11yImpact: finding.a11yImpact ?? undefined,
-        aiMetadata: buildFindingAiMetadata(finding),
+        aiMetadata: buildFindingAiMetadataWithFlow(finding, flowDiscovery),
         confidence: clampConfidence(finding.confidence),
         status: "PROPOSED",
         isAiGenerated: true,
@@ -520,6 +629,10 @@ export async function runReviewPipeline(reviewId: string): Promise<void> {
       (asset: ReviewAssetRecord) => asset.mimeType.startsWith("image/")
     );
     const imageAssetNames = imageAssets.map((asset: ReviewAssetRecord) => asset.name);
+    const documentPages = imageAssetNames.map((assetName, index) => ({
+      pageNumber: index + 1,
+      assetName,
+    }));
 
     const screenshots = await Promise.all(
       imageAssets.map(async (asset: ReviewAssetRecord) => {
@@ -545,7 +658,11 @@ export async function runReviewPipeline(reviewId: string): Promise<void> {
       textAssets ? `\nInput notes:\n${textAssets}` : "",
     ].join("\n");
 
-    await prisma.review.update({ where: { id: reviewId }, data: { stage: "analyzing_screens" } });
+    const keyFlowsOnly = review.analysisScope === "key";
+    await prisma.review.update({
+      where: { id: reviewId },
+      data: { stage: keyFlowsOnly ? "discovering_flows" : "analyzing_screens" },
+    });
 
     // Bug fix: convert subcategory IDs → agent names + selectedPrinciples map
     const { selectedAgents, selectedPrinciples } = deriveAgentSelection(review.criteria);
@@ -562,6 +679,8 @@ export async function runReviewPipeline(reviewId: string): Promise<void> {
       // principle blocks to inject into its system prompt.
       selectedPrinciples: Object.keys(selectedPrinciples).length > 0 ? selectedPrinciples : undefined,
       findingMetadataOptions: normalizeStringArray(review.findingMetadataOptions),
+      keyFlowsOnly,
+      documentPages,
     });
 
     const synthesis = finalState.synthesisOutput;
@@ -570,6 +689,7 @@ export async function runReviewPipeline(reviewId: string): Promise<void> {
     }
 
     const findings = synthesis.findings;
+  const flowDiscovery = normalizeFlowDiscoveryOutput(finalState.flowDiscoveryOutput, imageAssetNames, keyFlowsOnly);
     const p0 = findings.filter((finding) => finding.severity === "P0").length;
     const p1 = findings.filter((finding) => finding.severity === "P1").length;
     const p2 = findings.filter((finding) => finding.severity === "P2").length;
@@ -586,9 +706,10 @@ export async function runReviewPipeline(reviewId: string): Promise<void> {
       findings,
       imageAssetNames,
       groundingElements: finalState.groundingOutput?.elements ?? [],
+      flowDiscovery,
     });
 
-    await prisma.review.update({ where: { id: reviewId }, data: { stage: "generating_report", uxScore } });
+    await prisma.review.update({ where: { id: reviewId }, data: { stage: "generating_report", uxScore, flowDiscovery: flowDiscovery as any } });
 
     const report = buildReportMarkdown({
       review,

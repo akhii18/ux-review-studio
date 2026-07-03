@@ -30,6 +30,7 @@ import { gestaltAgent } from "./agents/gestalt.js";
 import { visualDesignAgent } from "./agents/visualDesign.js";
 import { synthesisAgent } from "./agents/synthesis.js";
 import { outputEnrichmentAgent } from "./agents/outputEnrichment.js";
+import { flowDiscoveryAgent } from "./agents/flowDiscovery.js";
 
 export const REVIEW_AGENT_NAMES = [
   "usability",
@@ -44,9 +45,10 @@ export type ReviewAgentName = typeof REVIEW_AGENT_NAMES[number];
 
 // ─── Build & Compile ───────────────────────────────────────────────────────
 
-export function buildGraph(options?: { selectedAgents?: ReviewAgentName[] }) {
+export function buildGraph(options?: { selectedAgents?: ReviewAgentName[]; keyFlowsOnly?: boolean }) {
   const requested = options?.selectedAgents ?? [...REVIEW_AGENT_NAMES];
   const enabledAgents = REVIEW_AGENT_NAMES.filter((name) => requested.includes(name));
+  const keyFlowsOnly = options?.keyFlowsOnly === true;
 
   const graph = new StateGraph(GraphState)
     // Register always-on nodes.
@@ -59,7 +61,13 @@ export function buildGraph(options?: { selectedAgents?: ReviewAgentName[] }) {
   const g = graph as any;
 
   // Wire edges:
-  g.addEdge(START, "grounding");
+  if (keyFlowsOnly) {
+    g.addNode("flowDiscovery", flowDiscoveryAgent);
+    g.addEdge(START, "flowDiscovery");
+    g.addEdge("flowDiscovery", "grounding");
+  } else {
+    g.addEdge(START, "grounding");
+  }
 
   // Register and wire only selected reviewer nodes.
   if (enabledAgents.includes("usability")) {

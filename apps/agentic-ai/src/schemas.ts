@@ -46,6 +46,39 @@ export const ScreenMetadataSchema = z.object({
 });
 export type ScreenMetadata = z.infer<typeof ScreenMetadataSchema>;
 
+export const DocumentPageMetadataSchema = z.object({
+  pageNumber: z.number().int().min(1),
+  assetName: z.string(),
+});
+export type DocumentPageMetadata = z.infer<typeof DocumentPageMetadataSchema>;
+
+export const DiscoveredFlowSchema = z.object({
+  flowName: z
+    .string()
+    .min(1)
+    .describe("Semantic journey name inferred by the AI, e.g. 'User Onboarding' or 'Payment Checkout'"),
+  description: z
+    .string()
+    .min(1)
+    .describe("Brief explanation of the journey intent and why these pages belong together"),
+  pageNumbers: z
+    .array(z.number().int().min(1))
+    .min(1)
+    .describe("One-based document page numbers included in this flow, in ascending reading order"),
+});
+export type DiscoveredFlow = z.infer<typeof DiscoveredFlowSchema>;
+
+export const FlowDiscoveryOutputSchema = z.object({
+  flows: z
+    .array(DiscoveredFlowSchema)
+    .min(1)
+    .describe("Complete set of discovered user journeys covering the supplied pages"),
+  routingRationale: z
+    .string()
+    .describe("Short summary of the intent shifts or functional boundaries used to form the flows"),
+});
+export type FlowDiscoveryOutput = z.infer<typeof FlowDiscoveryOutputSchema>;
+
 export const GeometrySourceTypeSchema = z.enum([
   "ocr",
   "layout",

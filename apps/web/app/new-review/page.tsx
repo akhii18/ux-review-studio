@@ -30,6 +30,7 @@ import { toast } from "sonner";
 import {
   DEFAULT_FINDING_OUTPUT_OPTIONS,
   FINDING_OUTPUT_OPTIONS,
+  type AnalysisScope,
   type FindingOutputOptionKey,
 } from "@uxm/shared";
 
@@ -169,21 +170,22 @@ const stepHelp = [
 ];
 
 const progressStages = [
-  "Reading inputs", "Mapping requirements", "Analyzing screens",
+  "Reading inputs", "Mapping requirements", "Discovering flows", "Analyzing screens",
   "Checking accessibility", "Reviewing consistency", "Generating findings", "Preparing report",
 ];
 
 const backendStageToUiIndex: Record<string, number> = {
   reading_inputs: 0,
-  analyzing_screens: 2,
-  checking_accessibility: 3,
-  reviewing_content: 4,
-  checking_consistency: 4,
-  mapping_review_basis: 5,
-  prioritizing_findings: 5,
-  generating_report: 6,
-  completed: 6,
-  failed: 6,
+  discovering_flows: 2,
+  analyzing_screens: 3,
+  checking_accessibility: 4,
+  reviewing_content: 5,
+  checking_consistency: 5,
+  mapping_review_basis: 6,
+  prioritizing_findings: 6,
+  generating_report: 7,
+  completed: 7,
+  failed: 7,
 };
 
 function formatBackendStage(stage?: string | null): string {
@@ -192,6 +194,7 @@ function formatBackendStage(stage?: string | null): string {
 
   const labels: Record<string, string> = {
     reading_inputs: "Reading inputs",
+    discovering_flows: "Discovering key flows",
     analyzing_screens: "Analyzing screens",
     checking_accessibility: "Checking accessibility",
     reviewing_content: "Reviewing content",
@@ -260,6 +263,7 @@ export default function NewReviewPage() {
   const [files, setFiles] = useState<ReviewFileEntry[]>([]);
   const [contextText, setContextText] = useState("");
   const [depth, setDepth] = useState<ReviewDepth>("standard");
+  const [analysisScope, setAnalysisScope] = useState<AnalysisScope>("all");
   const [confidence, setConfidence] = useState([75]);
   const [running, setRunning] = useState(false);
   const [stageIdx, setStageIdx] = useState(0);
@@ -376,6 +380,7 @@ export default function NewReviewPage() {
         setOwner(review.owner || "");
         setCriteria(Array.isArray(review.criteria) && review.criteria.length > 0 ? review.criteria : REVIEW_TYPE_REQUIRED_CRITERIA[loadedReviewType] ?? []);
         setDepth((review.depth as ReviewDepth) || "standard");
+        setAnalysisScope(review.analysisScope === "key" ? "key" : "all");
         setConfidence([typeof review.confidenceThreshold === "number" ? review.confidenceThreshold : 75]);
         criteriaTouchedRef.current = false;
 
@@ -856,6 +861,7 @@ export default function NewReviewPage() {
         owner,
         criteria,
         findingMetadataOptions,
+        analysisScope,
         depth,
         confidenceThreshold: confidence[0],
         stage: `step-${step + 1}`,
@@ -1376,7 +1382,7 @@ export default function NewReviewPage() {
                     <Slider value={confidence} onValueChange={setConfidence} min={50} max={99} step={1} aria-label="Confidence threshold" />
                   </Field>
                   <Field label="Areas included">
-                    <Select defaultValue="all">
+                    <Select value={analysisScope} onValueChange={(value) => setAnalysisScope(value as AnalysisScope)}>
                       <SelectTrigger><SelectValue /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="all">All selected screens</SelectItem>

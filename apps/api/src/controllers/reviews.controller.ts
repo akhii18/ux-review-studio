@@ -17,6 +17,7 @@ const ReviewDepthSchema = z.preprocess(
 
 const FindingOutputOptionSchema = z.enum(FINDING_OUTPUT_OPTIONS.map((option) => option.key) as [string, ...string[]]);
 const FindingMetadataOptionsSchema = z.array(FindingOutputOptionSchema).default([...DEFAULT_FINDING_OUTPUT_OPTIONS]);
+const AnalysisScopeSchema = z.enum(["all", "key"]).catch("all").default("all");
 
 const CreateReviewSchema = z.object({
   name:                z.string().min(1),
@@ -26,6 +27,7 @@ const CreateReviewSchema = z.object({
   owner:               z.string().optional(),
   criteria:            z.array(z.string()).optional(),
   findingMetadataOptions: FindingMetadataOptionsSchema,
+  analysisScope:       AnalysisScopeSchema,
   depth:               ReviewDepthSchema,
   confidenceThreshold: z.number().int().min(0).max(100).optional(),
 });
@@ -48,6 +50,7 @@ const SaveDraftSchema = z.object({
   owner: z.string().optional(),
   criteria: z.array(z.string()).optional(),
   findingMetadataOptions: FindingMetadataOptionsSchema,
+  analysisScope: AnalysisScopeSchema,
   depth: ReviewDepthSchema,
   confidenceThreshold: z.number().int().min(0).max(100).optional(),
   stage: z.string().optional(),

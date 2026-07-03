@@ -7,6 +7,7 @@ import crypto from "crypto";
 import { convertLegacyDoc } from "./docConversion.service";
 
 type ReviewDepth = "quick" | "standard" | "deep";
+type AnalysisScope = "all" | "key";
 
 type ReviewAssetRecord = {
   storageRef?: string | null;
@@ -120,6 +121,7 @@ type DraftReviewInput = {
   owner?: string;
   criteria?: string[];
   findingMetadataOptions?: string[];
+  analysisScope?: AnalysisScope;
   depth?: ReviewDepth;
   confidenceThreshold?: number;
   stage?: string;
@@ -142,6 +144,21 @@ type ReviewExportRecord = {
   reviewBasis: Array<{ type: string; name: string; explanation: string }>;
 };
 
+type FlowGroupFindingRecord = ReviewExportRecord & {
+  bboxRefs?: unknown;
+};
+
+type DiscoveredFlow = {
+  flowName: string;
+  description: string;
+  pageNumbers: number[];
+};
+
+type FlowDiscoveryPayload = {
+  flows: DiscoveredFlow[];
+  routingRationale?: string;
+};
+
 function normalizeStringArray(value: unknown): string[] | null {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : null;
 }
@@ -155,6 +172,9 @@ function readAiMetadata(finding: ReviewExportRecord): {
   acceptanceCriteria: string[];
   requirementTraceability?: string;
   wcagCriteria?: string;
+  flowName?: string;
+  flowDescription?: string;
+  flowPageNumbers?: number[];
 } {
   if (!finding.aiMetadata || typeof finding.aiMetadata !== "object") {
     return { acceptanceCriteria: [] };
@@ -165,7 +185,83 @@ function readAiMetadata(finding: ReviewExportRecord): {
     acceptanceCriteria: normalizeStringArray(metadata.acceptanceCriteria) ?? [],
     requirementTraceability: typeof metadata.requirementTraceability === "string" ? metadata.requirementTraceability : undefined,
     wcagCriteria: typeof metadata.wcagCriteria === "string" ? metadata.wcagCriteria : undefined,
+    flowName: typeof metadata.flowName === "string" ? metadata.flowName : undefined,
+    flowDescription: typeof metadata.flowDescription === "string" ? metadata.flowDescription : undefined,
+    flowPageNumbers: Array.isArray(metadata.flowPageNumbers)
+      ? metadata.flowPageNumbers.filter((item): item is number => typeof item === "number")
+      : undefined,
   };
+}
+
+function normalizeFlowDiscoveryPayload(value: unknown): FlowDiscoveryPayload | null {
+  if (!value || typeof value !== "object") return null;
+  const payload = value as Record<string, unknown>;
+  if (!Array.isArray(payload.flows)) return null;
+
+  const flows = payload.flows
+    .map((item): DiscoveredFlow | null => {
+      if (!item || typeof item !== "object") return null;
+      const flow = item as Record<string, unknown>;
+      const flowName = typeof flow.flowName === "string" ? flow.flowName.trim() : "";
+      const description = typeof flow.description === "string" ? flow.description.trim() : "";
+      const pageNumbers = Array.isArray(flow.pageNumbers)
+        ? flow.pageNumbers.filter((pageNumber): pageNumber is number => Number.isInteger(pageNumber) && pageNumber > 0)
+        : [];
+
+      if (!flowName || pageNumbers.length === 0) return null;
+
+      return {
+        flowName,
+        description: description || "AI-discovered journey grouping.",
+        pageNumbers,
+      };
+    })
+    .filter((flow): flow is DiscoveredFlow => Boolean(flow));
+
+  return flows.length > 0
+    ? {
+        flows,
+        routingRationale: typeof payload.routingRationale === "string" ? payload.routingRationale : undefined,
+      }
+    : null;
+}
+
+function buildFindingGroups(findings: FlowGroupFindingRecord[], flowDiscovery: unknown) {
+  const discovery = normalizeFlowDiscoveryPayload(flowDiscovery);
+  const groups = new Map<string, {
+    flowName: string;
+    description?: string;
+    pageNumbers: number[];
+    findings: FlowGroupFindingRecord[];
+  }>();
+
+  for (const flow of discovery?.flows ?? []) {
+    groups.set(flow.flowName, {
+      flowName: flow.flowName,
+      description: flow.description,
+      pageNumbers: flow.pageNumbers,
+      findings: [],
+    });
+  }
+
+  for (const finding of findings) {
+    const metadata = readAiMetadata(finding);
+    const flowName = metadata.flowName || finding.screen || "Review overview";
+    const existing = groups.get(flowName);
+
+    if (existing) {
+      existing.findings.push(finding);
+    } else {
+      groups.set(flowName, {
+        flowName,
+        description: metadata.flowDescription,
+        pageNumbers: metadata.flowPageNumbers ?? [],
+        findings: [finding],
+      });
+    }
+  }
+
+  return Array.from(groups.values()).filter((group) => group.findings.length > 0 || group.pageNumbers.length > 0);
 }
 
 function isExportableFindings(findings: ReviewExportRecord[]): boolean {
@@ -255,8 +351,11 @@ export const ReviewsService = {
     const review = await ReviewsRepository.findById(id, userId);
     if (!review) throw new AppError(404, "Review not found");
 
+    const findings = review.findings as FlowGroupFindingRecord[];
+
     return {
       ...review,
+      findingGroups: buildFindingGroups(findings, review.flowDiscovery),
       assets: await Promise.all(
         review.assets.map(async (asset: ReviewAssetRecord) => ({
           ...asset,
@@ -275,6 +374,7 @@ export const ReviewsService = {
     owner?: string;
     criteria?: string[];
     findingMetadataOptions?: string[];
+    analysisScope?: AnalysisScope;
     depth?: ReviewDepth;
     confidenceThreshold?: number;
   }) {
@@ -290,6 +390,7 @@ export const ReviewsService = {
       owner: data.owner,
       criteria: data.criteria,
       findingMetadataOptions: data.findingMetadataOptions,
+      analysisScope: data.analysisScope,
       depth: data.depth,
       confidenceThreshold: data.confidenceThreshold,
       stage: data.stage,

@@ -1,4 +1,4 @@
-import type { FindingOutputOptionKey } from "@uxm/shared";
+import type { AnalysisScope, FindingOutputOptionKey } from "@uxm/shared";
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 
@@ -93,6 +93,7 @@ export function createReview(data: {
   owner?: string;
   criteria?: string[];
   findingMetadataOptions?: FindingOutputOptionKey[];
+  analysisScope?: AnalysisScope;
   depth?: ReviewDepth;
   confidenceThreshold?: number;
 }) {
@@ -108,6 +109,7 @@ export function saveReviewDraft(data: {
   owner?: string;
   criteria?: string[];
   findingMetadataOptions?: FindingOutputOptionKey[];
+  analysisScope?: AnalysisScope;
   depth?: ReviewDepth;
   confidenceThreshold?: number;
   stage?: string;
