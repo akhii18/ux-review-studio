@@ -21,6 +21,9 @@ type ReviewAnalyticsRecord = {
   id: string;
   name: string;
   product: string;
+  domain: string;
+  reviewType: string;
+  owner: string;
   status: string;
   uxScore: number | null;
   createdAt: Date;
@@ -524,11 +527,21 @@ export const ReviewsService = {
       }),
     ]);
 
+    const optionSource = [
+      ...allReviewMeta,
+      ...reviews.map((review) => ({
+        product: review.product,
+        domain: review.domain,
+        reviewType: review.reviewType,
+        owner: review.owner,
+      })),
+    ];
+
     const filterOptions = {
-      products: Array.from(new Set(allReviewMeta.map((review) => (review.product || "").trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b)),
-      domains: Array.from(new Set(allReviewMeta.map((review) => (review.domain || "").trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b)),
-      reviewTypes: Array.from(new Set(allReviewMeta.map((review) => (review.reviewType || "").trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b)),
-      owners: Array.from(new Set(allReviewMeta.map((review) => (review.owner || "").trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b)),
+      products: Array.from(new Set(optionSource.map((review) => (review.product || "").trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b)),
+      domains: Array.from(new Set(optionSource.map((review) => (review.domain || "").trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b)),
+      reviewTypes: Array.from(new Set(optionSource.map((review) => (review.reviewType || "").trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b)),
+      owners: Array.from(new Set(optionSource.map((review) => (review.owner || "").trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b)),
     };
 
     const completed = reviews.filter((r) => String(r.status).toLowerCase() === "completed");
