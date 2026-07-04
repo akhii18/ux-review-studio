@@ -56,6 +56,7 @@ jobs:
           mkdir -p api-deploy
           cp package.json package-lock.json api-deploy/
           cp -a apps/api api-deploy/apps/
+          cp -a apps/agentic-ai api-deploy/apps/
           mkdir -p api-deploy/packages
           cp -a packages/shared api-deploy/packages/
           cp -a node_modules api-deploy/

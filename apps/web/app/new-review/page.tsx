@@ -411,6 +411,14 @@ export default function NewReviewPage() {
         }
 
         if (review.status === "completed") {
+          dispatch(addNotification({
+            type: "review_completed",
+            title: "Review completed",
+            message: `${review.name ?? "Your review"} is ready.`,
+            href: `/workspace?reviewId=${resolvedReviewId}`,
+            reviewId: resolvedReviewId,
+            dedupeKey: `review-status:${resolvedReviewId}`,
+          }));
           router.replace(`/workspace?reviewId=${resolvedReviewId}`);
           return;
         }
