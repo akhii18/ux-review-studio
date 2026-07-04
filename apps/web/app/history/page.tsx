@@ -390,7 +390,9 @@ export default function HistoryPage() {
                       {(["P0", "P1", "P2"] as const).map((priority) => (
                         <div key={priority} className="flex min-w-[34px] flex-col items-center gap-1">
                           <PriorityBadge priority={priority} compact />
-                          <span className="text-xs tabular-nums text-muted-foreground">{r.priorityBreakdown?.[priority] ?? 0}</span>
+                          <span className={`text-xs font-bold tabular-nums ${priority === "P0" ? "text-destructive" : "text-foreground"}`}>
+                            {r.priorityBreakdown?.[priority] ?? 0}
+                          </span>
                         </div>
                       ))}
                     </div>
