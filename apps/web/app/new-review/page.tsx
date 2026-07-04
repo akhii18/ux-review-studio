@@ -532,12 +532,12 @@ export default function NewReviewPage() {
   }, [maxUploadedAssetsStart, uploadedAssetsStart]);
 
   const reviewTypeOptions = [
-    { value: "partial", label: "Custom" },
     { value: "full", label: "Full UX Review" },
     { value: "prd", label: "PRD Alignment Review" },
     { value: "a11y", label: "Accessibility Review" },
     { value: "ds", label: "Design System Review" },
     { value: "content", label: "Content & Microcopy Review" },
+    { value: "partial", label: "Custom" },
   ];
 
   /**

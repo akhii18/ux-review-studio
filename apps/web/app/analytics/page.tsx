@@ -181,6 +181,14 @@ export default function AnalyticsPage() {
   }, [timeRange, customStartDate, customEndDate, productFilter, domainFilter, reviewTypeFilter]);
 
   const filterOptions = data?.filterOptions ?? { products: [], domains: [], reviewTypes: [] };
+  const reviewTypeOptions = [...filterOptions.reviewTypes].sort((a: string, b: string) => {
+    const aValue = a.toLowerCase();
+    const bValue = b.toLowerCase();
+    const aIsCustom = aValue === "custom" || aValue.includes("custom");
+    const bIsCustom = bValue === "custom" || bValue.includes("custom");
+    if (aIsCustom === bIsCustom) return 0;
+    return aIsCustom ? 1 : -1;
+  });
 
   const kpis = data ? [
     {
@@ -234,20 +242,7 @@ export default function AnalyticsPage() {
 
         {/* Filters */}
         <div className="space-y-2">
-          <div className="flex flex-row flex-wrap items-center gap-2">
-            <Select value={timeRange} onValueChange={(value: "1m" | "3m" | "6m" | "1y" | "custom") => setTimeRange(value)}>
-              <SelectTrigger className="h-10 w-40" aria-label="Time range">
-                <SelectValue placeholder="Time range" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="1m">1 month</SelectItem>
-                <SelectItem value="3m">3 months</SelectItem>
-                <SelectItem value="6m">6 months</SelectItem>
-                <SelectItem value="1y">1 year</SelectItem>
-                <SelectItem value="custom">Custom</SelectItem>
-              </SelectContent>
-            </Select>
-
+          <div className="flex flex-row flex-wrap items-start gap-2">
           <Select value={productFilter} onValueChange={setProductFilter}>
             <SelectTrigger className="h-10 w-40" aria-label="Product">
               <SelectValue placeholder="Product" />
@@ -278,38 +273,53 @@ export default function AnalyticsPage() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All review types</SelectItem>
-              {filterOptions.reviewTypes.map((type: string) => (
+              {reviewTypeOptions.map((type: string) => (
                 <SelectItem key={type} value={type}>{formatReviewTypeLabel(type)}</SelectItem>
               ))}
             </SelectContent>
           </Select>
 
+          <div className="flex flex-col gap-2">
+            <Select value={timeRange} onValueChange={(value: "1m" | "3m" | "6m" | "1y" | "custom") => setTimeRange(value)}>
+              <SelectTrigger className="h-10 w-40" aria-label="Time range">
+                <SelectValue placeholder="Time range" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="1m">1 month</SelectItem>
+                <SelectItem value="3m">3 months</SelectItem>
+                <SelectItem value="6m">6 months</SelectItem>
+                <SelectItem value="1y">1 year</SelectItem>
+                <SelectItem value="custom">Custom</SelectItem>
+              </SelectContent>
+            </Select>
+
+            {timeRange === "custom" && (
+              <div className="flex flex-wrap items-start gap-2">
+                <div className="space-y-1">
+                  <p className="text-xs text-muted-foreground">From</p>
+                  <Input
+                    type="date"
+                    className="h-10 w-40"
+                    aria-label="Start date"
+                    value={customStartDate}
+                    onChange={(event) => setCustomStartDate(event.target.value)}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <p className="text-xs text-muted-foreground">To</p>
+                  <Input
+                    type="date"
+                    className="h-10 w-40"
+                    aria-label="End date"
+                    value={customEndDate}
+                    onChange={(event) => setCustomEndDate(event.target.value)}
+                  />
+                </div>
+              </div>
+            )}
           </div>
 
-          {timeRange === "custom" && (
-            <div className="flex flex-wrap items-start gap-2">
-              <div className="space-y-1">
-                <p className="text-xs text-muted-foreground">From</p>
-                <Input
-                  type="date"
-                  className="h-10 w-40"
-                  aria-label="Start date"
-                  value={customStartDate}
-                  onChange={(event) => setCustomStartDate(event.target.value)}
-                />
-              </div>
-              <div className="space-y-1">
-                <p className="text-xs text-muted-foreground">To</p>
-                <Input
-                  type="date"
-                  className="h-10 w-40"
-                  aria-label="End date"
-                  value={customEndDate}
-                  onChange={(event) => setCustomEndDate(event.target.value)}
-                />
-              </div>
-            </div>
-          )}
+          </div>
         </div>
 
         {/* KPIs */}
