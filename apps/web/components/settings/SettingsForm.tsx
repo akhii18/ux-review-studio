@@ -1,44 +1,40 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useForm } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
-import { Save, Info } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from "@/components/ui/select";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Skeleton } from "@/components/ui/skeleton";
-import { UpdateSettingsSchema } from "@uxm/shared";
-import type { UpdateSettings } from "@uxm/shared";
-import { useGetSettingsQuery, useUpdateSettingsMutation } from "@/store/api/settingsApi";
+import { useGetSettingsQuery } from "@/store/api/settingsApi";
 import { useDispatch } from "react-redux";
 import { markSaved } from "@/store/slices/settingsSlice";
 import { toast } from "sonner";
-import { me as apiMe, updateMe } from "@/lib/api";
+import { me as apiMe } from "@/lib/api";
+
+const integrations = [
+  { name: "Figma", desc: "Pull frames and prototypes for review", connected: true },
+  { name: "Jira", desc: "Create issues from findings", connected: true },
+  { name: "Confluence", desc: "Publish reports to spaces", connected: false },
+  { name: "Azure OpenAI", desc: "Enterprise AI model provider", connected: true },
+  { name: "Google Vertex AI", desc: "Alternate AI provider", connected: false },
+  { name: "AWS Bedrock", desc: "Alternate AI provider", connected: false },
+  { name: "Slack", desc: "Notifications and digests", connected: true },
+  { name: "Microsoft Teams", desc: "Notifications and digests", connected: false },
+] as const;
+
+const roles = ["Admin", "UX Lead", "UX Reviewer", "Designer", "Product Owner", "Viewer"] as const;
 
 export function SettingsForm() {
   const dispatch = useDispatch();
   const { data: settings, isLoading } = useGetSettingsQuery();
-  const [updateSettings, { isLoading: isSaving }] = useUpdateSettingsMutation();
   const [profileName, setProfileName] = useState("");
   const [profileEmail, setProfileEmail] = useState("");
   const [profileLoading, setProfileLoading] = useState(true);
-  const [isSavingProfile, setIsSavingProfile] = useState(false);
-
-  const { register, handleSubmit, setValue, watch, reset } = useForm<UpdateSettings>({
-    resolver: zodResolver(UpdateSettingsSchema),
-  });
-
-  useEffect(() => {
-    if (settings) {
-      reset(settings as UpdateSettings);
-    }
-  }, [settings, reset]);
 
   useEffect(() => {
     let active = true;
@@ -63,38 +59,13 @@ export function SettingsForm() {
     };
   }, []);
 
-  const onSubmit = async (data: UpdateSettings) => {
-    try {
-      await updateSettings(data).unwrap();
-      dispatch(markSaved(new Date().toISOString()));
-      toast.success("Settings saved");
-    } catch {
-      toast.error("Failed to save settings");
-    }
-  };
-
-  const saveProfile = async () => {
-    const trimmedName = profileName.trim();
-    if (!trimmedName) {
-      toast.error("Enter your name");
-      return;
-    }
-
-    try {
-      setIsSavingProfile(true);
-      const result = await updateMe({ name: trimmedName });
-      localStorage.setItem("token", result.token);
-      localStorage.setItem("current_user", JSON.stringify(result.user));
-      document.cookie = `token=${result.token}; Path=/; Max-Age=${result.expiresInSeconds}; SameSite=Lax`;
-      window.dispatchEvent(new Event("uxm:user-updated"));
-      dispatch(markSaved(new Date().toISOString()));
-      toast.success("Profile updated");
-    } catch {
-      toast.error("Failed to update profile");
-    } finally {
-      setIsSavingProfile(false);
-    }
-  };
+  const profileInitials = profileName
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part.charAt(0).toUpperCase())
+    .join("") || "US";
 
   if (isLoading) {
     return (
@@ -107,181 +78,201 @@ export function SettingsForm() {
   }
 
   return (
-    <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Profile</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {profileLoading ? (
-            <div className="space-y-3">
-              <Skeleton className="h-10 rounded-md" />
-              <Skeleton className="h-10 rounded-md" />
+    <Tabs defaultValue="profile">
+      <TabsList className="flex-wrap">
+        <TabsTrigger value="profile">Profile</TabsTrigger>
+        <TabsTrigger value="org">Organization</TabsTrigger>
+        <TabsTrigger value="ai">AI Configuration</TabsTrigger>
+        <TabsTrigger value="integrations">Integrations</TabsTrigger>
+        <TabsTrigger value="roles">Roles &amp; Permissions</TabsTrigger>
+        <TabsTrigger value="notifications">Notifications</TabsTrigger>
+        <TabsTrigger value="branding">Branding</TabsTrigger>
+      </TabsList>
+
+      <TabsContent value="profile" className="mt-4">
+        <Card className="shadow-card">
+          <CardHeader>
+            <CardTitle className="text-base">User profile</CardTitle>
+          </CardHeader>
+          <CardContent className="grid gap-4 md:grid-cols-2">
+            <div className="md:col-span-2 flex items-center gap-4">
+              <Avatar className="h-14 w-14">
+                <AvatarFallback className="bg-primary text-primary-foreground">{profileInitials}</AvatarFallback>
+              </Avatar>
+              <div className="flex items-center gap-2">
+                <Button type="button" variant="outline" size="sm" disabled>
+                  Change photo
+                </Button>
+              </div>
             </div>
-          ) : (
-            <>
-              <div className="space-y-1.5">
-                <Label htmlFor="profile-name">Name</Label>
-                <Input
-                  id="profile-name"
-                  value={profileName}
-                  onChange={(e) => setProfileName(e.target.value)}
-                  placeholder="Your name"
-                />
+
+            {profileLoading ? (
+              <div className="md:col-span-2 space-y-3">
+                <Skeleton className="h-10 rounded-md" />
+                <Skeleton className="h-10 rounded-md" />
               </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="profile-email">Email</Label>
-                <Input
-                  id="profile-email"
-                  value={profileEmail}
-                  readOnly
-                  className="bg-muted/40"
-                />
-              </div>
-              <Button type="button" variant="outline" onClick={saveProfile} disabled={isSavingProfile}>
-                <Save className="h-4 w-4" />
-                {isSavingProfile ? "Saving…" : "Save profile"}
-              </Button>
-            </>
-          )}
-        </CardContent>
-      </Card>
+            ) : (
+              <>
+                <Field label="Full name">
+                  <p className="rounded-md border border-border bg-muted/30 px-3 py-2 text-sm font-medium text-foreground">
+                    {profileName || "User"}
+                  </p>
+                </Field>
+                <Field label="Email">
+                  <p className="rounded-md border border-border bg-muted/30 px-3 py-2 text-sm font-medium text-foreground">
+                    {profileEmail || "—"}
+                  </p>
+                </Field>
+              </>
+            )}
+            <Field label="Role">
+              <Input defaultValue="UX Lead" />
+            </Field>
+            <Field label="Team">
+              <Input defaultValue="Enterprise UX" />
+            </Field>
+          </CardContent>
+        </Card>
+      </TabsContent>
 
-      {/* Review defaults */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Review defaults</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="space-y-1.5">
-            <Label htmlFor="depth">Default depth</Label>
-            <Select
-              defaultValue={(settings?.review_depth as string) ?? "standard"}
-              onValueChange={(v) => setValue("review_depth", v as UpdateSettings["review_depth"])}
-            >
-              <SelectTrigger className="w-40">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="quick">Quick</SelectItem>
-                <SelectItem value="standard">Standard</SelectItem>
-                <SelectItem value="deep">Deep</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
+      <TabsContent value="org" className="mt-4">
+        <Card className="shadow-card">
+          <CardHeader>
+            <CardTitle className="text-base">Organization</CardTitle>
+          </CardHeader>
+          <CardContent className="grid gap-4 md:grid-cols-2">
+            <Field label="Organization name">
+              <Input defaultValue="Acme Enterprise" />
+            </Field>
+            <Field label="Industry">
+              <Input defaultValue="Banking & Financial Services" />
+            </Field>
+            <Field label="Workspace URL">
+              <Input defaultValue="acme.uxreview.studio" />
+            </Field>
+            <Field label="Seats">
+              <Input defaultValue="48 of 100" />
+            </Field>
+          </CardContent>
+        </Card>
+      </TabsContent>
 
-          <div className="space-y-1.5">
-            <Label htmlFor="threshold">Confidence threshold (%)</Label>
-            <Input
-              id="threshold"
-              type="number"
-              min={50}
-              max={99}
-              className="w-24"
-              {...register("review_confidence_threshold", { valueAsNumber: true })}
-            />
-          </div>
+      <TabsContent value="ai" className="mt-4 space-y-4">
+        <Card className="shadow-card">
+          <CardHeader>
+            <CardTitle className="text-base">AI model configuration</CardTitle>
+          </CardHeader>
+          <CardContent className="grid gap-4 md:grid-cols-2">
+            <Field label="Primary model">
+              <Input defaultValue="Azure OpenAI · gpt-4o" />
+            </Field>
+            <Field label="Fallback model">
+              <Input defaultValue="Vertex AI · gemini-1.5-pro" />
+            </Field>
+            <Field label="Default review depth">
+              <Input defaultValue={(settings?.review_depth as string) ?? "Standard"} />
+            </Field>
+            <Field label="Severity model">
+              <Input defaultValue="Critical / High / Medium / Low" />
+            </Field>
+          </CardContent>
+        </Card>
 
-          <div className="space-y-1.5">
-            <Label htmlFor="owner">Default owner</Label>
-            <Input
-              id="owner"
-              {...register("default_review_owner")}
-              placeholder="e.g. Alex Rivera"
-              className="w-64"
-            />
-          </div>
-        </CardContent>
-      </Card>
+        <Card className="shadow-card">
+          <CardHeader>
+            <CardTitle className="text-base">Default review criteria</CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-wrap gap-1.5">
+            {["Nielsen's heuristics", "WCAG 2.2", "Design system", "PRD alignment", "Content clarity"].map((item) => (
+              <Badge key={item} variant="secondary">{item}</Badge>
+            ))}
+          </CardContent>
+        </Card>
+      </TabsContent>
 
-      {/* Pipeline toggles */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Pipeline settings</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {[
-            { id: "enable_usability_checks", label: "Usability heuristics", desc: "Nielsen's 10 heuristics + interaction laws" },
-            { id: "enable_accessibility_checks", label: "Accessibility (WCAG 2.2)", desc: "WCAG 2.2 AA conformance checks" },
-            { id: "enable_content_checks", label: "Content & microcopy", desc: "Labels, errors, and plain language review" },
-            { id: "enable_consistency_checks", label: "Design consistency", desc: "Spacing, component, and token adherence" },
-          ].map((s) => (
-            <div key={s.id} className="flex items-start justify-between gap-4">
-              <div>
-                <Label htmlFor={s.id} className="text-sm font-medium">{s.label}</Label>
-                <p className="text-xs text-muted-foreground mt-0.5">{s.desc}</p>
-              </div>
-              <Switch
-                id={s.id}
-                defaultChecked={(settings?.[s.id as keyof typeof settings] as boolean) ?? true}
-                onCheckedChange={(v) =>
-                  setValue(s.id as keyof UpdateSettings, v)
-                }
-              />
-            </div>
+      <TabsContent value="integrations" className="mt-4">
+        <div className="grid gap-3 md:grid-cols-2">
+          {integrations.map((integration) => (
+            <Card key={integration.name} className="shadow-card">
+              <CardContent className="flex items-center gap-3 p-4">
+                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-secondary font-semibold text-primary">
+                  {integration.name[0]}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold">{integration.name}</p>
+                  <p className="text-xs text-muted-foreground">{integration.desc}</p>
+                </div>
+                <Badge
+                  variant={integration.connected ? "secondary" : "outline"}
+                  className={integration.connected ? "border-success/30 bg-success/10 text-[color:var(--success)]" : ""}
+                >
+                  {integration.connected ? "Connected" : "Not connected"}
+                </Badge>
+              </CardContent>
+            </Card>
           ))}
-        </CardContent>
-      </Card>
+        </div>
+      </TabsContent>
 
-      {/* Governance */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Governance</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <Label className="text-sm font-medium">Require checklist approval</Label>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                Checklists must be approved before they can be used in reviews.
-              </p>
-            </div>
-            <Switch
-              defaultChecked={(settings?.checklist_require_approval as boolean) ?? true}
-              onCheckedChange={(v) => setValue("checklist_require_approval", v)}
-            />
-          </div>
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <Label className="text-sm font-medium">Show AI confidence</Label>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                Display confidence scores alongside AI-generated findings.
-              </p>
-            </div>
-            <Switch
-              defaultChecked={(settings?.show_ai_confidence as boolean) ?? true}
-              onCheckedChange={(v) => setValue("show_ai_confidence", v)}
-            />
-          </div>
-        </CardContent>
-      </Card>
+      <TabsContent value="roles" className="mt-4">
+        <Card className="shadow-card">
+          <CardHeader>
+            <CardTitle className="text-base">Roles</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {roles.map((role) => (
+              <div key={role} className="flex items-center justify-between rounded-lg border border-border bg-secondary/40 p-3">
+                <div>
+                  <p className="text-sm font-medium">{role}</p>
+                  <p className="text-[11px] text-muted-foreground">Default permissions for {role.toLowerCase()}</p>
+                </div>
+                <Button variant="outline" size="sm">Configure</Button>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      </TabsContent>
 
-      {/* AI Engine status (read-only display) */}
-      <Card className="border-indigo-200 bg-indigo-50 dark:border-indigo-800 dark:bg-indigo-950/30">
-        <CardHeader>
-          <CardTitle className="text-base flex items-center gap-2">
-            Azure OpenAI
-            <span className="inline-flex items-center rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">
-              Active
-            </span>
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="text-xs text-muted-foreground space-y-1">
-          <p>Endpoint and API key are configured via server environment variables; model routing follows review depth.</p>
-          <p className="font-mono">AZURE_OPENAI_ENDPOINT · AZURE_OPENAI_API_KEY · AZURE_OPENAI_API_VERSION</p>
-        </CardContent>
-      </Card>
+      <TabsContent value="notifications" className="mt-4">
+        <Card className="shadow-card">
+          <CardContent className="space-y-3 p-4">
+            {["Review completed", "New critical finding", "Weekly digest", "Mentions and comments"].map((notification) => (
+              <div key={notification} className="flex items-center justify-between rounded-lg border border-border bg-secondary/40 p-3">
+                <Label className="text-sm">{notification}</Label>
+                <Switch defaultChecked />
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      </TabsContent>
 
-      {/* Info */}
-      <div className="flex items-start gap-2 text-xs text-muted-foreground">
-        <Info className="h-3.5 w-3.5 mt-0.5 shrink-0" />
-        <p>Authentication settings will be available in a later phase.</p>
-      </div>
+      <TabsContent value="branding" className="mt-4">
+        <Card className="shadow-card">
+          <CardHeader>
+            <CardTitle className="text-base">Branding</CardTitle>
+          </CardHeader>
+          <CardContent className="grid gap-4 md:grid-cols-2">
+            <Field label="Brand name">
+              <Input defaultValue="Acme UX Governance" />
+            </Field>
+            <Field label="Primary color">
+              <Input defaultValue="#1E3A8A" />
+            </Field>
+            <Field label="Report cover note">
+              <Input defaultValue="Confidential — internal use only" />
+            </Field>
+          </CardContent>
+        </Card>
+      </TabsContent>
+    </Tabs>
+  );
+}
 
-      <Button type="submit" disabled={isSaving} className="gap-1.5">
-        <Save className="h-4 w-4" />
-        {isSaving ? "Saving…" : "Save settings"}
-      </Button>
-    </form>
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="space-y-1.5">
+      <Label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}</Label>
+      {children}
+    </div>
   );
 }

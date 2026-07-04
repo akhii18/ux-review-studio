@@ -10,7 +10,13 @@ export const ReviewsRepository = {
       orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
       include: {
         _count: { select: { findings: true } },
-        findings: { select: { severity: true } },
+        findings: {
+          select: {
+            severity: true,
+            status: true,
+            reviewBasis: { select: { id: true } },
+          },
+        },
       },
     });
   },
@@ -46,7 +52,6 @@ export const ReviewsRepository = {
         reviewType:          data.reviewType ?? "full",
         owner:               data.owner ?? "User",
         criteria:            data.criteria ?? [],
-        findingMetadataOptions: data.findingMetadataOptions ?? undefined,
         depth:               data.depth ?? "standard",
         confidenceThreshold: data.confidenceThreshold ?? 75,
         status:              "draft",
@@ -73,7 +78,6 @@ export const ReviewsRepository = {
       reviewType: data.reviewType ?? "full",
       owner: data.owner ?? "User",
       criteria: data.criteria ?? [],
-      findingMetadataOptions: data.findingMetadataOptions ?? undefined,
       depth: data.depth ?? "standard",
       confidenceThreshold: data.confidenceThreshold ?? 75,
       status: "draft",

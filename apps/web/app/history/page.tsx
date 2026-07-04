@@ -21,6 +21,7 @@ import {
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { SheetClose } from "@/components/ui/sheet";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   Pagination,
   PaginationContent,
@@ -29,12 +30,12 @@ import {
   PaginationPrevious,
 } from "@/components/ui/pagination";
 import { PriorityBadge } from "@/components/ui/PriorityBadge";
-import { Search, MoreVertical, X, ExternalLink, FileBarChart, Trash2 } from "lucide-react";
+import { Search, MoreVertical, X, ExternalLink, FileBarChart, Trash2, Download, ChevronDown } from "lucide-react";
 import { deleteReview, exportReviewReport, getReview, listReviews } from "@/lib/api";
+import { downloadReport } from "@/lib/reportExport";
 import { toast } from "sonner";
 
 const STATUS_OPTIONS = ["all", "draft", "in_progress", "completed", "failed", "archived"];
-const PAGE_SIZE = 10;
 
 function toTitleCase(value?: string | null) {
   if (!value) return "—";
@@ -205,9 +206,10 @@ export default function HistoryPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [deletingReviewId, setDeletingReviewId] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
   const [reportSheetOpen, setReportSheetOpen] = useState(false);
   const [loadingReportReviewId, setLoadingReportReviewId] = useState<string | null>(null);
-  const [reportPreview, setReportPreview] = useState<{ title: string; html: string } | null>(null);
+  const [reportPreview, setReportPreview] = useState<{ title: string; html: string; report: any } | null>(null);
   const [pendingDeleteReview, setPendingDeleteReview] = useState<{ id: string; name: string } | null>(null);
 
   useEffect(() => {
@@ -242,11 +244,11 @@ export default function HistoryPage() {
     setCurrentPage(1);
   }, [q, status, domain]);
 
-  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const paginated = useMemo(() => {
-    const start = (currentPage - 1) * PAGE_SIZE;
-    return filtered.slice(start, start + PAGE_SIZE);
-  }, [filtered, currentPage]);
+    const start = (currentPage - 1) * pageSize;
+    return filtered.slice(start, start + pageSize);
+  }, [filtered, currentPage, pageSize]);
 
   const canGoPrevious = currentPage > 1;
   const canGoNext = currentPage < totalPages;
@@ -278,11 +280,12 @@ export default function HistoryPage() {
       setReportPreview({
         title: report.name || `${reviewName} report`,
         html: buildReportHtmlDocument(report.name || reviewName || "UX Report", report.contentMd),
+        report,
       });
       setReportSheetOpen(true);
     } catch (err) {
       console.error(err);
-      toast.error((err as any)?.message ?? "Triage or review the findings for report export");
+      toast.error((err as any)?.message ?? "Failed to load report");
     } finally {
       setLoadingReportReviewId(null);
     }
@@ -291,7 +294,7 @@ export default function HistoryPage() {
   return (
     <>
       <AppHeader title="Review History" subtitle="Search, filter, and compare reviews across products and domains" />
-      <div className="flex-1 space-y-0 p-4 md:p-6">
+      <div className="flex-1 min-h-0 space-y-0 p-4 md:p-6">
 
         {/* Filters */}
         <div className="sticky top-16 z-20 -mx-4 border-b border-border bg-background px-4 py-3 md:-mx-6 md:px-6">
@@ -332,7 +335,7 @@ export default function HistoryPage() {
 
         {/* Table */}
         <div className="rounded-xl border border-border bg-card shadow-card overflow-hidden">
-          <div className="overflow-x-auto">
+          <div className="max-h-[calc(97vh-170px)] overflow-auto">
             <table className="w-full border-collapse text-sm">
               <thead className="sticky top-0 z-10 bg-foreground">
                 <tr className="border-0">
@@ -350,7 +353,7 @@ export default function HistoryPage() {
               </thead>
               <tbody className="[&_tr:nth-child(even)]:bg-muted/40 [&_tr:last-child]:border-0">
               {isLoading ? (
-                Array.from({ length: PAGE_SIZE }).map((_, i) => (
+                Array.from({ length: pageSize }).map((_, i) => (
                   <tr key={i} className="border-b border-border/60">
                     {Array.from({ length: 10 }).map((_, j) => (
                       <td key={j} className="px-4 py-3 align-middle"><Skeleton className="h-4 w-full" /></td>
@@ -411,25 +414,53 @@ export default function HistoryPage() {
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end" className="min-w-52 p-1">
+                          {(() => {
+                            const isCompleted = r.status === "completed";
+                            const canOpenReport = isCompleted && Boolean(r.canExportReport);
+                            const reportDisabledReason = !isCompleted
+                              ? "Report is available only after review completion."
+                              : "Triage and review basis completion is required before report export.";
+
+                            return (
+                              <>
                           <DropdownMenuItem asChild className="h-10 w-full justify-start gap-2 px-3">
                             <Link href={r.status === "draft" ? { pathname: "/new-review", query: { reviewId: r.id } } : r.status === "in_progress" ? { pathname: "/new-review", query: { reviewId: r.id } } : { pathname: "/workspace", query: { reviewId: r.id } }} aria-label={r.status === "draft" ? "Resume draft" : getReviewActionLabel(r.status)}>
                               <ExternalLink className="h-4 w-4" />
                               <span>{r.status === "draft" ? "Resume draft" : getReviewActionLabel(r.status)}</span>
                             </Link>
                           </DropdownMenuItem>
-                          <DropdownMenuItem
-                            className="h-10 w-full justify-start gap-2 px-3"
-                            disabled={loadingReportReviewId === r.id || r.status === "draft"}
-                            onSelect={(event) => {
-                              event.preventDefault();
-                              if (loadingReportReviewId === r.id || r.status === "draft") return;
-                              void handleOpenReport(r.id, r.name || "Untitled review");
-                            }}
-                            aria-label="Open report"
-                          >
-                            <FileBarChart className="h-4 w-4" />
-                            <span>Open report</span>
-                          </DropdownMenuItem>
+
+                          {canOpenReport ? (
+                            <DropdownMenuItem
+                              className="h-10 w-full justify-start gap-2 px-3"
+                              disabled={loadingReportReviewId === r.id}
+                              onSelect={(event) => {
+                                event.preventDefault();
+                                if (loadingReportReviewId === r.id) return;
+                                void handleOpenReport(r.id, r.name || "Untitled review");
+                              }}
+                              aria-label="Open report"
+                            >
+                              <FileBarChart className="h-4 w-4" />
+                              <span>Open report</span>
+                            </DropdownMenuItem>
+                          ) : (
+                            <TooltipProvider>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <div
+                                    className="flex h-10 w-full cursor-not-allowed items-center gap-2 rounded-sm px-3 text-sm opacity-60"
+                                    aria-label="Open report unavailable"
+                                  >
+                                      <FileBarChart className="h-4 w-4" />
+                                      <span>Open report</span>
+                                  </div>
+                                </TooltipTrigger>
+                                <TooltipContent side="left">{reportDisabledReason}</TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
+                          )}
+
                           <DropdownMenuItem
                             className="h-10 w-full justify-start gap-2 px-3 text-destructive"
                             disabled={deletingReviewId === r.id}
@@ -443,6 +474,9 @@ export default function HistoryPage() {
                             <Trash2 className="h-4 w-4" />
                             <span>Delete review</span>
                           </DropdownMenuItem>
+                              </>
+                            );
+                          })()}
                         </DropdownMenuContent>
                       </DropdownMenu>
                     </div>
@@ -457,39 +491,61 @@ export default function HistoryPage() {
         {!isLoading && filtered.length > 0 && (
           <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <p className="text-xs text-muted-foreground">
-              Showing {(currentPage - 1) * PAGE_SIZE + 1} to {Math.min(currentPage * PAGE_SIZE, filtered.length)} of {filtered.length} filtered review{filtered.length !== 1 ? "s" : ""}
+              Showing {(currentPage - 1) * pageSize + 1} to {Math.min(currentPage * pageSize, filtered.length)} of {filtered.length} filtered review{filtered.length !== 1 ? "s" : ""}
             </p>
-            <Pagination className="mx-0 w-auto justify-start sm:justify-end">
-              <PaginationContent>
-                <PaginationItem>
-                  <PaginationPrevious
-                    href="#"
-                    onClick={(event) => {
-                      event.preventDefault();
-                      if (canGoPrevious) setCurrentPage((page) => page - 1);
-                    }}
-                    aria-disabled={!canGoPrevious}
-                    className={!canGoPrevious ? "pointer-events-none opacity-50" : undefined}
-                  />
-                </PaginationItem>
-                <PaginationItem>
-                  <span className="px-2 text-sm text-muted-foreground" aria-live="polite">
-                    Page {currentPage} of {totalPages}
-                  </span>
-                </PaginationItem>
-                <PaginationItem>
-                  <PaginationNext
-                    href="#"
-                    onClick={(event) => {
-                      event.preventDefault();
-                      if (canGoNext) setCurrentPage((page) => page + 1);
-                    }}
-                    aria-disabled={!canGoNext}
-                    className={!canGoNext ? "pointer-events-none opacity-50" : undefined}
-                  />
-                </PaginationItem>
-              </PaginationContent>
-            </Pagination>
+            <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-muted-foreground">Rows</span>
+                <Select
+                  value={String(pageSize)}
+                  onValueChange={(value) => {
+                    setPageSize(Number(value));
+                    setCurrentPage(1);
+                  }}
+                >
+                  <SelectTrigger className="h-8 w-20" aria-label="Rows per page">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="10">10</SelectItem>
+                    <SelectItem value="20">20</SelectItem>
+                    <SelectItem value="50">50</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <Pagination className="mx-0 w-auto justify-start sm:justify-end">
+                <PaginationContent>
+                  <PaginationItem>
+                    <PaginationPrevious
+                      href="#"
+                      onClick={(event) => {
+                        event.preventDefault();
+                        if (canGoPrevious) setCurrentPage((page) => page - 1);
+                      }}
+                      aria-disabled={!canGoPrevious}
+                      className={!canGoPrevious ? "pointer-events-none opacity-50" : undefined}
+                    />
+                  </PaginationItem>
+                  <PaginationItem>
+                    <span className="px-2 text-sm text-muted-foreground" aria-live="polite">
+                      Page {currentPage} of {totalPages}
+                    </span>
+                  </PaginationItem>
+                  <PaginationItem>
+                    <PaginationNext
+                      href="#"
+                      onClick={(event) => {
+                        event.preventDefault();
+                        if (canGoNext) setCurrentPage((page) => page + 1);
+                      }}
+                      aria-disabled={!canGoNext}
+                      className={!canGoNext ? "pointer-events-none opacity-50" : undefined}
+                    />
+                  </PaginationItem>
+                </PaginationContent>
+              </Pagination>
+            </div>
           </div>
         )}
       </div>
@@ -542,6 +598,24 @@ export default function HistoryPage() {
               </div>
             )}
           </div>
+          {reportPreview?.report && (
+            <div className="border-t border-border px-6 py-4">
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline">
+                    <Download className="mr-2 h-4 w-4" />
+                    Download
+                    <ChevronDown className="ml-2 h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start">
+                  <DropdownMenuItem onSelect={() => downloadReport(reportPreview.report, "pdf")}>Download as PDF</DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => downloadReport(reportPreview.report, "word")}>Download as Word</DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => downloadReport(reportPreview.report, "html")}>Download as HTML</DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          )}
         </SheetContent>
       </Sheet>
     </>
