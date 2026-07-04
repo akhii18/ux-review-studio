@@ -2,7 +2,7 @@ import { AlertOctagon, AlertTriangle, Info } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const styles = {
-  P0: "bg-destructive/10 text-destructive ring-destructive/30",
+  P0: "bg-red-50 text-red-700 ring-red-300 dark:bg-red-950/30 dark:text-red-300 dark:ring-red-900",
   P1: "bg-warning/15 text-warning ring-warning/30",
   P2: "bg-info/10 text-info ring-info/30",
 };
@@ -17,6 +17,12 @@ const icons = {
   P0: AlertOctagon,
   P1: AlertTriangle,
   P2: Info,
+};
+
+const iconStyles = {
+  P0: "text-red-700 dark:text-red-300",
+  P1: "text-warning",
+  P2: "text-info",
 };
 
 export function PriorityBadge({
@@ -40,7 +46,7 @@ export function PriorityBadge({
       )}
       aria-label={labels[p]}
     >
-      <Icon className="h-3 w-3" aria-hidden="true" />
+      <Icon className={cn("h-3 w-3", iconStyles[p])} aria-hidden="true" />
       {compact ? p : labels[p]}
     </span>
   );
