@@ -34,7 +34,7 @@ export function PriorityBadge({
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-semibold ring-1 ring-inset tabular-nums",
+        "inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-bold ring-1 ring-inset tabular-nums",
         styles[p],
         className
       )}

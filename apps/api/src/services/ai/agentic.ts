@@ -516,7 +516,13 @@ export async function runReviewPipeline(reviewId: string): Promise<void> {
     await prisma.review.update({ where: { id: reviewId }, data: { stage: "reading_inputs" } });
 
     // Collect image assets in order — the index maps to "screen{N}" in elementRefs
-    const imageAssets = review.assets.filter(
+    const sortedAssets = [...review.assets].sort((a, b) => {
+      const createdDiff = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+      if (createdDiff !== 0) return createdDiff;
+      return a.id.localeCompare(b.id);
+    });
+
+    const imageAssets = sortedAssets.filter(
       (asset: ReviewAssetRecord) => asset.mimeType.startsWith("image/")
     );
     const imageAssetNames = imageAssets.map((asset: ReviewAssetRecord) => asset.name);

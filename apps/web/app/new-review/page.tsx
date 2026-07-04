@@ -1095,7 +1095,9 @@ export default function NewReviewPage() {
                     </Select>
                   </Field>
                   <Field label="Reviewer / owner" className="md:col-span-2">
-                    <Input value={owner} readOnly aria-readonly />
+                    <div className="min-h-10 rounded-md border border-border bg-muted/30 px-3 py-2 text-sm font-medium text-foreground">
+                      {owner || "User"}
+                    </div>
                   </Field>
                 </div>
               )}
@@ -1633,18 +1635,18 @@ export default function NewReviewPage() {
           </DialogHeader>
 
           {documentFiles.length > 0 && (
-            <div className="space-y-3 p-4">
-              <div className="flex items-center justify-end gap-2">
+            <div className="grid h-[78vh] min-h-0 grid-rows-[auto_1fr_auto] overflow-hidden p-4">
+              <div className="shrink-0 flex items-center justify-end gap-2 pb-3">
                 <p className="text-xs text-muted-foreground">
                   {activeDocumentIndex + 1} / {documentFiles.length}
                 </p>
               </div>
 
-              <div className="relative rounded-lg border border-border bg-secondary/20">
+              <div className="relative min-h-0 overflow-y-auto overscroll-contain rounded-lg border border-border bg-secondary/20">
                 <iframe
                   title={documentFiles[activeDocumentIndex]?.name}
                   src={documentFiles[activeDocumentIndex]?.previewUrl}
-                  className="h-[65vh] w-full rounded"
+                  className="h-full min-h-[58vh] w-full rounded"
                 />
 
                 {documentFiles.length > 1 && (
@@ -1674,7 +1676,7 @@ export default function NewReviewPage() {
               </div>
 
               {documentFiles.length > 1 && (
-                <div className="flex gap-2 overflow-x-auto pb-1">
+                <div className="shrink-0 flex gap-2 overflow-x-auto pt-3 pb-1">
                   {documentFiles.map((file, idx) => (
                     <button
                       key={file.id}

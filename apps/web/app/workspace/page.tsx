@@ -529,11 +529,11 @@ function WorkspaceContent() {
 
   const exportable = triage.proposed === 0 && allAcceptedHaveBasis && (triage.accepted + triage.edited > 0);
 
-  const handleDownload = useCallback((report: any, format: "pdf" | "word") => {
+  const handleDownload = useCallback((report: any, format: "pdf" | "word" | "html") => {
     downloadReport(report, format);
   }, []);
 
-  const handleExport = useCallback(async (format: "pdf" | "word") => {
+  const handleExport = useCallback(async (format: "pdf" | "word" | "html") => {
     if (!reviewId) return;
     try {
       const report = await exportReviewReport(reviewId);
@@ -548,7 +548,7 @@ function WorkspaceContent() {
       handleDownload(report, format);
       toast.success("Report exported");
     } catch (error: any) {
-      toast.error(error?.message ?? "Triage or review the findings for report export");
+      toast.error(error?.message ?? "Failed to export report");
     }
   }, [dispatch, handleDownload, reviewData?.name, reviewId]);
 
@@ -648,6 +648,9 @@ function WorkspaceContent() {
                       </DropdownMenuItem>
                       <DropdownMenuItem onSelect={() => { void handleExport("word"); }}>
                         Export as Word
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onSelect={() => { void handleExport("html"); }}>
+                        Export as HTML
                       </DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>

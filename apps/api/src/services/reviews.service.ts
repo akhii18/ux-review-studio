@@ -244,9 +244,12 @@ export const ReviewsService = {
         return acc;
       }, { P0: 0, P1: 0, P2: 0 });
 
+      const canExportReport = isExportableFindings(review.findings ?? []);
+
       return {
         ...review,
         priorityBreakdown,
+        canExportReport,
       };
     });
   },
@@ -255,10 +258,16 @@ export const ReviewsService = {
     const review = await ReviewsRepository.findById(id, userId);
     if (!review) throw new AppError(404, "Review not found");
 
+    const sortedAssets = [...review.assets].sort((a, b) => {
+      const createdDiff = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+      if (createdDiff !== 0) return createdDiff;
+      return a.id.localeCompare(b.id);
+    });
+
     return {
       ...review,
       assets: await Promise.all(
-        review.assets.map(async (asset: ReviewAssetRecord) => ({
+        sortedAssets.map(async (asset: ReviewAssetRecord) => ({
           ...asset,
           storageRef: asset.blobUrl,
           blobUrl: asset.blobUrl ? await getSignedStorageReadUrl(asset.blobUrl) : asset.blobUrl,
