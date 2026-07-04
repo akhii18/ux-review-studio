@@ -2,7 +2,7 @@
 
 import { FormEvent, Suspense, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Check, ChevronDown, Lock, Mail, X } from "lucide-react";
+import { Check, ChevronDown, Eye, EyeOff, Lock, Mail, X } from "lucide-react";
 import { toast } from "sonner";
 import {
   signin as apiSignin,
@@ -20,6 +20,9 @@ function AuthPageContent() {
   const [signupPassword, setSignupPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [showPasswordRules, setShowPasswordRules] = useState(false);
+  const [showSigninPassword, setShowSigninPassword] = useState(false);
+  const [showSignupPassword, setShowSignupPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [didTrySigninSubmit, setDidTrySigninSubmit] = useState(false);
@@ -106,10 +109,6 @@ function AuthPageContent() {
       const currentUser = { name: result.user.name || "User", email: result.user.email };
       localStorage.setItem("current_user", JSON.stringify(currentUser));
       document.cookie = `token=${result.token}; Path=/; Max-Age=${result.expiresInSeconds}; SameSite=Lax`;
-
-      toast.success("User authenticated", {
-        className: "!bg-green-600 !text-white !border-green-700",
-      });
       router.replace("/dashboard");
     } catch (err: any) {
       setError(err?.message ?? "Sign-in failed");
@@ -324,17 +323,27 @@ function AuthPageContent() {
 
               <div>
                 <label className="text-sm font-medium">Password</label>
-                <input
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className={`w-full mt-1 border rounded-lg px-3 py-2 shadow-sm focus:outline-none focus:ring-2 ${password.length === 0 && !didTrySigninSubmit
-                    ? "border-gray-300 focus:ring-gray-300"
-                    : isSigninPasswordValid
-                      ? "border-green-500 focus:ring-green-500"
-                      : "border-red-500 focus:ring-red-500"
-                    }`}
-                />
+                <div className="relative mt-1">
+                  <input
+                    type={showSigninPassword ? "text" : "password"}
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    className={`w-full border rounded-lg px-3 py-2 pr-10 shadow-sm focus:outline-none focus:ring-2 ${password.length === 0 && !didTrySigninSubmit
+                      ? "border-gray-300 focus:ring-gray-300"
+                      : isSigninPasswordValid
+                        ? "border-green-500 focus:ring-green-500"
+                        : "border-red-500 focus:ring-red-500"
+                      }`}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowSigninPassword((prev) => !prev)}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-gray-500 hover:text-gray-700"
+                    aria-label={showSigninPassword ? "Hide password" : "Show password"}
+                  >
+                    {showSigninPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
               </div>
 
               {error && <p className="text-sm text-red-600">{error}</p>}
@@ -429,7 +438,7 @@ function AuthPageContent() {
                 <div className="relative mt-1">
                   <Lock className="absolute left-3 top-2.5 w-4 h-4 text-gray-400" />
                   <input
-                    type="password"
+                    type={showSignupPassword ? "text" : "password"}
                     value={signupPassword}
                     onChange={(e) => {
                       setSignupPassword(e.target.value);
@@ -446,6 +455,14 @@ function AuthPageContent() {
                         : "border-red-500 focus:ring-red-500"
                       }`}
                   />
+                  <button
+                    type="button"
+                    onClick={() => setShowSignupPassword((prev) => !prev)}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-gray-500 hover:text-gray-700"
+                    aria-label={showSignupPassword ? "Hide password" : "Show password"}
+                  >
+                    {showSignupPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
                 </div>
                 <p className="text-xs text-gray-400 mt-1">
                   Minimum 10 chars, with uppercase, lowercase, number, and special character
@@ -484,7 +501,7 @@ function AuthPageContent() {
                   <Lock className="absolute left-3 top-2.5 w-4 h-4 text-gray-400" />
                   <input
                     ref={confirmPasswordRef}
-                    type="password"
+                    type={showConfirmPassword ? "text" : "password"}
                     value={confirmPassword}
                     onChange={(e) => {
                       setConfirmPassword(e.target.value);
@@ -496,6 +513,14 @@ function AuthPageContent() {
                         : "border-red-500 focus:ring-red-500"
                       }`}
                   />
+                  <button
+                    type="button"
+                    onClick={() => setShowConfirmPassword((prev) => !prev)}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-gray-500 hover:text-gray-700"
+                    aria-label={showConfirmPassword ? "Hide password" : "Show password"}
+                  >
+                    {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
                 </div>
                   <div className="mt-1 flex items-center gap-2 text-xs font-medium">
                     {confirmPassword.length === 0 ? (

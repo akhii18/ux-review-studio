@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Search, Loader2, X, ChevronDown, MoreVertical, ExternalLink, ChevronsUpDown, Trash2 } from "lucide-react";
+import { Search, Loader2, X, ChevronDown, MoreVertical, ExternalLink, Trash2 } from "lucide-react";
 import {
   Dialog,
   DialogClose,
@@ -290,30 +290,29 @@ export function ReviewHistoryModal({
                               <MoreVertical className="h-4 w-4" />
                             </Button>
                           </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end" className="min-w-0 w-auto flex items-center gap-1 p-1">
-                            <DropdownMenuItem asChild className="h-9 w-9 justify-center">
+                          <DropdownMenuContent align="end" className="min-w-52 p-1">
+                            <DropdownMenuItem asChild className="h-10 w-full justify-start gap-2 px-3">
                               <Link
                                   href={item.status === "in_progress" ? { pathname: "/new-review", query: { reviewId: item.id } } : { pathname: "/workspace", query: { reviewId: item.id } }}
                                 onClick={(event) => event.stopPropagation()}
                                 aria-label={getReviewActionLabel(item.status)}
                               >
                                 <ExternalLink className="h-4 w-4" />
-                                <span className="sr-only">{getReviewActionLabel(item.status)}</span>
+                                <span>{getReviewActionLabel(item.status)}</span>
+                              </Link>
+                            </DropdownMenuItem>
+                            <DropdownMenuItem asChild className="h-10 w-full justify-start gap-2 px-3">
+                              <Link
+                                href={{ pathname: "/workspace", query: { reviewId: item.id } }}
+                                onClick={(event) => event.stopPropagation()}
+                                aria-label="Open workspace"
+                              >
+                                <ExternalLink className="h-4 w-4" />
+                                <span>Open workspace</span>
                               </Link>
                             </DropdownMenuItem>
                             <DropdownMenuItem
-                              className="h-9 w-9 justify-center"
-                              onSelect={(event) => {
-                                event.preventDefault();
-                                toggleOpenItem(item.id);
-                              }}
-                              aria-label={openItems.includes(item.id) ? "Collapse details" : "Expand details"}
-                            >
-                              <ChevronsUpDown className="h-4 w-4" />
-                              <span className="sr-only">{openItems.includes(item.id) ? "Collapse details" : "Expand details"}</span>
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                              className="h-9 w-9 justify-center text-destructive"
+                              className="h-10 w-full justify-start gap-2 px-3 text-destructive"
                               disabled={deletingReviewId === item.id}
                               onSelect={(event) => {
                                 event.preventDefault();
@@ -322,7 +321,7 @@ export function ReviewHistoryModal({
                               aria-label="Delete review"
                             >
                               <Trash2 className="h-4 w-4" />
-                              <span className="sr-only">Delete review</span>
+                              <span>Delete review</span>
                             </DropdownMenuItem>
                           </DropdownMenuContent>
                         </DropdownMenu>

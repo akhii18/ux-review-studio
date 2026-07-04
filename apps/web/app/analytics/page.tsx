@@ -134,7 +134,6 @@ export default function AnalyticsPage() {
   const [productFilter, setProductFilter] = useState("all");
   const [domainFilter, setDomainFilter] = useState("all");
   const [reviewTypeFilter, setReviewTypeFilter] = useState("all");
-  const [ownerFilter, setOwnerFilter] = useState("all");
 
   useEffect(() => {
     const currentBounds = resolveCurrentRangeBounds(timeRange, customStartDate, customEndDate);
@@ -153,7 +152,6 @@ export default function AnalyticsPage() {
     if (productFilter !== "all") currentParams.product = productFilter;
     if (domainFilter !== "all") currentParams.domain = domainFilter;
     if (reviewTypeFilter !== "all") currentParams.reviewType = reviewTypeFilter;
-    if (ownerFilter !== "all") currentParams.owner = ownerFilter;
 
     const currentDurationMs = currentBounds.end.getTime() - currentBounds.start.getTime();
     const previousEnd = new Date(currentBounds.start.getTime() - 1);
@@ -168,7 +166,6 @@ export default function AnalyticsPage() {
     if (productFilter !== "all") previousParams.product = productFilter;
     if (domainFilter !== "all") previousParams.domain = domainFilter;
     if (reviewTypeFilter !== "all") previousParams.reviewType = reviewTypeFilter;
-    if (ownerFilter !== "all") previousParams.owner = ownerFilter;
 
     setIsLoading(true);
     Promise.all([getAnalytics(currentParams), getAnalytics(previousParams)])
@@ -181,9 +178,9 @@ export default function AnalyticsPage() {
         toast.error("Failed to load analytics data");
       })
       .finally(() => setIsLoading(false));
-  }, [timeRange, customStartDate, customEndDate, productFilter, domainFilter, reviewTypeFilter, ownerFilter]);
+  }, [timeRange, customStartDate, customEndDate, productFilter, domainFilter, reviewTypeFilter]);
 
-  const filterOptions = data?.filterOptions ?? { products: [], domains: [], reviewTypes: [], owners: [] };
+  const filterOptions = data?.filterOptions ?? { products: [], domains: [], reviewTypes: [] };
 
   const kpis = data ? [
     {
@@ -236,7 +233,21 @@ export default function AnalyticsPage() {
       <div className="flex-1 space-y-5 p-4 md:p-6">
 
         {/* Filters */}
-        <div className="flex flex-row flex-wrap gap-2">
+        <div className="space-y-2">
+          <div className="flex flex-row flex-wrap items-center gap-2">
+            <Select value={timeRange} onValueChange={(value: "1m" | "3m" | "6m" | "1y" | "custom") => setTimeRange(value)}>
+              <SelectTrigger className="h-10 w-40" aria-label="Time range">
+                <SelectValue placeholder="Time range" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="1m">1 month</SelectItem>
+                <SelectItem value="3m">3 months</SelectItem>
+                <SelectItem value="6m">6 months</SelectItem>
+                <SelectItem value="1y">1 year</SelectItem>
+                <SelectItem value="custom">Custom</SelectItem>
+              </SelectContent>
+            </Select>
+
           <Select value={productFilter} onValueChange={setProductFilter}>
             <SelectTrigger className="h-10 w-40" aria-label="Product">
               <SelectValue placeholder="Product" />
@@ -273,48 +284,31 @@ export default function AnalyticsPage() {
             </SelectContent>
           </Select>
 
-          <Select value={ownerFilter} onValueChange={setOwnerFilter}>
-            <SelectTrigger className="h-10 w-40" aria-label="Owner">
-              <SelectValue placeholder="Owner" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All owners</SelectItem>
-              {filterOptions.owners.map((owner: string) => (
-                <SelectItem key={owner} value={owner}>{owner}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-
-          <Select value={timeRange} onValueChange={(value: "1m" | "3m" | "6m" | "1y" | "custom") => setTimeRange(value)}>
-            <SelectTrigger className="h-10 w-40" aria-label="Time range">
-              <SelectValue placeholder="Time range" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="1m">1 month</SelectItem>
-              <SelectItem value="3m">3 months</SelectItem>
-              <SelectItem value="6m">6 months</SelectItem>
-              <SelectItem value="1y">1 year</SelectItem>
-              <SelectItem value="custom">Custom</SelectItem>
-            </SelectContent>
-          </Select>
+          </div>
 
           {timeRange === "custom" && (
-            <>
-              <Input
-                type="date"
-                className="h-10 w-40"
-                aria-label="Start date"
-                value={customStartDate}
-                onChange={(event) => setCustomStartDate(event.target.value)}
-              />
-              <Input
-                type="date"
-                className="h-10 w-40"
-                aria-label="End date"
-                value={customEndDate}
-                onChange={(event) => setCustomEndDate(event.target.value)}
-              />
-            </>
+            <div className="flex flex-wrap items-start gap-2">
+              <div className="space-y-1">
+                <p className="text-xs text-muted-foreground">From</p>
+                <Input
+                  type="date"
+                  className="h-10 w-40"
+                  aria-label="Start date"
+                  value={customStartDate}
+                  onChange={(event) => setCustomStartDate(event.target.value)}
+                />
+              </div>
+              <div className="space-y-1">
+                <p className="text-xs text-muted-foreground">To</p>
+                <Input
+                  type="date"
+                  className="h-10 w-40"
+                  aria-label="End date"
+                  value={customEndDate}
+                  onChange={(event) => setCustomEndDate(event.target.value)}
+                />
+              </div>
+            </div>
           )}
         </div>
 
