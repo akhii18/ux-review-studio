@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AppHeader } from "@/components/ui/AppHeader";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -9,7 +9,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, ResponsiveContainer, XAxis, YAxis, LineChart, Line } from "recharts";
 import { TrendingUp, TrendingDown, CheckCircle2, AlertOctagon, FileBarChart, BarChart2 } from "lucide-react";
-import { getAnalytics } from "@/lib/api";
+import { getAnalytics, listReviews } from "@/lib/api";
 import { toast } from "sonner";
 
 const chartConfig = {
@@ -124,9 +124,21 @@ function formatMonthLabel(value: string): string {
   return `${month}'${year}`;
 }
 
+function normalizeOptionList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => (typeof item === "string" ? item.trim() : ""))
+    .filter((item) => item.length > 0);
+}
+
 export default function AnalyticsPage() {
   const [data, setData] = useState<any>(null);
   const [previousData, setPreviousData] = useState<any>(null);
+  const [fallbackFilterOptions, setFallbackFilterOptions] = useState<{ products: string[]; domains: string[]; reviewTypes: string[] }>({
+    products: [],
+    domains: [],
+    reviewTypes: [],
+  });
   const [isLoading, setIsLoading] = useState(true);
   const [timeRange, setTimeRange] = useState<"1m" | "3m" | "6m" | "1y" | "custom">("1y");
   const [customStartDate, setCustomStartDate] = useState("");
@@ -134,6 +146,35 @@ export default function AnalyticsPage() {
   const [productFilter, setProductFilter] = useState("all");
   const [domainFilter, setDomainFilter] = useState("all");
   const [reviewTypeFilter, setReviewTypeFilter] = useState("all");
+  const optionsDiagToastShownRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    listReviews()
+      .then((reviews) => {
+        const products = Array.from(new Set(
+          (reviews ?? [])
+            .map((review: any) => (review?.product ?? "").trim())
+            .filter((value: string) => value.length > 0)
+        )).sort((a, b) => a.localeCompare(b));
+
+        const domains = Array.from(new Set(
+          (reviews ?? [])
+            .map((review: any) => (review?.domain ?? "").trim())
+            .filter((value: string) => value.length > 0)
+        )).sort((a, b) => a.localeCompare(b));
+
+        const reviewTypes = Array.from(new Set(
+          (reviews ?? [])
+            .map((review: any) => (review?.reviewType ?? "").trim())
+            .filter((value: string) => value.length > 0)
+        )).sort((a, b) => a.localeCompare(b));
+
+        setFallbackFilterOptions({ products, domains, reviewTypes });
+      })
+      .catch((err) => {
+        console.error("Failed to build fallback analytics options", err);
+      });
+  }, []);
 
   useEffect(() => {
     const currentBounds = resolveCurrentRangeBounds(timeRange, customStartDate, customEndDate);
@@ -175,12 +216,62 @@ export default function AnalyticsPage() {
       })
       .catch((err) => {
         console.error(err);
-        toast.error("Failed to load analytics data");
+        toast.error(`Failed to load analytics data: ${err?.message ?? "Unknown error"}`);
       })
       .finally(() => setIsLoading(false));
   }, [timeRange, customStartDate, customEndDate, productFilter, domainFilter, reviewTypeFilter]);
 
-  const filterOptions = data?.filterOptions ?? { products: [], domains: [], reviewTypes: [] };
+  const filterOptions = useMemo(() => {
+    const fromAnalytics = data?.filterOptions ?? { products: [], domains: [], reviewTypes: [] };
+    const analyticsProducts = normalizeOptionList(fromAnalytics.products);
+    const analyticsDomains = normalizeOptionList(fromAnalytics.domains);
+    const analyticsReviewTypes = normalizeOptionList(fromAnalytics.reviewTypes);
+
+    const products = analyticsProducts.length > 0
+      ? analyticsProducts
+      : fallbackFilterOptions.products;
+    const domains = analyticsDomains.length > 0
+      ? analyticsDomains
+      : fallbackFilterOptions.domains;
+    const reviewTypes = analyticsReviewTypes.length > 0
+      ? analyticsReviewTypes
+      : fallbackFilterOptions.reviewTypes;
+
+    return {
+      products: Array.from(new Set(products)).sort((a, b) => a.localeCompare(b)),
+      domains: Array.from(new Set(domains)).sort((a, b) => a.localeCompare(b)),
+      reviewTypes: Array.from(new Set(reviewTypes)).sort((a, b) => a.localeCompare(b)),
+      diagnostics: {
+        fromAnalyticsProducts: analyticsProducts.length,
+        fromAnalyticsDomains: analyticsDomains.length,
+        fromAnalyticsReviewTypes: analyticsReviewTypes.length,
+        fromFallbackProducts: fallbackFilterOptions.products.length,
+        fromFallbackDomains: fallbackFilterOptions.domains.length,
+        fromFallbackReviewTypes: fallbackFilterOptions.reviewTypes.length,
+      },
+    };
+  }, [data?.filterOptions, fallbackFilterOptions]);
+
+  useEffect(() => {
+    const products = filterOptions.products ?? [];
+    const domains = filterOptions.domains ?? [];
+    const reviewTypes = filterOptions.reviewTypes ?? [];
+
+    if (productFilter !== "all" && !products.includes(productFilter)) setProductFilter("all");
+    if (domainFilter !== "all" && !domains.includes(domainFilter)) setDomainFilter("all");
+    if (reviewTypeFilter !== "all" && !reviewTypes.includes(reviewTypeFilter)) setReviewTypeFilter("all");
+
+    if (!isLoading && products.length === 0 && domains.length === 0 && reviewTypes.length === 0) {
+      const diagKey = `${products.length}-${domains.length}-${reviewTypes.length}-${JSON.stringify(filterOptions.diagnostics)}`;
+      if (optionsDiagToastShownRef.current !== diagKey) {
+        optionsDiagToastShownRef.current = diagKey;
+        toast.warning(`Analytics filters have no options. Diagnostics: ${JSON.stringify(filterOptions.diagnostics)}`, {
+          duration: 10000,
+        });
+      }
+    }
+  }, [filterOptions, productFilter, domainFilter, reviewTypeFilter, isLoading]);
+
   const reviewTypeOptions = [...filterOptions.reviewTypes].sort((a: string, b: string) => {
     const aValue = a.toLowerCase();
     const bValue = b.toLowerCase();
