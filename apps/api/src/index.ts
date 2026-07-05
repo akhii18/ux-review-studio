@@ -91,7 +91,12 @@ app.use(morgan(config.nodeEnv === "production" ? "combined" : "dev", {
 
 // ── Health check ───────────────────────────────────────────────────────────────
 app.get("/health", (_req, res) => {
-  res.json({ status: "ok", env: config.nodeEnv });
+  res.json({
+    status: "ok",
+    env: config.nodeEnv,
+    apiRelease: process.env.API_RELEASE ?? "unknown",
+    bboxFallbackVersion: "2026-07-05-v2",
+  });
 });
 
 // ── API Routes ─────────────────────────────────────────────────────────────────

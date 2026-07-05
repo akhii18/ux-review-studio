@@ -321,6 +321,11 @@ function normalizePersistableBBoxRefs(finding: SynthesizedFinding, groundingElem
   return refs.length > 0 ? refs : undefined;
 }
 
+function hasNonEmptyBBoxRefs(value: unknown): boolean {
+  if (!Array.isArray(value)) return false;
+  return value.length > 0;
+}
+
 function normalizeScreenLabel(value: string): string {
   return value.replace(/\.[^.]+$/, "").toLowerCase().replace(/\s+/g, " ").trim();
 }
@@ -621,6 +626,37 @@ async function persistFindings(params: {
         bboxRefs,
       },
     });
+
+    if (!hasNonEmptyBBoxRefs(createdFinding.bboxRefs)) {
+      try {
+        const updatedRows = await prisma.$executeRaw`
+          UPDATE "findings"
+          SET "bboxRefs" = ${JSON.stringify(bboxRefs)}::jsonb
+          WHERE "id" = ${createdFinding.id}
+            AND (
+              CASE
+                WHEN "bboxRefs" IS NULL THEN true
+                WHEN jsonb_typeof("bboxRefs") <> 'array' THEN true
+                ELSE jsonb_array_length("bboxRefs") = 0
+              END
+            )
+        `;
+
+        logPipeline("warn", reviewId, "bbox_refs_force_written", {
+          findingId: createdFinding.id,
+          fallbackRefCount: bboxRefs.length,
+          updatedRows,
+        });
+      } catch (error) {
+        const summary = summarizeError(error);
+        logPipeline("error", reviewId, "bbox_refs_force_write_failed", {
+          findingId: createdFinding.id,
+          fallbackRefCount: bboxRefs.length,
+          errorName: summary.name,
+          errorMessage: summary.message,
+        });
+      }
+    }
 
     const basisExplanation = finding.mergedFrom.length > 0
       ? `Synthesized from ${finding.sources.join(", ")} and merged from ${finding.mergedFrom.join(", ")}.`
