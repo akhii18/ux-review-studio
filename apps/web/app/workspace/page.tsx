@@ -145,13 +145,46 @@ function clamp01(value: number): number {
 }
 
 function normalizeBBoxRef(ref: unknown): BoundingBoxRef | null {
-  if (!isRecord(ref) || !isRecord(ref.bbox)) return null;
+  if (!isRecord(ref)) return null;
 
-  const screenIndex = Number(ref.screenIndex);
-  const x = Number(ref.bbox.x);
-  const y = Number(ref.bbox.y);
-  const width = Number(ref.bbox.width);
-  const height = Number(ref.bbox.height);
+  const bboxValue = isRecord(ref.bbox)
+    ? ref.bbox
+    : isRecord(ref.box)
+    ? ref.box
+    : isRecord(ref.rect)
+    ? ref.rect
+    : null;
+
+  if (!bboxValue) return null;
+
+  const rawScreenIndex =
+    ref.screenIndex ??
+    ref.screen ??
+    ref.imageIndex ??
+    ref.pageIndex;
+
+  const screenIndex = typeof rawScreenIndex === "string"
+    ? Number(rawScreenIndex.replace(/[^0-9.-]/g, ""))
+    : Number(rawScreenIndex);
+
+  let x = Number(bboxValue.x);
+  let y = Number(bboxValue.y);
+  let width = Number(bboxValue.width);
+  let height = Number(bboxValue.height);
+
+  if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(width) || !Number.isFinite(height)) {
+    const x0 = Number(bboxValue.x0);
+    const y0 = Number(bboxValue.y0);
+    const x1 = Number(bboxValue.x1);
+    const y1 = Number(bboxValue.y1);
+
+    if (Number.isFinite(x0) && Number.isFinite(y0) && Number.isFinite(x1) && Number.isFinite(y1)) {
+      x = x0;
+      y = y0;
+      width = x1 - x0;
+      height = y1 - y0;
+    }
+  }
 
   if (
     !Number.isFinite(screenIndex) ||
@@ -181,16 +214,55 @@ function normalizeBBoxRef(ref: unknown): BoundingBoxRef | null {
   };
 }
 
+function normalizeBBoxRefsInput(value: unknown): unknown[] {
+  if (Array.isArray(value)) return value;
+
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      return normalizeBBoxRefsInput(parsed);
+    } catch {
+      return [];
+    }
+  }
+
+  if (isRecord(value)) {
+    if (Array.isArray(value.bboxRefs)) return value.bboxRefs;
+    if (Array.isArray(value.refs)) return value.refs;
+    if (Array.isArray(value.items)) return value.items;
+  }
+
+  return [];
+}
+
 function getValidBBoxRefs(finding: Finding): BoundingBoxRef[] {
-  if (!Array.isArray(finding.bboxRefs)) return [];
-  return finding.bboxRefs
+  return normalizeBBoxRefsInput(finding.bboxRefs)
     .map(normalizeBBoxRef)
     .filter((ref): ref is BoundingBoxRef => Boolean(ref));
 }
 
 function getBboxRefForScreen(finding: Finding, screenIndex?: number): BoundingBoxRef | null {
   if (typeof screenIndex !== "number") return null;
-  return getValidBBoxRefs(finding).find((ref) => ref.screenIndex === screenIndex) ?? null;
+
+  const refs = getValidBBoxRefs(finding);
+  const exact = refs.find((ref) => ref.screenIndex === screenIndex);
+  if (exact) return exact;
+
+  if (refs.length === 0) return null;
+
+  const minIndex = Math.min(...refs.map((ref) => ref.screenIndex));
+  const maxIndex = Math.max(...refs.map((ref) => ref.screenIndex));
+
+  if (minIndex === 1) {
+    const oneBased = refs.find((ref) => ref.screenIndex === screenIndex + 1);
+    if (oneBased) return oneBased;
+  }
+
+  if (screenIndex === 0 && minIndex > 0 && maxIndex > 0) {
+    return refs.find((ref) => ref.screenIndex === minIndex) ?? null;
+  }
+
+  return null;
 }
 
 function getBboxCenter(ref: BoundingBoxRef): { x: number; y: number } {
@@ -328,6 +400,7 @@ function WorkspaceContent() {
   const [open, setOpen] = useState<Finding | null>(null);
   const [openCluster, setOpenCluster] = useState<PinCluster | null>(null);
   const [imageLoadFailed, setImageLoadFailed] = useState(false);
+  const unplacedDiagToastShownRef = useRef<string | null>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
   const imageRef = useRef<HTMLImageElement>(null);
   const [imageLayout, setImageLayout] = useState<ImageLayout | null>(null);
@@ -475,6 +548,53 @@ function WorkspaceContent() {
   );
 
   const unplacedPinCount = unplacedFindings.length;
+
+  useEffect(() => {
+    if (!screen || typeof screen.screenIndex !== "number") return;
+    if (imageLoadFailed) return;
+    if (visibleScreenFindingCount === 0) return;
+    if (unplacedPinCount !== visibleScreenFindingCount) return;
+
+    const diagKey = `${screen.id}:${visibleScreenFindingCount}:${unplacedPinCount}`;
+    if (unplacedDiagToastShownRef.current === diagKey) return;
+    unplacedDiagToastShownRef.current = diagKey;
+
+    const refsSummary = screenFindings.map((finding) => {
+      const normalizedRefs = getValidBBoxRefs(finding);
+      const rawRefs = normalizeBBoxRefsInput(finding.bboxRefs);
+      return {
+        id: finding.id,
+        title: finding.title,
+        screen: finding.screen,
+        rawRefCount: rawRefs.length,
+        normalizedRefCount: normalizedRefs.length,
+        normalizedIndexes: normalizedRefs.map((ref) => ref.screenIndex),
+      };
+    });
+
+    toast.warning(
+      `All findings are unplaced on \"${screen.name}\". Diagnostics: ${JSON.stringify(refsSummary.slice(0, 5))}`,
+      { duration: 12000 }
+    );
+  }, [screen, imageLoadFailed, visibleScreenFindingCount, unplacedPinCount, screenFindings]);
+
+  useEffect(() => {
+    if (!screen || typeof screen.screenIndex !== "number") return;
+    if (imageLoadFailed) return;
+    if (unplacedPinCount === 0) return;
+
+    const hasAnyPlaced = pinPlacements.length > 0;
+    if (!hasAnyPlaced) return;
+
+    const diagKey = `partial:${screen.id}:${pinPlacements.length}:${unplacedPinCount}`;
+    if (unplacedDiagToastShownRef.current === diagKey) return;
+    unplacedDiagToastShownRef.current = diagKey;
+
+    toast.info(
+      `Partial pin placement on \"${screen.name}\": placed=${pinPlacements.length}, unplaced=${unplacedPinCount}. This is temporary debug info for prod diagnostics.`,
+      { duration: 9000 }
+    );
+  }, [screen, imageLoadFailed, pinPlacements.length, unplacedPinCount]);
 
   const updateImageLayout = useCallback(() => {
     const canvas = canvasRef.current;
