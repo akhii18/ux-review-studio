@@ -164,7 +164,12 @@ export const ReviewsRepository = {
     if (!review) return null;
 
     const findingCount = await prisma.finding.count({ where: { reviewId } });
-    return { ...review, findingCount };
+    return {
+      ...review,
+      findingCount,
+      apiRelease: process.env.API_RELEASE ?? "unknown",
+      bboxFallbackVersion: "2026-07-05-v2",
+    };
   },
 
   async delete(id: string, userId: string) {
