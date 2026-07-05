@@ -321,6 +321,43 @@ function normalizePersistableBBoxRefs(finding: SynthesizedFinding, groundingElem
   return refs.length > 0 ? refs : undefined;
 }
 
+function normalizeScreenLabel(value: string): string {
+  return value.replace(/\.[^.]+$/, "").toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+function getScreenIndexForFinding(screenName: string, imageAssetNames: string[]): number {
+  const target = normalizeScreenLabel(screenName);
+  const exactIndex = imageAssetNames.findIndex((name) => normalizeScreenLabel(name) === target);
+  if (exactIndex >= 0) return exactIndex;
+
+  const looseIndex = imageAssetNames.findIndex((name) => {
+    const normalized = normalizeScreenLabel(name);
+    return normalized.includes(target) || target.includes(normalized);
+  });
+
+  if (looseIndex >= 0) return looseIndex;
+  return 0;
+}
+
+function buildFallbackBBoxRef(screenIndex: number, findingOrdinal: number) {
+  const cols = 4;
+  const rows = 6;
+  const col = findingOrdinal % cols;
+  const row = Math.floor(findingOrdinal / cols) % rows;
+
+  const cellWidth = 1 / cols;
+  const cellHeight = 1 / rows;
+  const width = 0.08;
+  const height = 0.06;
+  const x = Math.min(0.98 - width, Math.max(0.02, col * cellWidth + (cellWidth - width) / 2));
+  const y = Math.min(0.98 - height, Math.max(0.02, row * cellHeight + (cellHeight - height) / 2));
+
+  return {
+    screenIndex: Math.max(0, screenIndex),
+    bbox: { x, y, width, height },
+  };
+}
+
 function normalizeStringArray(value: unknown): string[] | null {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : null;
 }
@@ -543,8 +580,25 @@ async function persistFindings(params: {
 }) {
   const { reviewId, findings, imageAssetNames, groundingElements } = params;
 
-  for (const finding of findings) {
+  for (let findingIndex = 0; findingIndex < findings.length; findingIndex += 1) {
+    const finding = findings[findingIndex];
     const screenName = extractScreenName(finding, imageAssetNames);
+    const normalizedRefs = normalizePersistableBBoxRefs(finding, groundingElements);
+    const bboxRefs = normalizedRefs ?? [
+      buildFallbackBBoxRef(
+        getScreenIndexForFinding(screenName, imageAssetNames),
+        findingIndex,
+      ),
+    ];
+
+    if (!normalizedRefs) {
+      logPipeline("warn", reviewId, "using_fallback_bbox_ref", {
+        findingId: finding.id,
+        findingTitle: finding.issue.slice(0, 120),
+        screenName,
+        fallbackScreenIndex: bboxRefs[0]?.screenIndex,
+      });
+    }
 
     const createdFinding = await prisma.finding.create({
       data: {
@@ -564,7 +618,7 @@ async function persistFindings(params: {
         confidence: clampConfidence(finding.confidence),
         status: "PROPOSED",
         isAiGenerated: true,
-        bboxRefs: normalizePersistableBBoxRefs(finding, groundingElements),
+        bboxRefs,
       },
     });
 
