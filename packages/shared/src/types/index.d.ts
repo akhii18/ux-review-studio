@@ -4,11 +4,15 @@ export type FindingStatus = "PROPOSED" | "ACCEPTED" | "EDITED" | "DISMISSED" | "
 export type ChecklistStatus = "DRAFT" | "APPROVED" | "DEPRECATED";
 export type PrincipleCategory = "NIELSEN_HEURISTICS" | "COGNITIVE_LAWS" | "GESTALT" | "VISUAL_DESIGN" | "ACCESSIBILITY_WCAG" | "CONTENT_MICROCOPY" | "CUSTOM";
 export type ReviewStatus = "draft" | "in_progress" | "completed" | "failed" | "archived";
+export type AnalysisScope = "all" | "key";
 export type FindingOutputOptionKey = "recommendationsWithAcceptanceCriteria" | "linkedPrinciple" | "requirementTraceability" | "accessibilityImpactWcag" | "businessImpactEstimate";
 export interface FindingAiMetadata {
     acceptanceCriteria?: string[];
     requirementTraceability?: string;
     wcagCriteria?: string;
+    flowName?: string;
+    flowDescription?: string;
+    flowPageNumbers?: number[];
 }
 export interface Finding {
     id: string;
@@ -30,6 +34,7 @@ export interface Finding {
     notes?: string;
     escalationReason?: string;
     isAiGenerated: boolean;
+    bboxRefs?: Array<{ screenIndex: number; bbox: { x: number; y: number; width: number; height: number } }>;
     createdAt: string;
     updatedAt: string;
 }
@@ -42,6 +47,21 @@ export interface ReviewBasisItem {
 }
 export interface FindingWithBasis extends Finding {
     reviewBasis: ReviewBasisItem[];
+}
+export interface DiscoveredFlow {
+    flowName: string;
+    description: string;
+    pageNumbers: number[];
+}
+export interface FlowDiscoveryPayload {
+    flows: DiscoveredFlow[];
+    routingRationale?: string;
+}
+export interface FindingFlowGroup<TFinding = FindingWithBasis> {
+    flowName: string;
+    description?: string;
+    pageNumbers: number[];
+    findings: TFinding[];
 }
 export interface Checklist {
     id: string;
@@ -94,6 +114,9 @@ export interface Review {
     uxScore?: number;
     criteria: string[];
     findingMetadataOptions?: FindingOutputOptionKey[];
+    analysisScope: AnalysisScope;
+    flowDiscovery?: FlowDiscoveryPayload | null;
+    findingGroups?: FindingFlowGroup[];
     depth: string;
     confidenceThreshold: number;
     createdAt: string;

@@ -84,6 +84,8 @@ model Review {
   uxScore             Int?
   criteria            String[]      @default([])
   findingMetadataOptions Json?
+  analysisScope       String        @default("all")
+  flowDiscovery       Json?
   depth               String        @default("standard")
   confidenceThreshold Int           @default(75)
   createdAt           DateTime      @default(now())

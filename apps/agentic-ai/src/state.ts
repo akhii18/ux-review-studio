@@ -35,6 +35,8 @@ import type {
   VisualDesignOutput,
   SynthesisOutput,
   ScreenMetadata,
+  DocumentPageMetadata,
+  FlowDiscoveryOutput,
   GeometryOutput,
 } from "./schemas.js";
 
@@ -77,6 +79,14 @@ export const GraphState = Annotation.Root({
     reducer: replace,
     default: () => null,
   }),
+  keyFlowsOnly: Annotation<boolean>({
+    reducer: replace,
+    default: () => false,
+  }),
+  documentPages: Annotation<DocumentPageMetadata[]>({
+    reducer: replace,
+    default: () => [],
+  }),
   imagePaths: Annotation<string[]>({
     reducer: replace,
     default: () => [],
@@ -92,6 +102,12 @@ export const GraphState = Annotation.Root({
 
   // ── Written by grounding agent, read by all review agents ──────────────────
   groundingOutput: Annotation<GroundingOutput | null>({
+    reducer: replace,
+    default: () => null,
+  }),
+
+  // ── Written by flow discovery preprocessing when Key Flows Only is enabled ─
+  flowDiscoveryOutput: Annotation<FlowDiscoveryOutput | null>({
     reducer: replace,
     default: () => null,
   }),

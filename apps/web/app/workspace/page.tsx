@@ -28,6 +28,7 @@ import { addNotification } from "@/store/slices/notificationsSlice";
 import {
   DEFAULT_FINDING_OUTPUT_OPTIONS,
   REVIEW_BASIS_LIBRARY,
+  type DiscoveredFlow,
   type FindingOutputOptionKey,
   type FindingAiMetadata,
 } from "@uxm/shared";
@@ -69,6 +70,9 @@ interface Finding {
   businessImpact?: string;
   a11yImpact?: string;
   aiMetadata?: FindingAiMetadata | null;
+  flowName?: string;
+  flowDescription?: string;
+  flowPageNumbers?: number[];
   status: TriageStatus;
   confidence: number;
   notes?: string;
@@ -81,6 +85,18 @@ interface WorkspaceScreen {
   name: string;
   screenIndex?: number;
   imageUrl?: string;
+  flowName?: string;
+  flowDescription?: string;
+  flowPageNumbers?: number[];
+  issues: number;
+  p0: number;
+}
+
+interface WorkspaceScreenGroup {
+  flowName: string;
+  description?: string;
+  pageNumbers: number[];
+  screens: WorkspaceScreen[];
   issues: number;
   p0: number;
 }
@@ -434,6 +450,9 @@ function WorkspaceContent() {
         status: f.status || "PROPOSED",
         reviewBasis: f.reviewBasis || [],
         aiMetadata: f.aiMetadata || null,
+        flowName: f.flowName || f.aiMetadata?.flowName,
+        flowDescription: f.flowDescription || f.aiMetadata?.flowDescription,
+        flowPageNumbers: f.flowPageNumbers || f.aiMetadata?.flowPageNumbers,
       }));
     }
     return [];
@@ -444,6 +463,31 @@ function WorkspaceContent() {
     return Array.isArray(options) ? options : [...DEFAULT_FINDING_OUTPUT_OPTIONS];
   }, [reviewData]);
 
+  const discoveredFlows = useMemo<DiscoveredFlow[]>(() => {
+    const flows = reviewData?.flowDiscovery?.flows;
+    if (!Array.isArray(flows)) return [];
+
+    return flows
+      .map((flow: any) => ({
+        flowName: typeof flow.flowName === "string" ? flow.flowName : "",
+        description: typeof flow.description === "string" ? flow.description : "",
+        pageNumbers: Array.isArray(flow.pageNumbers)
+          ? flow.pageNumbers.filter((pageNumber: unknown): pageNumber is number => typeof pageNumber === "number" && Number.isInteger(pageNumber) && pageNumber > 0)
+          : [],
+      }))
+      .filter((flow) => flow.flowName && flow.pageNumbers.length > 0);
+  }, [reviewData]);
+
+  const flowByPageNumber = useMemo(() => {
+    const map = new Map<number, DiscoveredFlow>();
+    for (const flow of discoveredFlows) {
+      for (const pageNumber of flow.pageNumbers) {
+        if (!map.has(pageNumber)) map.set(pageNumber, flow);
+      }
+    }
+    return map;
+  }, [discoveredFlows]);
+
   const screens: WorkspaceScreen[] = useMemo(() => {
     if (!reviewData) return [];
     const assetsList = reviewData.assets ?? [];
@@ -453,6 +497,7 @@ function WorkspaceContent() {
       return imageAssets.map((asset: any, assetIndex: number) => {
         const screenName = stripExtension(asset.name);
         const screenFindings = allFindings.filter((f) => findingMatchesScreenContext(f, screenName, assetIndex));
+        const flow = flowByPageNumber.get(assetIndex + 1);
         return {
           id: asset.id,
           name: screenName,
@@ -462,6 +507,9 @@ function WorkspaceContent() {
             : asset.base64Data
             ? `data:${asset.mimeType};base64,${asset.base64Data}`
             : undefined,
+          flowName: flow?.flowName,
+          flowDescription: flow?.description,
+          flowPageNumbers: flow?.pageNumbers,
           issues: screenFindings.length,
           p0: screenFindings.filter((f) => f.severity === "P0").length,
         };
@@ -480,6 +528,7 @@ function WorkspaceContent() {
       return [{
         id: "overview",
         name: "Review overview",
+        flowName: reviewData.analysisScope === "key" ? "Key flows" : undefined,
         issues: allFindings.length,
         p0: allFindings.filter((f) => f.severity === "P0").length,
       }];
@@ -490,11 +539,38 @@ function WorkspaceContent() {
       return {
         id: `screen-${i}`,
         name,
+        flowName: allFindings.find((f) => findingMatchesScreen(f.screen, name))?.flowName,
         issues: screenFindings.length,
         p0: screenFindings.filter((f) => f.severity === "P0").length,
       };
     });
-  }, [reviewData, allFindings]);
+  }, [reviewData, allFindings, flowByPageNumber]);
+
+  const screenGroups = useMemo<WorkspaceScreenGroup[]>(() => {
+    const groups = new Map<string, WorkspaceScreenGroup>();
+
+    for (const screen of screens) {
+      const flowName = screen.flowName || "Screens";
+      const existing = groups.get(flowName);
+
+      if (existing) {
+        existing.screens.push(screen);
+        existing.issues += screen.issues;
+        existing.p0 += screen.p0;
+      } else {
+        groups.set(flowName, {
+          flowName,
+          description: screen.flowDescription,
+          pageNumbers: screen.flowPageNumbers ?? [],
+          screens: [screen],
+          issues: screen.issues,
+          p0: screen.p0,
+        });
+      }
+    }
+
+    return Array.from(groups.values());
+  }, [screens]);
 
   useEffect(() => {
     if (screens.length === 0) {
@@ -541,6 +617,19 @@ function WorkspaceContent() {
       .filter((finding) => finding.status !== "DISMISSED")
       .filter((finding) => !getBboxRefForScreen(finding, screen.screenIndex));
   }, [screenFindings, screen, imageLoadFailed]);
+
+  const unplacedFindingGroups = useMemo(() => {
+    const groups = new Map<string, Finding[]>();
+
+    for (const finding of unplacedFindings) {
+      const flowName = finding.flowName || screen?.flowName || "Findings";
+      const group = groups.get(flowName) ?? [];
+      group.push(finding);
+      groups.set(flowName, group);
+    }
+
+    return Array.from(groups.entries()).map(([flowName, findings]) => ({ flowName, findings }));
+  }, [unplacedFindings, screen?.flowName]);
 
   const visibleScreenFindingCount = useMemo(
     () => screenFindings.filter((finding) => finding.status !== "DISMISSED").length,
@@ -796,34 +885,49 @@ function WorkspaceContent() {
       <div className="flex flex-1 overflow-hidden">
         {/* Screen thumbnails */}
         <aside className="hidden w-48 shrink-0 overflow-y-auto border-r border-border bg-card/60 p-2 lg:block" aria-label="Screen list">
-          <p className="px-2 py-1.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Screens</p>
+          <p className="px-2 py-1.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+            {reviewData.analysisScope === "key" ? "Key flows" : "Screens"}
+          </p>
           {screens.length === 0 ? (
             <p className="px-2 py-4 text-[11px] text-muted-foreground">No screens uploaded.</p>
           ) : (
-            <div className="space-y-1.5">
-              {screens.map((s) => (
-                <button
-                  key={s.id}
-                  onClick={() => setSelectedScreen(s.id)}
-                  className={cn(
-                    "group flex w-full flex-col gap-1.5 rounded-lg border p-2 text-left transition",
-                    selectedScreen === s.id ? "border-accent bg-accent/5 shadow-sm" : "border-transparent hover:border-border hover:bg-secondary/50",
-                  )}
-                  aria-current={selectedScreen === s.id}
-                >
-                  <div className={cn("flex aspect-[4/3] items-center justify-center overflow-hidden rounded-md border border-border bg-secondary/60", selectedScreen === s.id && "border-accent/30")}>
-                    {s.imageUrl ? (
-                      <img src={s.imageUrl} alt="" className="h-full w-full object-cover object-top" />
-                    ) : (
-                      <ImageIcon className="h-4 w-4 text-muted-foreground/40" aria-hidden="true" />
+            <div className="space-y-3">
+              {screenGroups.map((group) => (
+                <div key={group.flowName} className="space-y-1.5">
+                  <div className="px-2 pt-1">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="truncate text-[11px] font-semibold text-foreground">{group.flowName}</p>
+                      <Badge variant="outline" className="shrink-0 text-[10px]">{group.issues}</Badge>
+                    </div>
+                    {group.description && reviewData.analysisScope === "key" && (
+                      <p className="mt-0.5 line-clamp-2 text-[10px] leading-snug text-muted-foreground">{group.description}</p>
                     )}
                   </div>
-                  <div className="flex items-center justify-between gap-1">
-                    <span className="truncate text-[11px] font-medium">{s.name}</span>
-                    {s.p0 > 0 && <PriorityBadge priority="P0" compact />}
-                  </div>
-                  <span className="text-[10px] text-muted-foreground">{s.issues} finding{s.issues === 1 ? "" : "s"}</span>
-                </button>
+                  {group.screens.map((s) => (
+                    <button
+                      key={s.id}
+                      onClick={() => setSelectedScreen(s.id)}
+                      className={cn(
+                        "group flex w-full flex-col gap-1.5 rounded-lg border p-2 text-left transition",
+                        selectedScreen === s.id ? "border-accent bg-accent/5 shadow-sm" : "border-transparent hover:border-border hover:bg-secondary/50",
+                      )}
+                      aria-current={selectedScreen === s.id}
+                    >
+                      <div className={cn("flex aspect-[4/3] items-center justify-center overflow-hidden rounded-md border border-border bg-secondary/60", selectedScreen === s.id && "border-accent/30")}>
+                        {s.imageUrl ? (
+                          <img src={s.imageUrl} alt="" className="h-full w-full object-cover object-top" />
+                        ) : (
+                          <ImageIcon className="h-4 w-4 text-muted-foreground/40" aria-hidden="true" />
+                        )}
+                      </div>
+                      <div className="flex items-center justify-between gap-1">
+                        <span className="truncate text-[11px] font-medium">{s.name}</span>
+                        {s.p0 > 0 && <PriorityBadge priority="P0" compact />}
+                      </div>
+                      <span className="text-[10px] text-muted-foreground">{s.issues} finding{s.issues === 1 ? "" : "s"}</span>
+                    </button>
+                  ))}
+                </div>
               ))}
             </div>
           )}
@@ -837,6 +941,7 @@ function WorkspaceContent() {
                 <Button variant="ghost" size="icon" className="h-9 w-9" disabled={idx <= 0} onClick={() => setSelectedScreen(screens[idx - 1].id)} aria-label="Previous screen">
                   <ChevronLeft className="h-4 w-4" />
                 </Button>
+                {screen.flowName && <Badge variant="outline" className="max-w-[12rem] truncate text-[10px]">{screen.flowName}</Badge>}
                 <div className="truncate text-sm font-medium">{screen.name}</div>
                 <Badge variant="secondary" className="text-[10px]">{idx + 1} / {screens.length}</Badge>
                 <Button variant="ghost" size="icon" className="h-9 w-9" disabled={idx >= screens.length - 1} onClick={() => setSelectedScreen(screens[idx + 1].id)} aria-label="Next screen">
@@ -968,20 +1073,27 @@ function WorkspaceContent() {
                         <Badge variant="outline" className="shrink-0 text-[10px]">{unplacedFindings.length}</Badge>
                       </div>
                       <ScrollArea className="mt-2 max-h-36">
-                        <div className="space-y-1 pr-2">
-                          {unplacedFindings.map((finding) => (
-                            <button
-                              key={finding.id}
-                              onClick={() => {
-                                setOpenCluster(null);
-                                setOpen(finding);
-                              }}
-                              className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs hover:bg-secondary/70"
-                            >
-                              <span className={cn("h-2 w-2 shrink-0 rounded-full", pinTone[finding.severity])} aria-hidden="true" />
-                              <span className="min-w-0 flex-1 truncate">{finding.title}</span>
-                              <PriorityBadge priority={finding.severity} compact />
-                            </button>
+                        <div className="space-y-2 pr-2">
+                          {unplacedFindingGroups.map((group) => (
+                            <div key={group.flowName} className="space-y-1">
+                              {unplacedFindingGroups.length > 1 && (
+                                <p className="px-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{group.flowName}</p>
+                              )}
+                              {group.findings.map((finding) => (
+                                <button
+                                  key={finding.id}
+                                  onClick={() => {
+                                    setOpenCluster(null);
+                                    setOpen(finding);
+                                  }}
+                                  className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs hover:bg-secondary/70"
+                                >
+                                  <span className={cn("h-2 w-2 shrink-0 rounded-full", pinTone[finding.severity])} aria-hidden="true" />
+                                  <span className="min-w-0 flex-1 truncate">{finding.title}</span>
+                                  <PriorityBadge priority={finding.severity} compact />
+                                </button>
+                              ))}
+                            </div>
                           ))}
                         </div>
                       </ScrollArea>
@@ -1056,6 +1168,9 @@ function FindingClusterDetail({ cluster, onSelect }: FindingClusterDetailProps) 
         <div className="flex flex-wrap items-center gap-2">
           <PriorityBadge priority={severity} />
           <Badge variant="outline">{cluster.placements.length} findings</Badge>
+          {cluster.placements[0]?.finding.flowName && (
+            <Badge variant="secondary" className="text-[10px]">{cluster.placements[0].finding.flowName}</Badge>
+          )}
         </div>
         <SheetTitle className="mt-2 text-left">Findings at this location</SheetTitle>
         <SheetDescription className="text-left">Select a finding to review its details.</SheetDescription>
@@ -1072,6 +1187,7 @@ function FindingClusterDetail({ cluster, onSelect }: FindingClusterDetailProps) 
               <PriorityBadge priority={finding.severity} compact />
               <FindingStatusBadge status={finding.status as any} />
               <Badge variant="outline" className="text-[10px]">{finding.area}</Badge>
+              {finding.flowName && <Badge variant="secondary" className="text-[10px]">{finding.flowName}</Badge>}
             </div>
             <p className="mt-2 text-sm font-medium">{finding.title}</p>
             <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{finding.observation || finding.description}</p>
@@ -1120,6 +1236,7 @@ function FindingDetail({ finding, screenImageUrl, findingMetadataOptions, onActi
           <PriorityBadge priority={finding.severity} />
           <FindingStatusBadge status={finding.status as any} />
           <Badge variant="outline">{finding.area}</Badge>
+          {finding.flowName && <Badge variant="secondary">{finding.flowName}</Badge>}
           {needsBasis && (
             <Badge variant="outline" className="gap-1 border-yellow-400/60 bg-yellow-50 text-yellow-700 dark:bg-yellow-900/20 dark:text-yellow-400">
               <AlertTriangle className="h-3 w-3" />Incomplete — add basis
