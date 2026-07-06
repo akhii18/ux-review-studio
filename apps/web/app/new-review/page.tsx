@@ -966,6 +966,7 @@ export default function NewReviewPage() {
               dedupeKey: `review-status:${reviewId}`,
             }));
             toast.success(`Review complete — ${progress.findingCount || 0} findings generated.`);
+            setRunning(false);
             redirectTimeoutRef.current = setTimeout(() => {
               router.push(`/workspace?reviewId=${reviewId}`);
             }, 600);
