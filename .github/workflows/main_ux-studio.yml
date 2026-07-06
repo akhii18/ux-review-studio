@@ -55,10 +55,12 @@ jobs:
           rm -rf api-deploy
           mkdir -p api-deploy
           cp package.json package-lock.json api-deploy/
-          cp -a apps/api api-deploy/apps/
-          cp -a apps/agentic-ai api-deploy/apps/
-          mkdir -p api-deploy/packages
-          cp -a packages/shared api-deploy/packages/
+          mkdir -p api-deploy/apps/api
+          mkdir -p api-deploy/apps/agentic-ai
+          mkdir -p api-deploy/packages/shared
+          cp -a apps/api/. api-deploy/apps/api/
+          cp -a apps/agentic-ai/. api-deploy/apps/agentic-ai/
+          cp -a packages/shared/. api-deploy/packages/shared/
           cp -a node_modules api-deploy/
 
           echo "API deploy package layout:"
