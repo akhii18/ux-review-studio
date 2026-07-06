@@ -1,4 +1,5 @@
 import path from "node:path";
+import fs from "node:fs";
 import { pathToFileURL } from "node:url";
 import { prisma } from "../../config/prisma";
 import { getSignedStorageReadUrl } from "../supabaseStorage";
@@ -144,10 +145,79 @@ type FlowDiscoveryOutput = {
   routingRationale: string;
 };
 
+type PipelineLogLevel = "info" | "warn" | "error";
+
+function summarizeError(error: unknown): {
+  name: string;
+  message: string;
+  stack?: string;
+  details?: Record<string, unknown>;
+} {
+  if (error instanceof Error) {
+    const details = error as Error & { cause?: unknown; code?: string; status?: number };
+    return {
+      name: error.name,
+      message: error.message,
+      stack: error.stack,
+      details: {
+        ...(details.code ? { code: details.code } : {}),
+        ...(typeof details.status === "number" ? { status: details.status } : {}),
+        ...(details.cause ? { cause: details.cause } : {}),
+      },
+    };
+  }
+
+  return {
+    name: "UnknownError",
+    message: typeof error === "string" ? error : JSON.stringify(error),
+  };
+}
+
+function logPipeline(level: PipelineLogLevel, reviewId: string, event: string, details?: Record<string, unknown>) {
+  const payload = {
+    reviewId,
+    event,
+    timestamp: new Date().toISOString(),
+    ...(details ?? {}),
+  };
+
+  if (level === "error") {
+    console.error("[AI_PIPELINE]", payload);
+    return;
+  }
+
+  if (level === "warn") {
+    console.warn("[AI_PIPELINE]", payload);
+    return;
+  }
+
+  console.log("[AI_PIPELINE]", payload);
+}
+
 // ── Module loader ─────────────────────────────────────────────────────────────
 
-const agenticSourcePath = path.resolve(__dirname, "../../../../agentic-ai/src/index.ts");
-const agenticBuildPath = path.resolve(__dirname, "../../../../agentic-ai/dist/index.js");
+const agenticSourceCandidates = [
+  path.resolve(__dirname, "../../../../agentic-ai/src/index.ts"),
+  path.resolve(__dirname, "../../../../../agentic-ai/src/index.ts"),
+  path.resolve(process.cwd(), "apps/agentic-ai/src/index.ts"),
+  path.resolve(process.cwd(), "agentic-ai/src/index.ts"),
+];
+
+const agenticBuildCandidates = [
+  path.resolve(__dirname, "../../../../agentic-ai/dist/index.js"),
+  path.resolve(__dirname, "../../../../../agentic-ai/dist/index.js"),
+  path.resolve(process.cwd(), "apps/agentic-ai/dist/index.js"),
+  path.resolve(process.cwd(), "agentic-ai/dist/index.js"),
+  path.resolve(process.cwd(), "apps/api/agentic-ai/dist/index.js"),
+];
+
+function resolveExistingPath(candidates: string[]): string | null {
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) return candidate;
+  }
+
+  return null;
+}
 
 let agenticModulePromise: Promise<{ runReviewGraph: (params: {
   screenshots: string[];
@@ -162,12 +232,41 @@ let agenticModulePromise: Promise<{ runReviewGraph: (params: {
 
 async function loadAgenticModule() {
   if (!agenticModulePromise) {
+    const resolvedPath = process.env.NODE_ENV === "production"
+      ? resolveExistingPath(agenticBuildCandidates)
+      : resolveExistingPath(agenticSourceCandidates) ?? resolveExistingPath(agenticBuildCandidates);
+
+    if (!resolvedPath) {
+      const tried = process.env.NODE_ENV === "production" ? agenticBuildCandidates : [...agenticSourceCandidates, ...agenticBuildCandidates];
+      throw new Error(`Unable to locate agentic-ai module. Tried: ${tried.join(" | ")}`);
+    }
+
     agenticModulePromise = import(
-      pathToFileURL((process.env.NODE_ENV === "production" ? agenticBuildPath : agenticSourcePath)).href
+      pathToFileURL(resolvedPath).href
     );
   }
 
   return agenticModulePromise;
+}
+
+async function toModelScreenshotDataUrl(asset: ReviewAssetRecord): Promise<string> {
+  if (!asset.blobUrl) {
+    throw new Error(`Asset ${asset.name} is missing a blobUrl`);
+  }
+
+  const signedOrRawUrl = await getSignedStorageReadUrl(asset.blobUrl);
+  if (/^data:/i.test(signedOrRawUrl)) {
+    return signedOrRawUrl;
+  }
+
+  const response = await fetch(signedOrRawUrl);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch image bytes for ${asset.name} (HTTP ${response.status})`);
+  }
+
+  const mimeType = response.headers.get("content-type")?.split(";")[0] ?? asset.mimeType ?? "image/png";
+  const bytes = Buffer.from(await response.arrayBuffer());
+  return `data:${mimeType};base64,${bytes.toString("base64")}`;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -239,6 +338,48 @@ function normalizePersistableBBoxRefs(finding: SynthesizedFinding, groundingElem
     .filter((ref): ref is NonNullable<ReturnType<typeof normalizePersistableBBoxRef>> => Boolean(ref));
 
   return refs.length > 0 ? refs : undefined;
+}
+
+function hasNonEmptyBBoxRefs(value: unknown): boolean {
+  if (!Array.isArray(value)) return false;
+  return value.length > 0;
+}
+
+function normalizeScreenLabel(value: string): string {
+  return value.replace(/\.[^.]+$/, "").toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+function getScreenIndexForFinding(screenName: string, imageAssetNames: string[]): number {
+  const target = normalizeScreenLabel(screenName);
+  const exactIndex = imageAssetNames.findIndex((name) => normalizeScreenLabel(name) === target);
+  if (exactIndex >= 0) return exactIndex;
+
+  const looseIndex = imageAssetNames.findIndex((name) => {
+    const normalized = normalizeScreenLabel(name);
+    return normalized.includes(target) || target.includes(normalized);
+  });
+
+  if (looseIndex >= 0) return looseIndex;
+  return 0;
+}
+
+function buildFallbackBBoxRef(screenIndex: number, findingOrdinal: number) {
+  const cols = 4;
+  const rows = 6;
+  const col = findingOrdinal % cols;
+  const row = Math.floor(findingOrdinal / cols) % rows;
+
+  const cellWidth = 1 / cols;
+  const cellHeight = 1 / rows;
+  const width = 0.08;
+  const height = 0.06;
+  const x = Math.min(0.98 - width, Math.max(0.02, col * cellWidth + (cellWidth - width) / 2));
+  const y = Math.min(0.98 - height, Math.max(0.02, row * cellHeight + (cellHeight - height) / 2));
+
+  return {
+    screenIndex: Math.max(0, screenIndex),
+    bbox: { x, y, width, height },
+  };
 }
 
 function normalizeStringArray(value: unknown): string[] | null {
@@ -553,8 +694,25 @@ async function persistFindings(params: {
 }) {
   const { reviewId, findings, imageAssetNames, groundingElements, flowDiscovery } = params;
 
-  for (const finding of findings) {
+  for (let findingIndex = 0; findingIndex < findings.length; findingIndex += 1) {
+    const finding = findings[findingIndex];
     const screenName = extractScreenName(finding, imageAssetNames);
+    const normalizedRefs = normalizePersistableBBoxRefs(finding, groundingElements);
+    const bboxRefs = normalizedRefs ?? [
+      buildFallbackBBoxRef(
+        getScreenIndexForFinding(screenName, imageAssetNames),
+        findingIndex,
+      ),
+    ];
+
+    if (!normalizedRefs) {
+      logPipeline("warn", reviewId, "using_fallback_bbox_ref", {
+        findingId: finding.id,
+        findingTitle: finding.issue.slice(0, 120),
+        screenName,
+        fallbackScreenIndex: bboxRefs[0]?.screenIndex,
+      });
+    }
 
     const createdFinding = await prisma.finding.create({
       data: {
@@ -574,9 +732,44 @@ async function persistFindings(params: {
         confidence: clampConfidence(finding.confidence),
         status: "PROPOSED",
         isAiGenerated: true,
-        bboxRefs: normalizePersistableBBoxRefs(finding, groundingElements),
+        bboxRefs,
       },
     });
+
+    if (!hasNonEmptyBBoxRefs(createdFinding.bboxRefs)) {
+      try {
+        await prisma.finding.update({
+          where: { id: createdFinding.id },
+          data: { bboxRefs },
+        });
+
+        const reloadedFinding = await prisma.finding.findUnique({
+          where: { id: createdFinding.id },
+          select: { bboxRefs: true },
+        });
+
+        logPipeline(
+          hasNonEmptyBBoxRefs(reloadedFinding?.bboxRefs) ? "warn" : "error",
+          reviewId,
+          hasNonEmptyBBoxRefs(reloadedFinding?.bboxRefs)
+            ? "bbox_refs_force_written"
+            : "bbox_refs_force_write_verification_failed",
+          {
+          findingId: createdFinding.id,
+          fallbackRefCount: bboxRefs.length,
+          verificationHasRefs: hasNonEmptyBBoxRefs(reloadedFinding?.bboxRefs),
+          }
+        );
+      } catch (error) {
+        const summary = summarizeError(error);
+        logPipeline("error", reviewId, "bbox_refs_force_write_failed", {
+          findingId: createdFinding.id,
+          fallbackRefCount: bboxRefs.length,
+          errorName: summary.name,
+          errorMessage: summary.message,
+        });
+      }
+    }
 
     const basisExplanation = finding.mergedFrom.length > 0
       ? `Synthesized from ${finding.sources.join(", ")} and merged from ${finding.mergedFrom.join(", ")}.`
@@ -612,20 +805,33 @@ function buildReviewContext(review: NonNullable<ReviewRecord>): string {
 // ── Main pipeline ─────────────────────────────────────────────────────────────
 
 export async function runReviewPipeline(reviewId: string): Promise<void> {
+  const pipelineStartedAt = Date.now();
+  logPipeline("info", reviewId, "pipeline_started", {
+    nodeEnv: process.env.NODE_ENV ?? "unknown",
+  });
+
   const review = await prisma.review.findUnique({
     where: { id: reviewId },
     include: { assets: true },
   });
 
   if (!review) {
+    logPipeline("error", reviewId, "review_not_found");
     throw new Error(`Review ${reviewId} not found`);
   }
 
   try {
+    logPipeline("info", reviewId, "stage_updating", { stage: "reading_inputs" });
     await prisma.review.update({ where: { id: reviewId }, data: { stage: "reading_inputs" } });
 
     // Collect image assets in order — the index maps to "screen{N}" in elementRefs
-    const imageAssets = review.assets.filter(
+    const sortedAssets = [...review.assets].sort((a, b) => {
+      const createdDiff = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+      if (createdDiff !== 0) return createdDiff;
+      return a.id.localeCompare(b.id);
+    });
+
+    const imageAssets = sortedAssets.filter(
       (asset: ReviewAssetRecord) => asset.mimeType.startsWith("image/")
     );
     const imageAssetNames = imageAssets.map((asset: ReviewAssetRecord) => asset.name);
@@ -634,19 +840,24 @@ export async function runReviewPipeline(reviewId: string): Promise<void> {
       assetName,
     }));
 
-    const screenshots = await Promise.all(
-      imageAssets.map(async (asset: ReviewAssetRecord) => {
-        if (!asset.blobUrl) {
-          throw new Error(`Asset ${asset.name} is missing a blobUrl`);
-        }
+    logPipeline("info", reviewId, "assets_resolved", {
+      totalAssets: sortedAssets.length,
+      imageAssets: imageAssets.length,
+      imageAssetNames,
+      textAssetsWithContent: review.assets.filter((asset: ReviewAssetRecord) => Boolean(asset.contentText?.trim())).length,
+    });
 
-        return getSignedStorageReadUrl(asset.blobUrl);
-      })
-    );
+    const screenshots = await Promise.all(imageAssets.map((asset: ReviewAssetRecord) => toModelScreenshotDataUrl(asset)));
 
     if (screenshots.length === 0) {
+      logPipeline("error", reviewId, "no_image_assets");
       throw new Error("At least one image asset is required before starting the review pipeline");
     }
+
+    logPipeline("info", reviewId, "screenshots_prepared", {
+      screenshotCount: screenshots.length,
+      screenshotPreview: screenshots.map((item) => item.slice(0, 48)),
+    });
 
     const textAssets = review.assets
       .filter((asset: ReviewAssetRecord) => Boolean(asset.contentText?.trim()))
@@ -659,13 +870,20 @@ export async function runReviewPipeline(reviewId: string): Promise<void> {
     ].join("\n");
 
     const keyFlowsOnly = review.analysisScope === "key";
-    await prisma.review.update({
-      where: { id: reviewId },
-      data: { stage: keyFlowsOnly ? "discovering_flows" : "analyzing_screens" },
-    });
+  const analysisStage = keyFlowsOnly ? "discovering_flows" : "analyzing_screens";
+  logPipeline("info", reviewId, "stage_updating", { stage: analysisStage });
+  await prisma.review.update({ where: { id: reviewId }, data: { stage: analysisStage } });
 
     // Bug fix: convert subcategory IDs → agent names + selectedPrinciples map
     const { selectedAgents, selectedPrinciples } = deriveAgentSelection(review.criteria);
+
+    const resolvedModulePath = process.env.NODE_ENV === "production"
+      ? resolveExistingPath(agenticBuildCandidates)
+      : resolveExistingPath(agenticSourceCandidates) ?? resolveExistingPath(agenticBuildCandidates);
+
+    logPipeline("info", reviewId, "agentic_module_loading", {
+      resolvedModulePath,
+    });
 
     const module = await loadAgenticModule();
     const finalState = await module.runReviewGraph({
@@ -683,8 +901,15 @@ export async function runReviewPipeline(reviewId: string): Promise<void> {
       documentPages,
     });
 
+    logPipeline("info", reviewId, "graph_completed", {
+      hasGroundingOutput: Boolean(finalState.groundingOutput),
+      groundingElements: finalState.groundingOutput?.elements?.length ?? 0,
+      hasSynthesisOutput: Boolean(finalState.synthesisOutput),
+    });
+
     const synthesis = finalState.synthesisOutput;
     if (!synthesis) {
+      logPipeline("error", reviewId, "missing_synthesis_output");
       throw new Error("LangGraph review pipeline returned no synthesis output");
     }
 
@@ -694,6 +919,15 @@ export async function runReviewPipeline(reviewId: string): Promise<void> {
     const p1 = findings.filter((finding) => finding.severity === "P1").length;
     const p2 = findings.filter((finding) => finding.severity === "P2").length;
     const uxScore = Math.max(0, 100 - (p0 * 8) - (p1 * 3) - p2);
+
+    logPipeline("info", reviewId, "findings_synthesized", {
+      findingCount: findings.length,
+      totalRawFindings: synthesis.totalRawFindings,
+      p0,
+      p1,
+      p2,
+      uxScore,
+    });
 
     // Clear any existing findings/reports from previous runs
     await prisma.$transaction([
@@ -709,7 +943,15 @@ export async function runReviewPipeline(reviewId: string): Promise<void> {
       flowDiscovery,
     });
 
-    await prisma.review.update({ where: { id: reviewId }, data: { stage: "generating_report", uxScore, flowDiscovery: flowDiscovery as any } });
+    logPipeline("info", reviewId, "findings_persisted", {
+      persistedFindings: findings.length,
+    });
+
+    logPipeline("info", reviewId, "stage_updating", { stage: "generating_report", uxScore });
+    await prisma.review.update({
+      where: { id: reviewId },
+      data: { stage: "generating_report", uxScore, flowDiscovery: flowDiscovery as any },
+    });
 
     const report = buildReportMarkdown({
       review,
@@ -730,6 +972,10 @@ export async function runReviewPipeline(reviewId: string): Promise<void> {
       },
     });
 
+    logPipeline("info", reviewId, "report_created", {
+      reportName: `${review.name} — UX Review Report`,
+    });
+
     await prisma.review.update({
       where: { id: reviewId },
       data: {
@@ -738,12 +984,31 @@ export async function runReviewPipeline(reviewId: string): Promise<void> {
         uxScore,
       },
     });
+
+    logPipeline("info", reviewId, "pipeline_completed", {
+      durationMs: Date.now() - pipelineStartedAt,
+      status: "completed",
+      uxScore,
+      findingCount: findings.length,
+    });
   } catch (err) {
+    const errorSummary = summarizeError(err);
+    const failureReason = errorSummary.message.replace(/\s+/g, " ").trim().slice(0, 180) || "unknown_error";
+
+    logPipeline("error", reviewId, "pipeline_failed", {
+      durationMs: Date.now() - pipelineStartedAt,
+      failureReason,
+      errorName: errorSummary.name,
+      errorMessage: errorSummary.message,
+      errorStack: errorSummary.stack,
+      errorDetails: errorSummary.details,
+    });
+
     await prisma.review.update({
       where: { id: reviewId },
       data: {
         status: "failed",
-        stage: "failed",
+        stage: `failed:${failureReason}`,
       },
     }).catch(() => undefined);
 

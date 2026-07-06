@@ -8,9 +8,9 @@ export default function SettingsPage() {
     <>
       <AppHeader
         title="Settings"
-        subtitle="Configure review defaults, pipeline settings, and governance preferences"
+        subtitle="Workspace, integrations, and governance preferences"
       />
-      <div className="flex-1 p-4 md:p-6 max-w-2xl">
+      <div className="flex-1 p-4 md:p-6">
         <SettingsForm />
       </div>
     </>

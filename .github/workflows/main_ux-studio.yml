@@ -55,10 +55,41 @@ jobs:
           rm -rf api-deploy
           mkdir -p api-deploy
           cp package.json package-lock.json api-deploy/
-          cp -a apps/api api-deploy/apps/
-          mkdir -p api-deploy/packages
-          cp -a packages/shared api-deploy/packages/
+          mkdir -p api-deploy/apps/api
+          mkdir -p api-deploy/apps/agentic-ai
+          mkdir -p api-deploy/packages/shared
+          cp -a apps/api/. api-deploy/apps/api/
+          cp -a apps/agentic-ai/. api-deploy/apps/agentic-ai/
+          cp -a packages/shared/. api-deploy/packages/shared/
           cp -a node_modules api-deploy/
+
+          echo "API deploy package layout:"
+          find api-deploy -maxdepth 4 -type f | sort | sed -n '1,120p'
+          if [ -f api-deploy/package.json ]; then
+            echo "Root package.json present in API artifact."
+          else
+            echo "::warning::Root package.json missing from API artifact."
+          fi
+          if [ -f api-deploy/apps/api/package.json ]; then
+            echo "API package.json present in API artifact."
+          else
+            echo "::warning::apps/api/package.json missing from API artifact."
+          fi
+          if [ -f api-deploy/apps/api/dist/src/index.js ]; then
+            echo "Compiled API entrypoint present in API artifact."
+          else
+            echo "::warning::Compiled API entrypoint missing at apps/api/dist/src/index.js."
+          fi
+          if [ -f api-deploy/apps/api/dist/src/index.js ] && grep -q "bboxFallbackVersion" api-deploy/apps/api/dist/src/index.js; then
+            echo "Health marker present in compiled API artifact."
+          else
+            echo "::warning::Health marker bboxFallbackVersion is missing from compiled API artifact."
+          fi
+          if [ -f api-deploy/apps/api/dist/src/services/ai/agentic.js ] && grep -q "bboxRefs" api-deploy/apps/api/dist/src/services/ai/agentic.js; then
+            echo "bboxRefs marker present in compiled AI pipeline artifact."
+          else
+            echo "::warning::bboxRefs marker is missing from compiled AI pipeline artifact."
+          fi
 
       - name: Create web deployment package
         run: |
@@ -112,18 +143,70 @@ jobs:
     permissions:
       contents: read
 
+    env:
+      NODE_ENV: production
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      DIRECT_URL: ${{ secrets.DIRECT_URL }}
+
     steps:
       - name: Download API artifact
         uses: actions/download-artifact@v4
         with:
           name: api-app
+          path: downloaded-api
+
+      - name: Resolve API artifact root
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Downloaded API artifact layout:"
+          find downloaded-api -maxdepth 3 -print | sort | sed -n '1,200p'
+
+          api_root=""
+          for candidate in downloaded-api downloaded-api/api-deploy; do
+            if [ -f "$candidate/package.json" ] && [ -f "$candidate/apps/api/package.json" ] && [ -f "$candidate/apps/api/dist/src/index.js" ]; then
+              api_root="$candidate"
+              break
+            fi
+          done
+
+          if [ -z "$api_root" ]; then
+            echo "::error::Unable to find API artifact root containing package.json, apps/api/package.json, and apps/api/dist/src/index.js"
+            exit 1
+          fi
+
+          rm -rf api-package
+          mkdir -p api-package
+          shopt -s dotglob
+          cp -a "$api_root"/. api-package/
+          echo "Resolved API artifact root: $api_root -> api-package"
+
+      - name: Verify API artifact contains current release code
+        shell: bash
+        run: |
+          set -euo pipefail
+          if grep -q "bboxFallbackVersion" api-package/apps/api/dist/src/index.js; then
+            echo "Health marker present in downloaded API artifact."
+          else
+            echo "::warning::Health marker bboxFallbackVersion is missing from downloaded API artifact."
+          fi
+          if grep -q "bboxRefs" api-package/apps/api/dist/src/services/ai/agentic.js; then
+            echo "bboxRefs marker present in downloaded API artifact."
+          else
+            echo "::warning::bboxRefs marker is missing from downloaded API artifact."
+          fi
+          npm pkg get workspaces --prefix api-package
+
+      - name: Prepare DB and Prisma client for API release
+        working-directory: ./api-package
+        run: npm run db:prepare:prod --workspace @uxm/api
 
       - name: Deploy API app
         uses: azure/webapps-deploy@v3
         with:
           app-name: ${{ secrets.AZURE_API_APP_NAME }}
           publish-profile: ${{ secrets.AZURE_API_PUBLISH_PROFILE }}
-          package: .
+          package: ./api-package
 
   deploy-web:
     runs-on: ubuntu-latest
@@ -138,10 +221,37 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: web-app
+          path: downloaded-web
+
+      - name: Resolve web artifact root
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Downloaded web artifact layout:"
+          find downloaded-web -maxdepth 3 -print | sort | sed -n '1,200p'
+
+          web_root=""
+          for candidate in downloaded-web downloaded-web/web-deploy; do
+            if [ -f "$candidate/package.json" ] && { [ -f "$candidate/server.js" ] || [ -f "$candidate/apps/web/server.js" ]; }; then
+              web_root="$candidate"
+              break
+            fi
+          done
+
+          if [ -z "$web_root" ]; then
+            echo "::error::Unable to find web artifact root containing package.json and a Next standalone server.js"
+            exit 1
+          fi
+
+          rm -rf web-package
+          mkdir -p web-package
+          shopt -s dotglob
+          cp -a "$web_root"/. web-package/
+          echo "Resolved web artifact root: $web_root -> web-package"
 
       - name: Deploy web app
         uses: azure/webapps-deploy@v3
         with:
           app-name: ${{ secrets.AZURE_WEB_APP_NAME }}
           publish-profile: ${{ secrets.AZURE_WEB_PUBLISH_PROFILE }}
-          package: .
+          package: ./web-package

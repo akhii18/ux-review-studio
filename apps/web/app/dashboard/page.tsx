@@ -392,21 +392,21 @@ export default function DashboardPage() {
                                   <MoreVertical className="h-4 w-4" />
                                 </Button>
                               </DropdownMenuTrigger>
-                              <DropdownMenuContent align="end" className="min-w-0 w-auto flex items-center gap-1 p-1">
-                                <DropdownMenuItem asChild className="h-9 w-9 justify-center">
+                              <DropdownMenuContent align="end" className="min-w-52 p-1">
+                                <DropdownMenuItem asChild className="h-10 w-full justify-start gap-2 px-3">
                                   <Link href={{ pathname: "/workspace", query: { reviewId: r.id } }} aria-label="Open review">
                                     <ExternalLink className="h-4 w-4" />
-                                    <span className="sr-only">Open review</span>
+                                    <span>Open review</span>
                                   </Link>
                                 </DropdownMenuItem>
-                                <DropdownMenuItem asChild className="h-9 w-9 justify-center">
+                                <DropdownMenuItem asChild className="h-10 w-full justify-start gap-2 px-3">
                                   <Link href="/history" aria-label="Open review history">
                                     <History className="h-4 w-4" />
-                                    <span className="sr-only">Open review history</span>
+                                    <span>Open review history</span>
                                   </Link>
                                 </DropdownMenuItem>
                                 <DropdownMenuItem
-                                  className="h-9 w-9 justify-center text-destructive focus:text-destructive"
+                                  className="h-10 w-full justify-start gap-2 px-3 text-destructive focus:text-destructive"
                                   onSelect={(event) => {
                                     event.preventDefault();
                                     void handleDeleteReview(String(r.id));
@@ -414,7 +414,7 @@ export default function DashboardPage() {
                                   aria-label="Delete review"
                                 >
                                   <Trash2 className="h-4 w-4" />
-                                  <span className="sr-only">Delete review</span>
+                                  <span>Delete review</span>
                                 </DropdownMenuItem>
                               </DropdownMenuContent>
                             </DropdownMenu>

@@ -255,9 +255,46 @@ function downloadWordReport(report: ExportableReport) {
   triggerBlobDownload(wordBlob, `${safeName}.doc`);
 }
 
-export function downloadReport(report: ExportableReport, format: "pdf" | "word") {
+function downloadHtmlReport(report: ExportableReport) {
+  const reportHtml = markdownToSafeHtml(String(report.contentMd ?? ""));
+  const reportName = String(report.name ?? "UX Report");
+
+  const htmlDocument = `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>${escapeHtml(reportName)}</title>
+  <style>
+    body { font-family: Inter, Segoe UI, Arial, sans-serif; margin: 20px auto; max-width: 980px; line-height: 1.6; color: #111827; padding: 0 16px; }
+    h1, h2, h3, h4 { color: #111827; margin-top: 1.1em; margin-bottom: 0.5em; }
+    p { margin: 0.6em 0; }
+    table { border-collapse: collapse; width: 100%; margin: 10px 0; }
+    th, td { border: 1px solid #d1d5db; padding: 6px; text-align: left; vertical-align: top; }
+    code { background: #f3f4f6; padding: 1px 4px; border-radius: 4px; }
+    pre { background: #f3f4f6; padding: 10px; border-radius: 6px; overflow: auto; }
+  </style>
+</head>
+<body>
+  <h1>${escapeHtml(reportName)}</h1>
+  ${report.executiveSummary ? `<p><strong>Executive Summary:</strong> ${escapeHtml(String(report.executiveSummary))}</p>` : ""}
+  ${reportHtml}
+</body>
+</html>`;
+
+  const htmlBlob = new Blob([htmlDocument], { type: "text/html;charset=utf-8" });
+  const safeName = sanitizeFileName(reportName);
+  triggerBlobDownload(htmlBlob, `${safeName}.html`);
+}
+
+export function downloadReport(report: ExportableReport, format: "pdf" | "word" | "html") {
   if (format === "pdf") {
     downloadPdfReport(report);
+    return;
+  }
+
+  if (format === "html") {
+    downloadHtmlReport(report);
     return;
   }
 
