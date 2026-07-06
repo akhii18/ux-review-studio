@@ -61,6 +61,12 @@ jobs:
           cp -a packages/shared api-deploy/packages/
           cp -a node_modules api-deploy/
 
+          test -f api-deploy/package.json
+          test -f api-deploy/apps/api/package.json
+          test -f api-deploy/apps/api/dist/src/index.js
+          grep -q "bboxFallbackVersion" api-deploy/apps/api/dist/src/index.js
+          grep -q "bboxRefs" api-deploy/apps/api/dist/src/services/ai/agentic.js
+
       - name: Create web deployment package
         run: |
           mkdir -p web-deploy
@@ -123,10 +129,44 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: api-app
-          path: ./api-deploy
+          path: downloaded-api
+
+      - name: Resolve API artifact root
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Downloaded API artifact layout:"
+          find downloaded-api -maxdepth 3 -print | sort | sed -n '1,200p'
+
+          api_root=""
+          for candidate in downloaded-api downloaded-api/api-deploy; do
+            if [ -f "$candidate/package.json" ] && [ -f "$candidate/apps/api/package.json" ] && [ -f "$candidate/apps/api/dist/src/index.js" ]; then
+              api_root="$candidate"
+              break
+            fi
+          done
+
+          if [ -z "$api_root" ]; then
+            echo "::error::Unable to find API artifact root containing package.json, apps/api/package.json, and apps/api/dist/src/index.js"
+            exit 1
+          fi
+
+          rm -rf api-package
+          mkdir -p api-package
+          shopt -s dotglob
+          cp -a "$api_root"/. api-package/
+          echo "Resolved API artifact root: $api_root -> api-package"
+
+      - name: Verify API artifact contains current release code
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q "bboxFallbackVersion" api-package/apps/api/dist/src/index.js
+          grep -q "bboxRefs" api-package/apps/api/dist/src/services/ai/agentic.js
+          npm pkg get workspaces --prefix api-package
 
       - name: Prepare DB and Prisma client for API release
-        working-directory: ./api-deploy
+        working-directory: ./api-package
         run: npm run db:prepare:prod --workspace @uxm/api
 
       - name: Deploy API app
@@ -134,7 +174,7 @@ jobs:
         with:
           app-name: ${{ secrets.AZURE_API_APP_NAME }}
           publish-profile: ${{ secrets.AZURE_API_PUBLISH_PROFILE }}
-          package: ./api-deploy
+          package: ./api-package
 
   deploy-web:
     runs-on: ubuntu-latest
@@ -149,11 +189,37 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: web-app
-          path: ./web-deploy
+          path: downloaded-web
+
+      - name: Resolve web artifact root
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Downloaded web artifact layout:"
+          find downloaded-web -maxdepth 3 -print | sort | sed -n '1,200p'
+
+          web_root=""
+          for candidate in downloaded-web downloaded-web/web-deploy; do
+            if [ -f "$candidate/package.json" ] && { [ -f "$candidate/server.js" ] || [ -f "$candidate/apps/web/server.js" ]; }; then
+              web_root="$candidate"
+              break
+            fi
+          done
+
+          if [ -z "$web_root" ]; then
+            echo "::error::Unable to find web artifact root containing package.json and a Next standalone server.js"
+            exit 1
+          fi
+
+          rm -rf web-package
+          mkdir -p web-package
+          shopt -s dotglob
+          cp -a "$web_root"/. web-package/
+          echo "Resolved web artifact root: $web_root -> web-package"
 
       - name: Deploy web app
         uses: azure/webapps-deploy@v3
         with:
           app-name: ${{ secrets.AZURE_WEB_APP_NAME }}
           publish-profile: ${{ secrets.AZURE_WEB_PUBLISH_PROFILE }}
-          package: ./web-deploy
+          package: ./web-package
