@@ -47,7 +47,19 @@ function hasMigrations() {
   return entries.length > 0;
 }
 
-function main() {
+async function applyNonDestructiveFallbackSchema() {
+  const { PrismaClient } = require("@prisma/client");
+  const prisma = new PrismaClient();
+
+  try {
+    console.log("[db:prepare:prod] Ensuring findings.bboxRefs exists without dropping existing columns...");
+    await prisma.$executeRawUnsafe('ALTER TABLE "findings" ADD COLUMN IF NOT EXISTS "bboxRefs" JSONB');
+  } finally {
+    await prisma.$disconnect();
+  }
+}
+
+async function main() {
   console.log("[db:prepare:prod] Generating Prisma client...");
   runPrisma(["generate"]);
 
@@ -57,14 +69,12 @@ function main() {
     return;
   }
 
-  console.warn("[db:prepare:prod] No migrations directory found; syncing schema with prisma db push.");
-  runPrisma(["db", "push", "--skip-generate"]);
+  console.warn("[db:prepare:prod] No migrations directory found; skipping destructive prisma db push fallback.");
+  await applyNonDestructiveFallbackSchema();
 }
 
-try {
-  main();
-} catch (error) {
+main().catch((error) => {
   const message = error instanceof Error ? error.message : String(error);
   console.error("[db:prepare:prod] Failed:", message);
   process.exit(1);
-}
+});
