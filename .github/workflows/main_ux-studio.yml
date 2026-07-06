@@ -113,12 +113,20 @@ jobs:
     permissions:
       contents: read
 
+    env:
+      NODE_ENV: production
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      DIRECT_URL: ${{ secrets.DIRECT_URL }}
+
     steps:
       - name: Download API artifact
         uses: actions/download-artifact@v4
         with:
           name: api-app
           path: .
+
+      - name: Prepare DB and Prisma client for API release
+        run: npm run db:prepare:prod --workspace @uxm/api
 
       - name: Deploy API app
         uses: azure/webapps-deploy@v3

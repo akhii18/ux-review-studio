@@ -8,8 +8,11 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/src/index.js",
     "start:prod": "node dist/src/index.js",
+    "prestart:prod": "node scripts/prepare-db-prod.cjs",
     "db:migrate": "prisma migrate dev",
     "db:migrate:prod": "prisma migrate deploy",
+    "db:push:prod": "prisma db push --skip-generate",
+    "db:prepare:prod": "node scripts/prepare-db-prod.cjs",
     "db:seed": "tsx prisma/seed.ts",
     "db:studio": "prisma studio",
     "db:generate": "prisma generate"
