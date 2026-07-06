@@ -629,24 +629,28 @@ async function persistFindings(params: {
 
     if (!hasNonEmptyBBoxRefs(createdFinding.bboxRefs)) {
       try {
-        const updatedRows = await prisma.$executeRaw`
-          UPDATE "findings"
-          SET "bboxRefs" = ${JSON.stringify(bboxRefs)}::jsonb
-          WHERE "id" = ${createdFinding.id}
-            AND (
-              CASE
-                WHEN "bboxRefs" IS NULL THEN true
-                WHEN jsonb_typeof("bboxRefs") <> 'array' THEN true
-                ELSE jsonb_array_length("bboxRefs") = 0
-              END
-            )
-        `;
+        await prisma.finding.update({
+          where: { id: createdFinding.id },
+          data: { bboxRefs },
+        });
 
-        logPipeline("warn", reviewId, "bbox_refs_force_written", {
+        const reloadedFinding = await prisma.finding.findUnique({
+          where: { id: createdFinding.id },
+          select: { bboxRefs: true },
+        });
+
+        logPipeline(
+          hasNonEmptyBBoxRefs(reloadedFinding?.bboxRefs) ? "warn" : "error",
+          reviewId,
+          hasNonEmptyBBoxRefs(reloadedFinding?.bboxRefs)
+            ? "bbox_refs_force_written"
+            : "bbox_refs_force_write_verification_failed",
+          {
           findingId: createdFinding.id,
           fallbackRefCount: bboxRefs.length,
-          updatedRows,
-        });
+          verificationHasRefs: hasNonEmptyBBoxRefs(reloadedFinding?.bboxRefs),
+          }
+        );
       } catch (error) {
         const summary = summarizeError(error);
         logPipeline("error", reviewId, "bbox_refs_force_write_failed", {
