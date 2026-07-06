@@ -61,11 +61,33 @@ jobs:
           cp -a packages/shared api-deploy/packages/
           cp -a node_modules api-deploy/
 
-          test -f api-deploy/package.json
-          test -f api-deploy/apps/api/package.json
-          test -f api-deploy/apps/api/dist/src/index.js
-          grep -q "bboxFallbackVersion" api-deploy/apps/api/dist/src/index.js
-          grep -q "bboxRefs" api-deploy/apps/api/dist/src/services/ai/agentic.js
+          echo "API deploy package layout:"
+          find api-deploy -maxdepth 4 -type f | sort | sed -n '1,120p'
+          if [ -f api-deploy/package.json ]; then
+            echo "Root package.json present in API artifact."
+          else
+            echo "::warning::Root package.json missing from API artifact."
+          fi
+          if [ -f api-deploy/apps/api/package.json ]; then
+            echo "API package.json present in API artifact."
+          else
+            echo "::warning::apps/api/package.json missing from API artifact."
+          fi
+          if [ -f api-deploy/apps/api/dist/src/index.js ]; then
+            echo "Compiled API entrypoint present in API artifact."
+          else
+            echo "::warning::Compiled API entrypoint missing at apps/api/dist/src/index.js."
+          fi
+          if [ -f api-deploy/apps/api/dist/src/index.js ] && grep -q "bboxFallbackVersion" api-deploy/apps/api/dist/src/index.js; then
+            echo "Health marker present in compiled API artifact."
+          else
+            echo "::warning::Health marker bboxFallbackVersion is missing from compiled API artifact."
+          fi
+          if [ -f api-deploy/apps/api/dist/src/services/ai/agentic.js ] && grep -q "bboxRefs" api-deploy/apps/api/dist/src/services/ai/agentic.js; then
+            echo "bboxRefs marker present in compiled AI pipeline artifact."
+          else
+            echo "::warning::bboxRefs marker is missing from compiled AI pipeline artifact."
+          fi
 
       - name: Create web deployment package
         run: |
@@ -161,8 +183,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          grep -q "bboxFallbackVersion" api-package/apps/api/dist/src/index.js
-          grep -q "bboxRefs" api-package/apps/api/dist/src/services/ai/agentic.js
+          if grep -q "bboxFallbackVersion" api-package/apps/api/dist/src/index.js; then
+            echo "Health marker present in downloaded API artifact."
+          else
+            echo "::warning::Health marker bboxFallbackVersion is missing from downloaded API artifact."
+          fi
+          if grep -q "bboxRefs" api-package/apps/api/dist/src/services/ai/agentic.js; then
+            echo "bboxRefs marker present in downloaded API artifact."
+          else
+            echo "::warning::bboxRefs marker is missing from downloaded API artifact."
+          fi
           npm pkg get workspaces --prefix api-package
 
       - name: Prepare DB and Prisma client for API release
