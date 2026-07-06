@@ -126,6 +126,7 @@ jobs:
           path: .
 
       - name: Prepare DB and Prisma client for API release
+        working-directory: ./api-deploy
         run: npm run db:prepare:prod --workspace @uxm/api
 
       - name: Deploy API app
@@ -133,7 +134,7 @@ jobs:
         with:
           app-name: ${{ secrets.AZURE_API_APP_NAME }}
           publish-profile: ${{ secrets.AZURE_API_PUBLISH_PROFILE }}
-          package: .
+          package: ./api-deploy
 
   deploy-web:
     runs-on: ubuntu-latest
@@ -155,4 +156,4 @@ jobs:
         with:
           app-name: ${{ secrets.AZURE_WEB_APP_NAME }}
           publish-profile: ${{ secrets.AZURE_WEB_PUBLISH_PROFILE }}
-          package: .
+          package: ./web-deploy
