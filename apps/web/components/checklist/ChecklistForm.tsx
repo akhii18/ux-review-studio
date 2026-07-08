@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/select";
 import { CreateChecklistSchema, REVIEW_AREA_LABELS } from "@uxm/shared";
 import type { CreateChecklist } from "@uxm/shared";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import { useCreateChecklistMutation } from "@/store/api/checklistsApi";
 import { useRouter } from "next/navigation";
 
