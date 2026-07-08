@@ -9,6 +9,7 @@ const Toaster = ({ position = "top-right", ...props }: ToasterProps) => {
     <Sonner
       className="toaster group"
       position={position}
+      visibleToasts={1}
       closeButton
       toastOptions={{
         duration: Infinity,

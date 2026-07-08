@@ -33,7 +33,7 @@ import { PriorityBadge } from "@/components/ui/PriorityBadge";
 import { Search, MoreVertical, X, ExternalLink, FileBarChart, Trash2, Download, ChevronDown } from "lucide-react";
 import { deleteReview, exportReviewReport, getReview, listReviews } from "@/lib/api";
 import { downloadReport } from "@/lib/reportExport";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 
 const STATUS_OPTIONS = ["all", "draft", "in_progress", "completed", "failed", "archived"];
 
@@ -337,18 +337,19 @@ export default function HistoryPage() {
         <div className="rounded-xl border border-border bg-card shadow-card overflow-hidden">
           <div className="max-h-[calc(97vh-170px)] overflow-auto">
             <table className="w-full border-collapse text-sm">
+              <caption className="sr-only">Review history</caption>
               <thead className="sticky top-0 z-10 bg-foreground">
                 <tr className="border-0">
-                  <th className="h-12 px-4 text-left align-middle text-[12px] font-semibold uppercase tracking-wide text-background">Review</th>
-                  <th className="hidden h-12 px-4 text-left align-middle text-[12px] font-semibold uppercase tracking-wide text-background md:table-cell">Product</th>
-                  <th className="hidden h-12 px-4 text-left align-middle text-[12px] font-semibold uppercase tracking-wide text-background lg:table-cell">Domain</th>
-                  <th className="hidden h-12 px-4 text-left align-middle text-[12px] font-semibold uppercase tracking-wide text-background lg:table-cell">Type</th>
-                  <th className="h-12 px-4 text-right align-middle text-[12px] font-semibold uppercase tracking-wide text-background">UX Score</th>
-                  <th className="hidden h-12 px-4 text-left align-middle text-[12px] font-semibold uppercase tracking-wide text-background sm:table-cell">Priority breakdown</th>
-                  <th className="h-12 px-4 text-left align-middle text-[12px] font-semibold uppercase tracking-wide text-background">Status</th>
-                  <th className="hidden h-12 px-4 text-left align-middle text-[12px] font-semibold uppercase tracking-wide text-background xl:table-cell">Owner</th>
-                  <th className="hidden h-12 px-4 text-left align-middle text-[12px] font-semibold uppercase tracking-wide text-background xl:table-cell">Created</th>
-                  <th className="h-12 px-2 text-right align-middle text-[12px] font-semibold uppercase tracking-wide text-background">Actions</th>
+                  <th scope="col" className="h-12 px-4 text-left align-middle text-[12px] font-semibold uppercase tracking-wide text-background">Review</th>
+                  <th scope="col" className="hidden h-12 px-4 text-left align-middle text-[12px] font-semibold uppercase tracking-wide text-background md:table-cell">Product</th>
+                  <th scope="col" className="hidden h-12 px-4 text-left align-middle text-[12px] font-semibold uppercase tracking-wide text-background lg:table-cell">Domain</th>
+                  <th scope="col" className="hidden h-12 px-4 text-left align-middle text-[12px] font-semibold uppercase tracking-wide text-background lg:table-cell">Type</th>
+                  <th scope="col" className="h-12 px-4 text-right align-middle text-[12px] font-semibold uppercase tracking-wide text-background">UX Score</th>
+                  <th scope="col" className="hidden h-12 px-4 text-left align-middle text-[12px] font-semibold uppercase tracking-wide text-background sm:table-cell">Priority breakdown</th>
+                  <th scope="col" className="h-12 px-4 text-left align-middle text-[12px] font-semibold uppercase tracking-wide text-background">Status</th>
+                  <th scope="col" className="hidden h-12 px-4 text-left align-middle text-[12px] font-semibold uppercase tracking-wide text-background xl:table-cell">Owner</th>
+                  <th scope="col" className="hidden h-12 px-4 text-left align-middle text-[12px] font-semibold uppercase tracking-wide text-background xl:table-cell">Created</th>
+                  <th scope="col" className="h-12 px-2 text-right align-middle text-[12px] font-semibold uppercase tracking-wide text-background">Actions</th>
                 </tr>
               </thead>
               <tbody className="[&_tr:nth-child(even)]:bg-muted/40 [&_tr:last-child]:border-0">

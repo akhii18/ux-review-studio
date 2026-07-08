@@ -3,7 +3,7 @@
 import { FormEvent, Suspense, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Check, ChevronDown, Eye, EyeOff, Lock, Mail, X } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import {
   signin as apiSignin,
   signup as apiSignup,
@@ -250,24 +250,38 @@ function AuthPageContent() {
           </div>
 
           {/* Tabs */}
-          <div className="bg-[#d9d3cc] p-1 rounded-xl flex mb-5">
+          <div
+            role="tablist"
+            aria-label="Authentication mode"
+            className="bg-[#d9d3cc] p-1 rounded-xl flex mb-5"
+          >
             <button
+              type="button"
+              role="tab"
+              id="auth-tab-signin"
+              aria-selected={tab === "signin"}
+              aria-controls="auth-panel-signin"
               onClick={() => setTab("signin")}
-              className={`flex-1 py-2 text-sm font-medium rounded-lg transition ${
+              className={`flex-1 min-h-11 py-2 text-sm font-medium rounded-lg transition ${
                 tab === "signin"
                   ? "bg-white shadow text-gray-900"
-                  : "text-gray-600"
+                  : "text-gray-700"
               }`}
             >
               Sign in
             </button>
 
             <button
+              type="button"
+              role="tab"
+              id="auth-tab-signup"
+              aria-selected={tab === "signup"}
+              aria-controls="auth-panel-signup"
               onClick={() => setTab("signup")}
-              className={`flex-1 py-2 text-sm font-medium rounded-lg transition ${
+              className={`flex-1 min-h-11 py-2 text-sm font-medium rounded-lg transition ${
                 tab === "signup"
                   ? "bg-white shadow text-gray-900"
-                  : "text-gray-600"
+                  : "text-gray-700"
               }`}
             >
               Sign up
@@ -275,8 +289,11 @@ function AuthPageContent() {
 
             <button
               type="button"
+              role="tab"
+              aria-selected={false}
+              aria-disabled="true"
               disabled
-              className="flex-1 py-2 text-sm font-medium rounded-lg text-gray-400 cursor-not-allowed"
+              className="flex-1 min-h-11 py-2 text-sm font-medium rounded-lg text-gray-500 cursor-not-allowed"
             >
               SSO
             </button>
@@ -285,18 +302,24 @@ function AuthPageContent() {
           {/* ✅ SIGN IN */}
           {tab === "signin" && (
             <form
+              id="auth-panel-signin"
+              role="tabpanel"
+              aria-labelledby="auth-tab-signin"
               onSubmit={handleSignIn}
               className="space-y-4"
             >
 
               <div>
-                <label className="text-sm font-medium">Email</label>
+                <label htmlFor="signin-email" className="text-sm font-medium">Email</label>
                 <input
+                  id="signin-email"
                   type="text"
                   inputMode="email"
                   autoComplete="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value.replace(/^\s+/, ""))}
+                  aria-invalid={email.length > 0 && !isSigninEmailValid}
+                  aria-describedby="signin-email-help"
                   className={`w-full mt-1 border rounded-lg px-3 py-2 shadow-sm focus:outline-none focus:ring-2 ${email.length === 0 && !didTrySigninSubmit
                     ? "border-gray-300 focus:ring-gray-300"
                     : isSigninEmailValid
@@ -304,7 +327,7 @@ function AuthPageContent() {
                       : "border-red-500 focus:ring-red-500"
                     }`}
                 />
-                <div className="mt-1 flex items-center gap-2 text-xs font-medium">
+                <div id="signin-email-help" className="mt-1 flex items-center gap-2 text-xs font-medium">
                   {email.length === 0 ? (
                     <span className="text-gray-400"></span>
                   ) : isSigninEmailValid ? (
@@ -322,12 +345,15 @@ function AuthPageContent() {
               </div>
 
               <div>
-                <label className="text-sm font-medium">Password</label>
+                <label htmlFor="signin-password" className="text-sm font-medium">Password</label>
                 <div className="relative mt-1">
                   <input
+                    id="signin-password"
                     type={showSigninPassword ? "text" : "password"}
+                    autoComplete="current-password"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
+                    aria-invalid={password.length === 0 && didTrySigninSubmit}
                     className={`w-full border rounded-lg px-3 py-2 pr-10 shadow-sm focus:outline-none focus:ring-2 ${password.length === 0 && !didTrySigninSubmit
                       ? "border-gray-300 focus:ring-gray-300"
                       : isSigninPasswordValid
@@ -338,7 +364,7 @@ function AuthPageContent() {
                   <button
                     type="button"
                     onClick={() => setShowSigninPassword((prev) => !prev)}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-gray-500 hover:text-gray-700"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 min-h-11 min-w-11 rounded p-1 text-gray-600 hover:text-gray-800"
                     aria-label={showSigninPassword ? "Hide password" : "Show password"}
                   >
                     {showSigninPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
@@ -346,12 +372,12 @@ function AuthPageContent() {
                 </div>
               </div>
 
-              {error && <p className="text-sm text-red-600">{error}</p>}
+              {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
 
               <button
                 type="submit"
                 disabled={isSubmitting}
-                className="w-full bg-[#12083c] text-white py-3 rounded-xl font-medium"
+                className="w-full min-h-11 bg-[#12083c] text-white py-3 rounded-xl font-medium"
               >
                 {isSubmitting ? "Signing in..." : "Sign in"}
               </button>
@@ -361,11 +387,19 @@ function AuthPageContent() {
 
           {/* ✅ SIGN UP */}
           {tab === "signup" && (
-            <form className="space-y-4" onSubmit={handleSignUp}>
+            <form
+              id="auth-panel-signup"
+              role="tabpanel"
+              aria-labelledby="auth-tab-signup"
+              className="space-y-4"
+              onSubmit={handleSignUp}
+            >
 
               <div>
-                <label className="text-sm font-medium">Full name</label>
+                <label htmlFor="signup-name" className="text-sm font-medium">Full name</label>
                 <input
+                  id="signup-name"
+                  autoComplete="name"
                   value={signupName}
                   onChange={(e) => {
                     const sanitized = e.target.value
@@ -399,10 +433,11 @@ function AuthPageContent() {
               </div>
 
               <div>
-                <label className="text-sm font-medium">Email</label>
+                <label htmlFor="signup-email" className="text-sm font-medium">Email</label>
                 <div className="relative mt-1">
-                  <Mail className="absolute left-3 top-2.5 w-4 h-4 text-gray-400" />
+                  <Mail className="absolute left-3 top-2.5 w-4 h-4 text-gray-500" aria-hidden="true" />
                   <input
+                    id="signup-email"
                     type="text"
                     inputMode="email"
                     autoComplete="email"
@@ -434,11 +469,13 @@ function AuthPageContent() {
               </div>
 
               <div>
-                <label className="text-sm font-medium">Password</label>
+                <label htmlFor="signup-password" className="text-sm font-medium">Password</label>
                 <div className="relative mt-1">
-                  <Lock className="absolute left-3 top-2.5 w-4 h-4 text-gray-400" />
+                  <Lock className="absolute left-3 top-2.5 w-4 h-4 text-gray-500" aria-hidden="true" />
                   <input
+                    id="signup-password"
                     type={showSignupPassword ? "text" : "password"}
+                    autoComplete="new-password"
                     value={signupPassword}
                     onChange={(e) => {
                       setSignupPassword(e.target.value);
@@ -458,7 +495,7 @@ function AuthPageContent() {
                   <button
                     type="button"
                     onClick={() => setShowSignupPassword((prev) => !prev)}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-gray-500 hover:text-gray-700"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 min-h-11 min-w-11 rounded p-1 text-gray-600 hover:text-gray-800"
                     aria-label={showSignupPassword ? "Hide password" : "Show password"}
                   >
                     {showSignupPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
@@ -496,12 +533,14 @@ function AuthPageContent() {
               </div>
 
               <div>
-                <label className="text-sm font-medium">Confirm password</label>
+                <label htmlFor="signup-confirm-password" className="text-sm font-medium">Confirm password</label>
                 <div className="relative mt-1">
-                  <Lock className="absolute left-3 top-2.5 w-4 h-4 text-gray-400" />
+                  <Lock className="absolute left-3 top-2.5 w-4 h-4 text-gray-500" aria-hidden="true" />
                   <input
+                    id="signup-confirm-password"
                     ref={confirmPasswordRef}
                     type={showConfirmPassword ? "text" : "password"}
+                    autoComplete="new-password"
                     value={confirmPassword}
                     onChange={(e) => {
                       setConfirmPassword(e.target.value);
@@ -516,7 +555,7 @@ function AuthPageContent() {
                   <button
                     type="button"
                     onClick={() => setShowConfirmPassword((prev) => !prev)}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-gray-500 hover:text-gray-700"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 min-h-11 min-w-11 rounded p-1 text-gray-600 hover:text-gray-800"
                     aria-label={showConfirmPassword ? "Hide password" : "Show password"}
                   >
                     {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}

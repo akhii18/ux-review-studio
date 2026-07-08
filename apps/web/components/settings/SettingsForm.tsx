@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { cloneElement, isValidElement, useEffect, useId, useState, type ReactElement, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -13,7 +13,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useGetSettingsQuery } from "@/store/api/settingsApi";
 import { useDispatch } from "react-redux";
 import { markSaved } from "@/store/slices/settingsSlice";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import { me as apiMe } from "@/lib/api";
 
 const integrations = [
@@ -113,12 +113,12 @@ export function SettingsForm() {
               </div>
             ) : (
               <>
-                <Field label="Full name">
+                <Field label="Full name" readOnly>
                   <p className="rounded-md border border-border bg-muted/30 px-3 py-2 text-sm font-medium text-foreground">
                     {profileName || "User"}
                   </p>
                 </Field>
-                <Field label="Email">
+                <Field label="Email" readOnly>
                   <p className="rounded-md border border-border bg-muted/30 px-3 py-2 text-sm font-medium text-foreground">
                     {profileEmail || "—"}
                   </p>
@@ -268,11 +268,31 @@ export function SettingsForm() {
   );
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({ label, children, readOnly = false }: { label: string; children: ReactNode; readOnly?: boolean }) {
+  const fieldId = useId();
+  const labelId = `${fieldId}-label`;
+
+  if (readOnly) {
+    return (
+      <div className="space-y-1.5">
+        <Label id={labelId} className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          {label}
+        </Label>
+        <div aria-labelledby={labelId}>{children}</div>
+      </div>
+    );
+  }
+
+  const control = isValidElement(children)
+    ? cloneElement(children as ReactElement<{ id?: string }>, { id: fieldId })
+    : children;
+
   return (
     <div className="space-y-1.5">
-      <Label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}</Label>
-      {children}
+      <Label htmlFor={fieldId} className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+        {label}
+      </Label>
+      {control}
     </div>
   );
 }
