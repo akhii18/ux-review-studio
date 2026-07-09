@@ -16,12 +16,12 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import {
   Download, Check, RefreshCw, Sparkles, Image as ImageIcon,
   AlertCircle, ChevronLeft, ChevronRight, X, ArrowUpRight, Edit3, Plus,
-  BookOpen, AlertTriangle, MessageSquare, MonitorPlay, ChevronDown,
+  BookOpen, AlertTriangle, MessageSquare, MonitorPlay, ChevronDown, Loader2,
 } from "lucide-react";
 import { PriorityBadge } from "@/components/ui/PriorityBadge";
 import { FindingStatusBadge } from "@/components/ui/FindingStatusBadge";
 import { cn } from "@/lib/utils";
-import { exportReviewReport, getReview, updateFinding, triageFinding } from "@/lib/api";
+import { exportReviewReport, getReview, updateFinding, triageFinding, addComment, regenerateFinding } from "@/lib/api";
 import { downloadReport } from "@/lib/reportExport";
 import { useAppDispatch } from "@/store/hooks";
 import { addNotification } from "@/store/slices/notificationsSlice";
@@ -35,7 +35,7 @@ import {
 import { toast } from "sonner";
 import Link from "next/link";
 
-type TriageStatus = "PROPOSED" | "ACCEPTED" | "EDITED" | "DISMISSED" | "ESCALATED";
+type TriageStatus = "PROPOSED" | "ACCEPTED" | "EDITED" | "DISMISSED" | "ESCALATED" | "FALSE_POSITIVE";
 
 interface ReviewBasisItem {
   id?: string;
@@ -52,6 +52,13 @@ interface BoundingBoxRef {
     width: number;
     height: number;
   };
+}
+
+interface FindingComment {
+  id: string;
+  text: string;
+  authorName?: string;
+  createdAt: string;
 }
 
 interface Finding {
@@ -78,6 +85,7 @@ interface Finding {
   notes?: string;
   reviewBasis: ReviewBasisItem[];
   bboxRefs?: unknown;
+  comments?: FindingComment[];
 }
 
 interface WorkspaceScreen {
@@ -161,13 +169,46 @@ function clamp01(value: number): number {
 }
 
 function normalizeBBoxRef(ref: unknown): BoundingBoxRef | null {
-  if (!isRecord(ref) || !isRecord(ref.bbox)) return null;
+  if (!isRecord(ref)) return null;
 
-  const screenIndex = Number(ref.screenIndex);
-  const x = Number(ref.bbox.x);
-  const y = Number(ref.bbox.y);
-  const width = Number(ref.bbox.width);
-  const height = Number(ref.bbox.height);
+  const bboxValue = isRecord(ref.bbox)
+    ? ref.bbox
+    : isRecord(ref.box)
+    ? ref.box
+    : isRecord(ref.rect)
+    ? ref.rect
+    : null;
+
+  if (!bboxValue) return null;
+
+  const rawScreenIndex =
+    ref.screenIndex ??
+    ref.screen ??
+    ref.imageIndex ??
+    ref.pageIndex;
+
+  const screenIndex = typeof rawScreenIndex === "string"
+    ? Number(rawScreenIndex.replace(/[^0-9.-]/g, ""))
+    : Number(rawScreenIndex);
+
+  let x = Number(bboxValue.x);
+  let y = Number(bboxValue.y);
+  let width = Number(bboxValue.width);
+  let height = Number(bboxValue.height);
+
+  if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(width) || !Number.isFinite(height)) {
+    const x0 = Number(bboxValue.x0);
+    const y0 = Number(bboxValue.y0);
+    const x1 = Number(bboxValue.x1);
+    const y1 = Number(bboxValue.y1);
+
+    if (Number.isFinite(x0) && Number.isFinite(y0) && Number.isFinite(x1) && Number.isFinite(y1)) {
+      x = x0;
+      y = y0;
+      width = x1 - x0;
+      height = y1 - y0;
+    }
+  }
 
   if (
     !Number.isFinite(screenIndex) ||
@@ -197,16 +238,55 @@ function normalizeBBoxRef(ref: unknown): BoundingBoxRef | null {
   };
 }
 
+function normalizeBBoxRefsInput(value: unknown): unknown[] {
+  if (Array.isArray(value)) return value;
+
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      return normalizeBBoxRefsInput(parsed);
+    } catch {
+      return [];
+    }
+  }
+
+  if (isRecord(value)) {
+    if (Array.isArray(value.bboxRefs)) return value.bboxRefs;
+    if (Array.isArray(value.refs)) return value.refs;
+    if (Array.isArray(value.items)) return value.items;
+  }
+
+  return [];
+}
+
 function getValidBBoxRefs(finding: Finding): BoundingBoxRef[] {
-  if (!Array.isArray(finding.bboxRefs)) return [];
-  return finding.bboxRefs
+  return normalizeBBoxRefsInput(finding.bboxRefs)
     .map(normalizeBBoxRef)
     .filter((ref): ref is BoundingBoxRef => Boolean(ref));
 }
 
 function getBboxRefForScreen(finding: Finding, screenIndex?: number): BoundingBoxRef | null {
   if (typeof screenIndex !== "number") return null;
-  return getValidBBoxRefs(finding).find((ref) => ref.screenIndex === screenIndex) ?? null;
+
+  const refs = getValidBBoxRefs(finding);
+  const exact = refs.find((ref) => ref.screenIndex === screenIndex);
+  if (exact) return exact;
+
+  if (refs.length === 0) return null;
+
+  const minIndex = Math.min(...refs.map((ref) => ref.screenIndex));
+  const maxIndex = Math.max(...refs.map((ref) => ref.screenIndex));
+
+  if (minIndex === 1) {
+    const oneBased = refs.find((ref) => ref.screenIndex === screenIndex + 1);
+    if (oneBased) return oneBased;
+  }
+
+  if (screenIndex === 0 && minIndex > 0 && maxIndex > 0) {
+    return refs.find((ref) => ref.screenIndex === minIndex) ?? null;
+  }
+
+  return null;
 }
 
 function getBboxCenter(ref: BoundingBoxRef): { x: number; y: number } {
@@ -344,6 +424,7 @@ function WorkspaceContent() {
   const [open, setOpen] = useState<Finding | null>(null);
   const [openCluster, setOpenCluster] = useState<PinCluster | null>(null);
   const [imageLoadFailed, setImageLoadFailed] = useState(false);
+  const unplacedDiagToastShownRef = useRef<string | null>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
   const imageRef = useRef<HTMLImageElement>(null);
   const [imageLayout, setImageLayout] = useState<ImageLayout | null>(null);
@@ -565,6 +646,53 @@ function WorkspaceContent() {
 
   const unplacedPinCount = unplacedFindings.length;
 
+  useEffect(() => {
+    if (!screen || typeof screen.screenIndex !== "number") return;
+    if (imageLoadFailed) return;
+    if (visibleScreenFindingCount === 0) return;
+    if (unplacedPinCount !== visibleScreenFindingCount) return;
+
+    const diagKey = `${screen.id}:${visibleScreenFindingCount}:${unplacedPinCount}`;
+    if (unplacedDiagToastShownRef.current === diagKey) return;
+    unplacedDiagToastShownRef.current = diagKey;
+
+    const refsSummary = screenFindings.map((finding) => {
+      const normalizedRefs = getValidBBoxRefs(finding);
+      const rawRefs = normalizeBBoxRefsInput(finding.bboxRefs);
+      return {
+        id: finding.id,
+        title: finding.title,
+        screen: finding.screen,
+        rawRefCount: rawRefs.length,
+        normalizedRefCount: normalizedRefs.length,
+        normalizedIndexes: normalizedRefs.map((ref) => ref.screenIndex),
+      };
+    });
+
+    toast.warning(
+      `All findings are unplaced on \"${screen.name}\". Diagnostics: ${JSON.stringify(refsSummary.slice(0, 5))}`,
+      { duration: 12000 }
+    );
+  }, [screen, imageLoadFailed, visibleScreenFindingCount, unplacedPinCount, screenFindings]);
+
+  useEffect(() => {
+    if (!screen || typeof screen.screenIndex !== "number") return;
+    if (imageLoadFailed) return;
+    if (unplacedPinCount === 0) return;
+
+    const hasAnyPlaced = pinPlacements.length > 0;
+    if (!hasAnyPlaced) return;
+
+    const diagKey = `partial:${screen.id}:${pinPlacements.length}:${unplacedPinCount}`;
+    if (unplacedDiagToastShownRef.current === diagKey) return;
+    unplacedDiagToastShownRef.current = diagKey;
+
+    toast.info(
+      `Partial pin placement on \"${screen.name}\": placed=${pinPlacements.length}, unplaced=${unplacedPinCount}. This is temporary debug info for prod diagnostics.`,
+      { duration: 9000 }
+    );
+  }, [screen, imageLoadFailed, pinPlacements.length, unplacedPinCount]);
+
   const updateImageLayout = useCallback(() => {
     const canvas = canvasRef.current;
     const image = imageRef.current;
@@ -618,11 +746,11 @@ function WorkspaceContent() {
 
   const exportable = triage.proposed === 0 && allAcceptedHaveBasis && (triage.accepted + triage.edited > 0);
 
-  const handleDownload = useCallback((report: any, format: "pdf" | "word") => {
+  const handleDownload = useCallback((report: any, format: "pdf" | "word" | "html") => {
     downloadReport(report, format);
   }, []);
 
-  const handleExport = useCallback(async (format: "pdf" | "word") => {
+  const handleExport = useCallback(async (format: "pdf" | "word" | "html") => {
     if (!reviewId) return;
     try {
       const report = await exportReviewReport(reviewId);
@@ -637,7 +765,7 @@ function WorkspaceContent() {
       handleDownload(report, format);
       toast.success("Report exported");
     } catch (error: any) {
-      toast.error(error?.message ?? "Triage or review the findings for report export");
+      toast.error(error?.message ?? "Failed to export report");
     }
   }, [dispatch, handleDownload, reviewData?.name, reviewId]);
 
@@ -737,6 +865,9 @@ function WorkspaceContent() {
                       </DropdownMenuItem>
                       <DropdownMenuItem onSelect={() => { void handleExport("word"); }}>
                         Export as Word
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onSelect={() => { void handleExport("html"); }}>
+                        Export as HTML
                       </DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>
@@ -885,8 +1016,8 @@ function WorkspaceContent() {
                                 }}
                                 className={cn(
                                   "absolute z-10 flex h-7 w-7 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full text-[10px] font-bold text-white shadow-md ring-2 ring-card transition hover:scale-110",
-                                  pinTone[severity],
-                                  isCluster && "h-8 w-8 ring-4 ring-card before:absolute before:inset-[-5px] before:-z-10 before:rounded-full before:border-2 before:border-current before:bg-card before:opacity-80 after:absolute after:inset-[-9px] after:-z-20 after:rounded-full after:border after:border-current after:opacity-35",
+                                  isCluster ? "bg-[rgb(174, 55, 166)]" : pinTone[severity],
+                                  isCluster && "h-8 w-8 bg-[rgb(174, 55, 166)] ring-4 ring-[rgb(174, 55, 166)] before:absolute before:inset-[-5px] before:-z-10 before:rounded-full before:border-2 before:border-[rgb(174, 55, 166)] before:bg-transparent before:opacity-100 after:absolute after:inset-[-9px] after:-z-20 after:rounded-full after:border after:border-[rgb(174, 55, 166)] after:opacity-35"
                                 )}
                                 style={style}
                                 aria-label={isCluster
@@ -1003,6 +1134,7 @@ function WorkspaceContent() {
               findingMetadataOptions={findingMetadataOptions}
               onAction={(status) => handleFindingAction(open.id, status)}
               onBasisChange={(basis) => handleBasisChange(open.id, basis)}
+              onFindingUpdate={(updated) => setOpen(updated)}
             />
           ) : openCluster ? (
             <FindingClusterDetail
@@ -1029,6 +1161,7 @@ interface FindingDetailProps {
   findingMetadataOptions: FindingOutputOptionKey[];
   onAction: (status: TriageStatus) => void;
   onBasisChange: (basis: ReviewBasisItem[]) => void;
+  onFindingUpdate?: (finding: Finding) => void;
 }
 
 interface FindingClusterDetailProps {
@@ -1075,8 +1208,50 @@ function FindingClusterDetail({ cluster, onSelect }: FindingClusterDetailProps) 
   );
 }
 
-function FindingDetail({ finding, screenImageUrl, findingMetadataOptions, onAction, onBasisChange }: FindingDetailProps) {
+function FindingDetail({ finding, screenImageUrl, findingMetadataOptions, onAction, onBasisChange, onFindingUpdate }: FindingDetailProps) {
   const [basisSearch, setBasisSearch] = useState("");
+  const [showComment, setShowComment] = useState(false);
+  const [commentText, setCommentText] = useState("");
+  const [isCommenting, setIsCommenting] = useState(false);
+  const [isRegenerating, setIsRegenerating] = useState(false);
+
+  const handleAddComment = async () => {
+    if (!commentText.trim()) { toast.error("Please enter a comment"); return; }
+    setIsCommenting(true);
+    try {
+      const comment = await addComment(finding.id, { text: commentText.trim() });
+      toast.success("Comment added");
+      setCommentText("");
+      setShowComment(false);
+      if (onFindingUpdate) {
+        onFindingUpdate({
+          ...finding,
+          comments: [...(finding.comments || []), comment],
+        });
+      }
+    } catch {
+      toast.error("Failed to add comment");
+    } finally {
+      setIsCommenting(false);
+    }
+  };
+
+  const handleRegenerate = async () => {
+    setIsRegenerating(true);
+    try {
+      const userComments = finding.comments && finding.comments.length > 0
+        ? finding.comments.map((c) => c.text)
+        : undefined;
+      const regenerated = await regenerateFinding(finding.id, { userComments });
+      toast.success("Finding regenerated with AI");
+      if (onFindingUpdate) onFindingUpdate(regenerated);
+    } catch {
+      toast.error("Regeneration failed. Please try again.");
+    } finally {
+      setIsRegenerating(false);
+    }
+  };
+
   const hasOutputOption = (option: FindingOutputOptionKey) => findingMetadataOptions.includes(option);
 
   const filteredLibrary = useMemo(() => {
@@ -1246,14 +1421,57 @@ function FindingDetail({ finding, screenImageUrl, findingMetadataOptions, onActi
           <Section title="WCAG criterion">{finding.aiMetadata.wcagCriteria}</Section>
         )}
 
+        {/* User Comments */}
+        {finding.comments && finding.comments.length > 0 && (
+          <div>
+            <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground mb-2">Comments</p>
+            <div className="space-y-2">
+              {finding.comments.map((comment) => (
+                <div key={comment.id} className="rounded-lg border border-border bg-secondary/30 p-3">
+                  <p className="text-sm">{comment.text}</p>
+                  <p className="mt-1.5 text-[10px] text-muted-foreground">
+                    {comment.authorName ?? "You"} · {new Date(comment.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Comment Input */}
+        {showComment && (
+          <div className="rounded-lg border border-border bg-secondary/40 p-3 space-y-2">
+            <p className="text-xs font-medium text-foreground">Add a comment</p>
+            <Textarea
+              value={commentText}
+              onChange={(e) => setCommentText(e.target.value)}
+              placeholder="Type your comment…"
+              className="text-sm"
+              rows={3}
+            />
+            <div className="flex gap-2">
+              <Button size="sm" onClick={handleAddComment} disabled={isCommenting}>
+                {isCommenting ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : <MessageSquare className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />}
+                Save comment
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => { setShowComment(false); setCommentText(""); }}>Cancel</Button>
+            </div>
+          </div>
+        )}
+
         <div className="rounded-lg border border-accent/30 bg-accent/5 p-3">
           <div className="flex items-center gap-2 text-xs font-medium text-accent">
-            <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
-            AI confidence · {finding.confidence}%
+            {isRegenerating ? (
+              <><Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />Regenerating with AI…</>
+            ) : (
+              <><Sparkles className="h-3.5 w-3.5" aria-hidden="true" />AI confidence · {finding.confidence}%</>
+            )}
           </div>
-          <p className="mt-1 text-xs text-muted-foreground">
-            You decide the final outcome.
-          </p>
+          {!isRegenerating && (
+            <p className="mt-1 text-xs text-muted-foreground">
+              You decide the final outcome.
+            </p>
+          )}
         </div>
 
         <Separator />
@@ -1287,10 +1505,20 @@ function FindingDetail({ finding, screenImageUrl, findingMetadataOptions, onActi
           >
             <ArrowUpRight className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />Escalate
           </Button>
-          <Button size="sm" variant="outline" className="min-h-9"><MessageSquare className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />Comment</Button>
+          <Button size="sm" variant="outline" className="min-h-9" onClick={() => setShowComment(true)} disabled={showComment}>
+            <MessageSquare className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />Comment
+          </Button>
           <Button size="sm" variant="outline" className="min-h-9">Create Jira ticket</Button>
-          <Button size="sm" variant="ghost" className="min-h-9"><RefreshCw className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />Regenerate</Button>
-          <Button size="sm" variant="ghost" className="min-h-9"><AlertCircle className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />False positive</Button>
+          <Button size="sm" variant="ghost" className="min-h-9" onClick={handleRegenerate} disabled={isRegenerating}>
+            <RefreshCw className={cn("mr-1.5 h-3.5 w-3.5", isRegenerating && "animate-spin")} aria-hidden="true" />Regenerate
+          </Button>
+          <Button
+            size="sm" variant="ghost" className="min-h-9"
+            onClick={() => onAction("FALSE_POSITIVE" as TriageStatus)}
+            disabled={finding.status === "FALSE_POSITIVE"}
+          >
+            <AlertCircle className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />False positive
+          </Button>
         </div>
       </div>
     </>

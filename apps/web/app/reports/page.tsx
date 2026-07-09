@@ -20,8 +20,8 @@ import DOMPurify from "dompurify";
 function ReportsPageContent() {
   const searchParams = useSearchParams();
   const reviewId = searchParams.get("reviewId");
-  const [reviews, setReviews]   = useState<any[]>([]);
-  const [loading, setLoading]   = useState(true);
+  const [reviews, setReviews] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<any | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
 
@@ -43,7 +43,7 @@ function ReportsPageContent() {
     openReport(reviewId);
   }, [reviewId]);
 
-  function handleDownload(report: any, format: "pdf" | "word") {
+  function handleDownload(report: any, format: "pdf" | "word" | "html") {
     try {
       downloadReport(report, format);
     } catch (error: any) {
@@ -126,6 +126,16 @@ function ReportsPageContent() {
                         }}>
                           Download as Word
                         </DropdownMenuItem>
+                        <DropdownMenuItem onSelect={async () => {
+                          try {
+                            const report = await exportReviewReport(r.id);
+                            handleDownload(report, "html");
+                          } catch (error: any) {
+                            toast.error(error?.message ?? "Failed to export report");
+                          }
+                        }}>
+                          Download as HTML
+                        </DropdownMenuItem>
                       </DropdownMenuContent>
                     </DropdownMenu>
                   </div>
@@ -136,7 +146,6 @@ function ReportsPageContent() {
         )}
       </div>
 
-      {/* Report viewer sheet */}
       <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
         <SheetContent side="right" className="w-[92vw] max-w-none sm:w-[58vw] sm:max-w-[58vw] p-0 flex flex-col">
           <SheetHeader className="px-6 py-4 border-b border-border shrink-0">
@@ -161,6 +170,9 @@ function ReportsPageContent() {
                   </DropdownMenuItem>
                   <DropdownMenuItem onSelect={() => handleDownload(selected, "word")}>
                     Download as Word
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => handleDownload(selected, "html")}>
+                    Download as HTML
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>

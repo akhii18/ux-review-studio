@@ -1,7 +1,7 @@
 import { z } from "zod";
 export declare const ReviewAreaSchema: z.ZodEnum<["USABILITY", "ACCESSIBILITY", "CONSISTENCY", "CONTENT_UX", "RISK", "RECOMMENDATIONS"]>;
 export declare const SeveritySchema: z.ZodEnum<["P0", "P1", "P2"]>;
-export declare const FindingStatusSchema: z.ZodEnum<["PROPOSED", "ACCEPTED", "EDITED", "DISMISSED", "ESCALATED"]>;
+export declare const FindingStatusSchema: z.ZodEnum<["PROPOSED", "ACCEPTED", "EDITED", "DISMISSED", "ESCALATED", "FALSE_POSITIVE"]>;
 export declare const ChecklistStatusSchema: z.ZodEnum<["DRAFT", "APPROVED", "DEPRECATED"]>;
 export declare const PrincipleCategorySchema: z.ZodEnum<["NIELSEN_HEURISTICS", "COGNITIVE_LAWS", "GESTALT", "VISUAL_DESIGN", "ACCESSIBILITY_WCAG", "CONTENT_MICROCOPY", "CUSTOM"]>;
 export declare const ReviewBasisItemSchema: z.ZodObject<{
@@ -26,7 +26,7 @@ export declare const UpdateFindingSchema: z.ZodObject<{
     recommendation: z.ZodOptional<z.ZodString>;
     severity: z.ZodOptional<z.ZodEnum<["P0", "P1", "P2"]>>;
     notes: z.ZodOptional<z.ZodString>;
-    status: z.ZodOptional<z.ZodEnum<["PROPOSED", "ACCEPTED", "EDITED", "DISMISSED", "ESCALATED"]>>;
+    status: z.ZodOptional<z.ZodEnum<["PROPOSED", "ACCEPTED", "EDITED", "DISMISSED", "ESCALATED", "FALSE_POSITIVE"]>>;
     reviewBasis: z.ZodOptional<z.ZodArray<z.ZodObject<{
         id: z.ZodOptional<z.ZodString>;
         type: z.ZodString;
@@ -44,7 +44,7 @@ export declare const UpdateFindingSchema: z.ZodObject<{
         explanation?: string | undefined;
     }>, "many">>;
 }, "strip", z.ZodTypeAny, {
-    status?: "PROPOSED" | "ACCEPTED" | "EDITED" | "DISMISSED" | "ESCALATED" | undefined;
+    status?: "PROPOSED" | "ACCEPTED" | "EDITED" | "DISMISSED" | "ESCALATED" | "FALSE_POSITIVE" | undefined;
     title?: string | undefined;
     description?: string | undefined;
     recommendation?: string | undefined;
@@ -57,7 +57,7 @@ export declare const UpdateFindingSchema: z.ZodObject<{
         id?: string | undefined;
     }[] | undefined;
 }, {
-    status?: "PROPOSED" | "ACCEPTED" | "EDITED" | "DISMISSED" | "ESCALATED" | undefined;
+    status?: "PROPOSED" | "ACCEPTED" | "EDITED" | "DISMISSED" | "ESCALATED" | "FALSE_POSITIVE" | undefined;
     title?: string | undefined;
     description?: string | undefined;
     recommendation?: string | undefined;
@@ -71,7 +71,7 @@ export declare const UpdateFindingSchema: z.ZodObject<{
     }[] | undefined;
 }>;
 export declare const TriageFindingSchema: z.ZodObject<{
-    action: z.ZodEnum<["ACCEPT", "EDIT", "DISMISS", "ESCALATE"]>;
+    action: z.ZodEnum<["ACCEPT", "EDIT", "DISMISS", "ESCALATE", "FALSE_POSITIVE"]>;
     title: z.ZodOptional<z.ZodString>;
     description: z.ZodOptional<z.ZodString>;
     recommendation: z.ZodOptional<z.ZodString>;
@@ -94,7 +94,7 @@ export declare const TriageFindingSchema: z.ZodObject<{
         explanation?: string | undefined;
     }>, "many">>;
 }, "strip", z.ZodTypeAny, {
-    action: "ACCEPT" | "EDIT" | "DISMISS" | "ESCALATE";
+    action: "ACCEPT" | "EDIT" | "DISMISS" | "ESCALATE" | "FALSE_POSITIVE";
     title?: string | undefined;
     description?: string | undefined;
     recommendation?: string | undefined;
@@ -107,7 +107,7 @@ export declare const TriageFindingSchema: z.ZodObject<{
         id?: string | undefined;
     }[] | undefined;
 }, {
-    action: "ACCEPT" | "EDIT" | "DISMISS" | "ESCALATE";
+    action: "ACCEPT" | "EDIT" | "DISMISS" | "ESCALATE" | "FALSE_POSITIVE";
     title?: string | undefined;
     description?: string | undefined;
     recommendation?: string | undefined;
@@ -129,7 +129,7 @@ export declare const EscalateFindingSchema: z.ZodObject<{
 }>;
 export declare const FindingsQuerySchema: z.ZodObject<{
     area: z.ZodOptional<z.ZodEnum<["USABILITY", "ACCESSIBILITY", "CONSISTENCY", "CONTENT_UX", "RISK", "RECOMMENDATIONS"]>>;
-    status: z.ZodOptional<z.ZodEnum<["PROPOSED", "ACCEPTED", "EDITED", "DISMISSED", "ESCALATED"]>>;
+    status: z.ZodOptional<z.ZodEnum<["PROPOSED", "ACCEPTED", "EDITED", "DISMISSED", "ESCALATED", "FALSE_POSITIVE"]>>;
     severity: z.ZodOptional<z.ZodEnum<["P0", "P1", "P2"]>>;
     page: z.ZodDefault<z.ZodNumber>;
     pageSize: z.ZodDefault<z.ZodNumber>;
@@ -140,11 +140,11 @@ export declare const FindingsQuerySchema: z.ZodObject<{
     pageSize: number;
     sortBy: "severity" | "confidence" | "createdAt";
     sortOrder: "asc" | "desc";
-    status?: "PROPOSED" | "ACCEPTED" | "EDITED" | "DISMISSED" | "ESCALATED" | undefined;
+    status?: "PROPOSED" | "ACCEPTED" | "EDITED" | "DISMISSED" | "ESCALATED" | "FALSE_POSITIVE" | undefined;
     severity?: "P0" | "P1" | "P2" | undefined;
     area?: "USABILITY" | "ACCESSIBILITY" | "CONSISTENCY" | "CONTENT_UX" | "RISK" | "RECOMMENDATIONS" | undefined;
 }, {
-    status?: "PROPOSED" | "ACCEPTED" | "EDITED" | "DISMISSED" | "ESCALATED" | undefined;
+    status?: "PROPOSED" | "ACCEPTED" | "EDITED" | "DISMISSED" | "ESCALATED" | "FALSE_POSITIVE" | undefined;
     severity?: "P0" | "P1" | "P2" | undefined;
     area?: "USABILITY" | "ACCESSIBILITY" | "CONSISTENCY" | "CONTENT_UX" | "RISK" | "RECOMMENDATIONS" | undefined;
     page?: number | undefined;
@@ -362,3 +362,22 @@ export type ApproveChecklist = z.infer<typeof ApproveChecklistSchema>;
 export type CreatePrinciple = z.infer<typeof CreatePrincipleSchema>;
 export type UpdatePrinciple = z.infer<typeof UpdatePrincipleSchema>;
 export type UpdateSettings = z.infer<typeof UpdateSettingsSchema>;
+export declare const CreateCommentSchema: z.ZodObject<{
+    text: z.ZodString;
+    authorName: z.ZodDefault<z.ZodString>;
+}, "strip", z.ZodTypeAny, {
+    text: string;
+    authorName: string;
+}, {
+    text: string;
+    authorName?: string | undefined;
+}>;
+export declare const RegenerateFindingSchema: z.ZodObject<{
+    userComments: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+}, "strip", z.ZodTypeAny, {
+    userComments?: string[] | undefined;
+}, {
+    userComments?: string[] | undefined;
+}>;
+export type CreateComment = z.infer<typeof CreateCommentSchema>;
+export type RegenerateFinding = z.infer<typeof RegenerateFindingSchema>;

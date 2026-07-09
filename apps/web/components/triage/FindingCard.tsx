@@ -3,7 +3,7 @@
 import { useState } from "react";
 import {
   Check, Edit3, X, ArrowUpRight, MessageSquare, Sparkles,
-  BookOpen, Plus, AlertTriangle,
+  BookOpen, Plus, AlertTriangle, RefreshCw, AlertCircle, Send, Loader2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -20,7 +20,12 @@ import { FindingStatusBadge } from "@/components/ui/FindingStatusBadge";
 import { cn } from "@/lib/utils";
 import type { FindingWithBasis, ReviewBasisItem } from "@uxm/shared";
 import { REVIEW_BASIS_LIBRARY } from "@uxm/shared";
-import { useTriageFindingMutation, useEscalateFindingMutation } from "@/store/api/findingsApi";
+import {
+  useTriageFindingMutation,
+  useEscalateFindingMutation,
+  useAddCommentMutation,
+  useRegenerateFindingMutation,
+} from "@/store/api/findingsApi";
 import { toast } from "sonner";
 
 interface FindingCardProps {
@@ -33,15 +38,19 @@ export function FindingCard({ finding, open, onClose }: FindingCardProps) {
   const [basisSearch, setBasisSearch] = useState("");
   const [escalateReason, setEscalateReason] = useState("");
   const [showEscalate, setShowEscalate] = useState(false);
+  const [showComment, setShowComment] = useState(false);
+  const [commentText, setCommentText] = useState("");
 
   const [triage, { isLoading: triageLoading }] = useTriageFindingMutation();
   const [escalate, { isLoading: escalateLoading }] = useEscalateFindingMutation();
+  const [addComment, { isLoading: commentLoading }] = useAddCommentMutation();
+  const [regenerate, { isLoading: regenerateLoading }] = useRegenerateFindingMutation();
 
-  const handleTriage = async (action: "ACCEPT" | "EDIT" | "DISMISS" | "ESCALATE") => {
+  const handleTriage = async (action: "ACCEPT" | "EDIT" | "DISMISS" | "ESCALATE" | "FALSE_POSITIVE") => {
     if (action === "ESCALATE") { setShowEscalate(true); return; }
     try {
       await triage({ id: finding.id, payload: { action } }).unwrap();
-      toast.success(`Finding ${action.toLowerCase()}d`);
+      toast.success(`Finding ${action.toLowerCase().replace("_", " ")}d`);
       onClose();
     } catch {
       toast.error("Action failed. Please try again.");
@@ -57,6 +66,30 @@ export function FindingCard({ finding, open, onClose }: FindingCardProps) {
       onClose();
     } catch {
       toast.error("Escalation failed");
+    }
+  };
+
+  const handleAddComment = async () => {
+    if (!commentText.trim()) { toast.error("Please enter a comment"); return; }
+    try {
+      await addComment({ id: finding.id, payload: { text: commentText.trim() } }).unwrap();
+      toast.success("Comment added");
+      setCommentText("");
+      setShowComment(false);
+    } catch {
+      toast.error("Failed to add comment");
+    }
+  };
+
+  const handleRegenerate = async () => {
+    try {
+      const userComments = finding.comments && finding.comments.length > 0
+        ? finding.comments.map((c) => c.text)
+        : undefined;
+      await regenerate({ id: finding.id, payload: { userComments } }).unwrap();
+      toast.success("Finding regenerated with AI");
+    } catch {
+      toast.error("Regeneration failed. Please try again.");
     }
   };
 
@@ -170,10 +203,56 @@ export function FindingCard({ finding, open, onClose }: FindingCardProps) {
           {finding.businessImpact && <Section title="Business impact">{finding.businessImpact}</Section>}
           {finding.a11yImpact && <Section title="Accessibility impact">{finding.a11yImpact}</Section>}
 
+          {/* User Comments */}
+          {finding.comments && finding.comments.length > 0 && (
+            <div className="space-y-3">
+              {finding.comments.map((comment) => (
+                <div key={comment.id}>
+                  <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">User Comment</p>
+                  <div className="mt-1 rounded-lg border border-border bg-secondary/30 p-3">
+                    <p className="text-sm">{comment.text}</p>
+                    <p className="mt-1.5 text-[10px] text-muted-foreground">
+                      {comment.authorName} · {new Date(comment.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Comment Input */}
+          {showComment && (
+            <div className="rounded-lg border border-border bg-secondary/40 p-3 space-y-2">
+              <p className="text-xs font-medium text-foreground">Add a comment</p>
+              <Textarea
+                value={commentText}
+                onChange={(e) => setCommentText(e.target.value)}
+                placeholder="Type your comment…"
+                className="text-sm"
+                rows={3}
+              />
+              <div className="flex gap-2">
+                <Button size="sm" onClick={handleAddComment} disabled={commentLoading}>
+                  {commentLoading ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Send className="mr-1.5 h-3.5 w-3.5" />}
+                  Save comment
+                </Button>
+                <Button size="sm" variant="ghost" onClick={() => { setShowComment(false); setCommentText(""); }}>Cancel</Button>
+              </div>
+            </div>
+          )}
+
+          {/* AI Confidence */}
           <div className="rounded-lg border border-accent/30 bg-accent/5 p-3">
             <div className="flex items-center gap-2 text-xs font-medium text-primary">
-              <Sparkles className="h-3.5 w-3.5" />AI confidence · {finding.confidence}%
+              {regenerateLoading ? (
+                <><Loader2 className="h-3.5 w-3.5 animate-spin" />Regenerating with AI…</>
+              ) : (
+                <><Sparkles className="h-3.5 w-3.5" />AI confidence · {finding.confidence}%</>
+              )}
             </div>
+            {!regenerateLoading && (
+              <p className="mt-1 text-[11px] text-muted-foreground">You decide the final outcome.</p>
+            )}
           </div>
 
           {showEscalate && (
@@ -210,7 +289,22 @@ export function FindingCard({ finding, open, onClose }: FindingCardProps) {
             <Button size="sm" variant="outline" onClick={() => handleTriage("ESCALATE")} disabled={triageLoading}>
               <ArrowUpRight className="mr-1.5 h-3.5 w-3.5" />Escalate
             </Button>
-            <Button size="sm" variant="ghost"><MessageSquare className="mr-1.5 h-3.5 w-3.5" />Comment</Button>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button size="sm" variant="ghost" onClick={() => setShowComment(true)} disabled={showComment}>
+              <MessageSquare className="mr-1.5 h-3.5 w-3.5" />Comment
+            </Button>
+            <Button size="sm" variant="ghost" onClick={handleRegenerate} disabled={regenerateLoading}>
+              <RefreshCw className={cn("mr-1.5 h-3.5 w-3.5", regenerateLoading && "animate-spin")} />Regenerate
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => handleTriage("FALSE_POSITIVE")}
+              disabled={triageLoading || finding.status === "FALSE_POSITIVE"}
+            >
+              <AlertCircle className="mr-1.5 h-3.5 w-3.5" />False positive
+            </Button>
           </div>
         </div>
       </SheetContent>

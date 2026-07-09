@@ -9,11 +9,14 @@ const Toaster = ({ position = "top-right", ...props }: ToasterProps) => {
     <Sonner
       className="toaster group"
       position={position}
+      closeButton
       toastOptions={{
+        duration: Infinity,
         classNames: {
-          toast: "group toast group-[.toaster]:shadow-lg",
-          error: "!bg-red-600 !text-white !border-red-700",
+          toast: "group toast group-[.toaster]:shadow-lg [&_[data-close-button]]:!opacity-100 [&_[data-close-button]]:!text-foreground [&_[data-close-button]]:!bg-background [&_[data-close-button]]:!border-border [&_[data-close-button]]:!rounded-md [&_[data-close-button]]:!p-1",
+          error: "!bg-red-600 !text-white !border-red-700 [&_[data-close-button]]:!text-white [&_[data-close-button]]:!bg-red-700 [&_[data-close-button]]:!border-red-500",
           description: "group-[.toast]:text-muted-foreground",
+          closeButton: "!opacity-100",
           actionButton: "group-[.toast]:bg-primary group-[.toast]:text-primary-foreground",
           cancelButton: "group-[.toast]:bg-muted group-[.toast]:text-muted-foreground",
         },

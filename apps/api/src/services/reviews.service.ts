@@ -22,6 +22,9 @@ type ReviewAnalyticsRecord = {
   id: string;
   name: string;
   product: string;
+  domain: string;
+  reviewType: string;
+  owner: string;
   status: string;
   uxScore: number | null;
   createdAt: Date;
@@ -340,9 +343,12 @@ export const ReviewsService = {
         return acc;
       }, { P0: 0, P1: 0, P2: 0 });
 
+      const canExportReport = isExportableFindings(review.findings ?? []);
+
       return {
         ...review,
         priorityBreakdown,
+        canExportReport,
       };
     });
   },
@@ -352,12 +358,17 @@ export const ReviewsService = {
     if (!review) throw new AppError(404, "Review not found");
 
     const findings = review.findings as FlowGroupFindingRecord[];
+    const sortedAssets = [...review.assets].sort((a, b) => {
+      const createdDiff = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+      if (createdDiff !== 0) return createdDiff;
+      return a.id.localeCompare(b.id);
+    });
 
     return {
       ...review,
       findingGroups: buildFindingGroups(findings, review.flowDiscovery),
       assets: await Promise.all(
-        review.assets.map(async (asset: ReviewAssetRecord) => ({
+        sortedAssets.map(async (asset: ReviewAssetRecord) => ({
           ...asset,
           storageRef: asset.blobUrl,
           blobUrl: asset.blobUrl ? await getSignedStorageReadUrl(asset.blobUrl) : asset.blobUrl,
@@ -616,11 +627,21 @@ export const ReviewsService = {
       }),
     ]);
 
+    const optionSource = [
+      ...allReviewMeta,
+      ...reviews.map((review) => ({
+        product: review.product,
+        domain: review.domain,
+        reviewType: review.reviewType,
+        owner: review.owner,
+      })),
+    ];
+
     const filterOptions = {
-      products: Array.from(new Set(allReviewMeta.map((review) => (review.product || "").trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b)),
-      domains: Array.from(new Set(allReviewMeta.map((review) => (review.domain || "").trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b)),
-      reviewTypes: Array.from(new Set(allReviewMeta.map((review) => (review.reviewType || "").trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b)),
-      owners: Array.from(new Set(allReviewMeta.map((review) => (review.owner || "").trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b)),
+      products: Array.from(new Set(optionSource.map((review) => (review.product || "").trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b)),
+      domains: Array.from(new Set(optionSource.map((review) => (review.domain || "").trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b)),
+      reviewTypes: Array.from(new Set(optionSource.map((review) => (review.reviewType || "").trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b)),
+      owners: Array.from(new Set(optionSource.map((review) => (review.owner || "").trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b)),
     };
 
     const completed = reviews.filter((r) => String(r.status).toLowerCase() === "completed");
