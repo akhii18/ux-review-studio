@@ -309,7 +309,7 @@ function CriteriaSelectionPanel({
         );
       })}
       {criteria.length === 0 && (
-        <p className="text-xs text-destructive">Select at least one criterion to continue.</p>
+        <p className="text-xs text-destructive">Select at least one criteria to continue.</p>
       )}
     </div>
   );
@@ -1213,7 +1213,7 @@ export default function NewReviewPage() {
                           <p className="text-xs text-muted-foreground">
                             {criteria.length === 0
                               ? "Choose the checks the AI should run for this review."
-                              : `${criteria.length} criterion${criteria.length === 1 ? "" : "s"} selected`}
+                              : `${criteria.length} criteria selected`}
                           </p>
                         </div>
                         <Button
@@ -1227,12 +1227,12 @@ export default function NewReviewPage() {
                         </Button>
                       </div>
                       {criteria.length === 0 && (
-                        <p className="mt-2 text-xs text-destructive">Select at least one criterion to continue.</p>
+                        <p className="mt-2 text-xs text-destructive">Select at least one criteria to continue.</p>
                       )}
                     </div>
                   )}
                   <Field label="Reviewer / owner" className="md:col-span-2">
-                    <div className="min-h-10 rounded-md border border-border bg-muted/30 px-3 py-2 text-sm font-medium text-foreground">
+                    <div className="text-sm font-medium text-foreground px-0.5 -mt-2">
                       {owner || "User"}
                     </div>
                   </Field>
@@ -1608,7 +1608,7 @@ export default function NewReviewPage() {
           </div>
           <div className="flex items-center justify-between border-t border-border pt-4">
             <p className="text-xs text-muted-foreground">
-              {criteria.length} criterion{criteria.length === 1 ? "" : "s"} selected
+              {criteria.length} criteria selected
             </p>
             <Button
               type="button"
@@ -1616,7 +1616,7 @@ export default function NewReviewPage() {
               disabled={criteria.length === 0}
               onClick={() => setIsCustomCriteriaModalOpen(false)}
             >
-              Done
+              Save
             </Button>
           </div>
         </DialogContent>

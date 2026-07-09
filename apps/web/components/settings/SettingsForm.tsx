@@ -114,22 +114,22 @@ export function SettingsForm() {
             ) : (
               <>
                 <Field label="Full name" readOnly>
-                  <p className="rounded-md border border-border bg-muted/30 px-3 py-2 text-sm font-medium text-foreground">
+                  <p className="text-sm font-medium text-foreground px-0.5 -mt-2">
                     {profileName || "User"}
                   </p>
                 </Field>
                 <Field label="Email" readOnly>
-                  <p className="rounded-md border border-border bg-muted/30 px-3 py-2 text-sm font-medium text-foreground">
+                  <p className="text-sm font-medium text-foreground px-0.5 -mt-2">
                     {profileEmail || "—"}
                   </p>
                 </Field>
               </>
             )}
             <Field label="Role">
-              <Input defaultValue="UX Lead" />
+              <Input defaultValue="UX Lead" className="border-transparent bg-transparent shadow-none px-0.5 -mt-3 h-auto focus-visible:ring-0 focus-visible:outline-none" />
             </Field>
             <Field label="Team">
-              <Input defaultValue="Enterprise UX" />
+              <Input defaultValue="Enterprise UX" className="border-transparent bg-transparent shadow-none px-0.5 -mt-3 h-auto focus-visible:ring-0 focus-visible:outline-none" />
             </Field>
           </CardContent>
         </Card>

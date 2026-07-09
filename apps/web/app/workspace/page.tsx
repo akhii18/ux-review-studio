@@ -584,6 +584,10 @@ function WorkspaceContent() {
     }
   }, [screens, selectedScreen]);
 
+  useEffect(() => {
+    toast.dismiss();
+  }, [clusterFindingIndex, open, openCluster, selectedScreen]);
+
   const screen = screens.find((s) => s.id === selectedScreen) ?? screens[0] ?? null;
   const idx = screen ? screens.findIndex((s) => s.id === screen.id) : -1;
 
@@ -1046,23 +1050,23 @@ function WorkspaceContent() {
                                 ) : i + 1}
                               </button>
                             </TooltipTrigger>
-                            <TooltipContent side="top" className="max-w-xs">
+                            <TooltipContent side="top" className="max-w-xs text-white">
                               {isCluster ? (
                                 <div className="space-y-1">
-                                  <p className="text-xs font-medium">{cluster.placements.length} findings here</p>
+                                  <p className="text-xs font-semibold text-white">{cluster.placements.length} findings here</p>
                                   {cluster.placements.slice(0, 3).map(({ finding }) => (
-                                    <p key={finding.id} className="truncate text-[10px] text-muted-foreground">
+                                    <p key={finding.id} className="truncate text-[10px] text-white/95">
                                       {finding.severity} · {finding.title}
                                     </p>
                                   ))}
                                   {cluster.placements.length > 3 && (
-                                    <p className="text-[10px] text-muted-foreground">+{cluster.placements.length - 3} more</p>
+                                    <p className="text-[10px] text-white/95">+{cluster.placements.length - 3} more</p>
                                   )}
                                 </div>
                               ) : primaryFinding ? (
                                 <>
-                                  <p className="text-xs font-medium">{primaryFinding.title}</p>
-                                  <p className="text-[10px] text-muted-foreground">{primaryFinding.severity} · {primaryFinding.area}</p>
+                                  <p className="text-xs font-semibold text-white">{primaryFinding.title}</p>
+                                  <p className="text-[10px] text-white/95">{primaryFinding.severity} · {primaryFinding.area}</p>
                                 </>
                               ) : null}
                             </TooltipContent>
