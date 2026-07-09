@@ -158,24 +158,6 @@ export function AppSidebar() {
       <SidebarFooter className="border-t border-sidebar-border p-2">
         <nav aria-label="Account">
         <SidebarMenu>
-          <SidebarMenuItem>
-            <SidebarMenuButton asChild tooltip="Documentation" className="text-sidebar-foreground hover:bg-sidebar-accent/60 hover:text-sidebar-foreground">
-              <Link href="/settings" onClick={() => handleNavClick("/settings")}>
-                <BookOpen className="h-4 w-4 shrink-0" aria-hidden />
-                <span>Documentation</span>
-              </Link>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-          <SidebarMenuItem>
-            <SidebarMenuButton
-              tooltip="Log out"
-              onClick={handleLogout}
-              className="text-sidebar-foreground hover:bg-sidebar-accent/60 hover:text-sidebar-foreground"
-            >
-              <LogOut className="h-4 w-4 shrink-0" aria-hidden />
-              <span>Log out</span>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
         </SidebarMenu>
         </nav>
       </SidebarFooter>
