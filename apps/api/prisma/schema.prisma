@@ -31,6 +31,7 @@ enum FindingStatus {
   EDITED
   DISMISSED
   ESCALATED
+  FALSE_POSITIVE
 }
 
 enum ChecklistStatus {
@@ -159,6 +160,7 @@ model Finding {
 
   review      Review           @relation(fields: [reviewId], references: [id], onDelete: Cascade)
   reviewBasis ReviewBasisItem[]
+  comments    Comment[]
 
   @@map("findings")
 }
@@ -173,6 +175,18 @@ model ReviewBasisItem {
   finding Finding @relation(fields: [findingId], references: [id], onDelete: Cascade)
 
   @@map("review_basis_items")
+}
+
+model Comment {
+  id        String   @id @default(cuid())
+  findingId String
+  text      String   @db.Text
+  authorName String  @default("User")
+  createdAt DateTime @default(now())
+
+  finding Finding @relation(fields: [findingId], references: [id], onDelete: Cascade)
+
+  @@map("comments")
 }
 
 model Checklist {

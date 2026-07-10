@@ -15,7 +15,8 @@ export type FindingStatus =
   | "ACCEPTED"
   | "EDITED"
   | "DISMISSED"
-  | "ESCALATED";
+  | "ESCALATED"
+  | "FALSE_POSITIVE";
 
 export type ChecklistStatus = "DRAFT" | "APPROVED" | "DEPRECATED";
 
@@ -83,8 +84,17 @@ export interface ReviewBasisItem {
   explanation: string;
 }
 
+export interface FindingComment {
+  id: string;
+  findingId: string;
+  text: string;
+  authorName: string;
+  createdAt: string;
+}
+
 export interface FindingWithBasis extends Finding {
   reviewBasis: ReviewBasisItem[];
+  comments: FindingComment[];
 }
 
 export interface DiscoveredFlow {
