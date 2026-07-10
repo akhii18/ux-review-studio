@@ -35,6 +35,10 @@ const UpdateMeSchema = z.object({
   name: z.string().min(1),
 });
 
+const DeleteAccountSchema = z.object({
+  password: z.string().min(1),
+});
+
 export const AuthController = {
   async signup(req: Request, res: Response) {
     const payload = SignupSchema.parse(req.body);
@@ -64,6 +68,16 @@ export const AuthController = {
 
     const payload = UpdateMeSchema.parse(req.body);
     const result = await AuthService.updateMe(req.user.sub, payload.name);
+    res.json({ success: true, data: result });
+  },
+
+  async deleteAccount(req: Request, res: Response) {
+    if (!req.user?.sub) {
+      throw new AppError(401, "Authentication required");
+    }
+
+    const payload = DeleteAccountSchema.parse(req.body);
+    const result = await AuthService.deleteAccount(req.user.sub, payload.password);
     res.json({ success: true, data: result });
   },
 
