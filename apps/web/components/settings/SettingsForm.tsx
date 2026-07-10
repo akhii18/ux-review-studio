@@ -1,6 +1,7 @@
 "use client";
 
 import { cloneElement, isValidElement, useEffect, useId, useState, type ReactElement, type ReactNode } from "react";
+import { AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -10,11 +11,21 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { useGetSettingsQuery } from "@/store/api/settingsApi";
 import { useDispatch } from "react-redux";
 import { markSaved } from "@/store/slices/settingsSlice";
 import { toast } from "@/lib/toast";
-import { me as apiMe, updateMe as apiUpdateMe } from "@/lib/api";
+import { deleteAccount as apiDeleteAccount, me as apiMe, updateMe as apiUpdateMe } from "@/lib/api";
 
 const integrations = [
   { name: "Figma", desc: "Pull frames and prototypes for review", connected: true },
@@ -37,6 +48,11 @@ export function SettingsForm() {
   const [profileEmail, setProfileEmail] = useState("");
   const [profileLoading, setProfileLoading] = useState(true);
   const [profileSaving, setProfileSaving] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deleteConfirmation, setDeleteConfirmation] = useState("");
+  const [deletePassword, setDeletePassword] = useState("");
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [deleteSubmitting, setDeleteSubmitting] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -75,6 +91,7 @@ export function SettingsForm() {
     normalizedProfileName.length > 0 &&
     normalizedProfileName !== savedProfileName &&
     !profileSaving;
+  const isDeleteConfirmed = deleteConfirmation.trim().toLowerCase() === "delete";
 
   const handleSaveProfile = async () => {
     if (!canSaveProfile) return;
@@ -97,6 +114,25 @@ export function SettingsForm() {
       toast.error(err?.message ?? "Failed to update profile");
     } finally {
       setProfileSaving(false);
+    }
+  };
+
+  const handleDeleteAccount = async () => {
+    if (!isDeleteConfirmed || !deletePassword || deleteSubmitting) return;
+
+    try {
+      setDeleteSubmitting(true);
+      setDeleteError(null);
+      await apiDeleteAccount({ password: deletePassword });
+      localStorage.removeItem("token");
+      localStorage.removeItem("current_user");
+      document.cookie = "token=; Path=/; Max-Age=0; SameSite=Lax";
+      toast.success("Account deleted permanently");
+      window.location.replace("/auth");
+    } catch (err: any) {
+      setDeleteError(err?.message ?? "Unable to delete account.");
+    } finally {
+      setDeleteSubmitting(false);
     }
   };
 
@@ -177,6 +213,94 @@ export function SettingsForm() {
             <Field label="Team">
               <Input defaultValue="Enterprise UX" className="border-transparent bg-transparent shadow-none px-0.5 -mt-3 h-auto focus-visible:ring-0 focus-visible:outline-none" />
             </Field>
+          </CardContent>
+        </Card>
+        <Card className="mt-4 border border-red-200 border-l-4 border-l-destructive bg-red-50/50 shadow-card">
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-base text-destructive">
+              <span className="flex h-8 w-8 items-center justify-center rounded-full bg-red-100 text-destructive ring-1 ring-red-200">
+                <AlertTriangle className="h-4 w-4" aria-hidden />
+              </span>
+              Danger zone
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="space-y-1">
+              <p className="text-sm font-semibold text-red-950">Delete account</p>
+              <p className="max-w-2xl text-sm text-red-700">
+                This will delete all of your data permanently and cannot be undone.
+              </p>
+            </div>
+            <AlertDialog open={deleteDialogOpen} onOpenChange={(open) => {
+              setDeleteDialogOpen(open);
+              if (!open) {
+                setDeleteConfirmation("");
+                setDeletePassword("");
+                setDeleteError(null);
+              }
+            }}>
+              <AlertDialogTrigger asChild>
+                <Button type="button" variant="destructive" className="shrink-0">
+                  Delete account
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent className="border-red-200 bg-red-50 sm:max-w-md">
+                <AlertDialogHeader>
+                  <AlertDialogTitle className="flex items-center gap-2 text-destructive">
+                    <AlertTriangle className="h-5 w-5" aria-hidden />
+                    Delete your account permanently?
+                  </AlertDialogTitle>
+                  <AlertDialogDescription className="text-red-800">
+                    This will delete all of your data permanently and cannot be undone.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <div className="space-y-4">
+                  <div className="space-y-2 rounded-lg border border-red-200 bg-white p-3">
+                    <Label htmlFor="delete-account-confirmation" className="text-red-950">Type delete to continue</Label>
+                    <Input
+                      id="delete-account-confirmation"
+                      value={deleteConfirmation}
+                      onChange={(event) => {
+                        setDeleteConfirmation(event.target.value);
+                        setDeleteError(null);
+                      }}
+                      autoComplete="off"
+                      disabled={deleteSubmitting}
+                      className="border-red-200 bg-white focus-visible:ring-red-300"
+                    />
+                  </div>
+                  {isDeleteConfirmed && (
+                    <div className="space-y-2 rounded-lg border border-red-200 bg-white p-3">
+                      <Label htmlFor="delete-account-password" className="text-red-950">Enter your password</Label>
+                      <Input
+                        id="delete-account-password"
+                        type="password"
+                        value={deletePassword}
+                        onChange={(event) => {
+                          setDeletePassword(event.target.value);
+                          setDeleteError(null);
+                        }}
+                        autoComplete="current-password"
+                        disabled={deleteSubmitting}
+                        className="border-red-200 bg-white focus-visible:ring-red-300"
+                      />
+                    </div>
+                  )}
+                  {deleteError && <p className="text-sm text-destructive">{deleteError}</p>}
+                </div>
+                <AlertDialogFooter>
+                  <AlertDialogCancel disabled={deleteSubmitting}>Cancel</AlertDialogCancel>
+                  <Button
+                    type="button"
+                    variant="destructive"
+                    onClick={handleDeleteAccount}
+                    disabled={!isDeleteConfirmed || !deletePassword || deleteSubmitting}
+                  >
+                    {deleteSubmitting ? "Deleting..." : "Delete permanently"}
+                  </Button>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
           </CardContent>
         </Card>
       </TabsContent>

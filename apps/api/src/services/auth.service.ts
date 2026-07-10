@@ -5,6 +5,7 @@ import { prisma } from "../config/prisma";
 import { config } from "../config";
 import { AppError } from "../middleware/errorHandler";
 import { EmailService } from "./email.service";
+import { deleteStorageRefs } from "./supabaseStorage";
 
 const EMAIL_VERIFICATION_TTL_MS = 60 * 60 * 1000;
 const PASSWORD_RESET_TTL_MS = 60 * 60 * 1000;
@@ -179,6 +180,47 @@ export const AuthService = {
       expiresInSeconds: config.jwtExpiresInSeconds,
       user,
     };
+  },
+
+  async deleteAccount(userId: string, password: string) {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        passwordHash: true,
+        reviews: {
+          select: {
+            assets: {
+              select: { blobUrl: true },
+            },
+          },
+        },
+      },
+    });
+
+    if (!user) {
+      throw new AppError(404, "User not found");
+    }
+
+    const isPasswordValid = await bcrypt.compare(password, user.passwordHash);
+    if (!isPasswordValid) {
+      throw new AppError(401, "Password is incorrect");
+    }
+
+    const storageRefs = user.reviews.flatMap((review) =>
+      review.assets.map((asset) => asset.blobUrl).filter((blobUrl): blobUrl is string => Boolean(blobUrl))
+    );
+
+    if (storageRefs.length > 0) {
+      try {
+        await deleteStorageRefs(storageRefs);
+      } catch (error) {
+        console.error("[Auth] Failed to delete account storage assets", error);
+      }
+    }
+
+    await prisma.user.delete({ where: { id: user.id } });
+    return { message: "Account deleted permanently" };
   },
 
   async forgotPassword(emailInput: string) {

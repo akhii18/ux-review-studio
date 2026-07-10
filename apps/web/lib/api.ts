@@ -66,6 +66,13 @@ export function updateMe(data: { name: string }) {
   });
 }
 
+export function deleteAccount(data: { password: string }) {
+  return request<{ message: string }>("/api/auth/me", {
+    method: "DELETE",
+    body: JSON.stringify(data),
+  });
+}
+
 export function resetPassword(token: string, password: string) {
   return request<{ message: string }>("/api/auth/reset-password", {
     method: "POST",
