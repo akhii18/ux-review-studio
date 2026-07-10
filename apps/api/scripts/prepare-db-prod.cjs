@@ -54,6 +54,22 @@ async function applyNonDestructiveFallbackSchema() {
   try {
     console.log("[db:prepare:prod] Ensuring findings.bboxRefs exists without dropping existing columns...");
     await prisma.$executeRawUnsafe('ALTER TABLE "findings" ADD COLUMN IF NOT EXISTS "bboxRefs" JSONB');
+
+    console.log("[db:prepare:prod] Ensuring auth verification/reset fields and indexes exist...");
+    await prisma.$executeRawUnsafe('ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "isEmailVerified" BOOLEAN NOT NULL DEFAULT false');
+    await prisma.$executeRawUnsafe('ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "emailVerificationToken" TEXT');
+    await prisma.$executeRawUnsafe('ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "emailVerificationExpiry" TIMESTAMP(3)');
+    await prisma.$executeRawUnsafe('ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "resetPasswordToken" TEXT');
+    await prisma.$executeRawUnsafe('ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "resetPasswordExpiry" TIMESTAMP(3)');
+    await prisma.$executeRawUnsafe('CREATE INDEX IF NOT EXISTS "users_emailVerificationToken_idx" ON "users"("emailVerificationToken")');
+    await prisma.$executeRawUnsafe('CREATE INDEX IF NOT EXISTS "users_resetPasswordToken_idx" ON "users"("resetPasswordToken")');
+
+    if (process.env.VERIFY_LEGACY_USERS_WITHOUT_TOKENS === "true") {
+      console.log("[db:prepare:prod] Marking legacy users without pending verification tokens as verified...");
+      await prisma.$executeRawUnsafe('UPDATE "users" SET "isEmailVerified" = true WHERE "isEmailVerified" = false AND "emailVerificationToken" IS NULL');
+    } else {
+      console.log("[db:prepare:prod] Skipping legacy user auto-verification. Set VERIFY_LEGACY_USERS_WITHOUT_TOKENS=true to run it explicitly.");
+    }
   } finally {
     await prisma.$disconnect();
   }

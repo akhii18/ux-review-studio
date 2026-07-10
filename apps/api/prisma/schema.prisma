@@ -68,6 +68,8 @@ model User {
   checklists Checklist[]
   settings   Setting[]
 
+  @@index([emailVerificationToken])
+  @@index([resetPasswordToken])
   @@map("users")
 }
 

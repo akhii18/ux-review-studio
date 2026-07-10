@@ -73,6 +73,20 @@ export function resetPassword(token: string, password: string) {
   });
 }
 
+export function forgotPassword(email: string) {
+  return request<{ message: string }>("/api/auth/forgot-password", {
+    method: "POST",
+    body: JSON.stringify({ email }),
+  });
+}
+
+export function resendVerification(email: string) {
+  return request<{ message: string }>("/api/auth/resend-verification", {
+    method: "POST",
+    body: JSON.stringify({ email }),
+  });
+}
+
 // ── Reviews ───────────────────────────────────────────────────────────────────
 
 export type ReviewDepth = "quick" | "standard" | "deep";
@@ -156,7 +170,37 @@ export function startReview(id: string) {
 }
 
 export function exportReviewReport(id: string) {
-  return request<{ id: string; name: string; contentMd: string; executiveSummary: string; status: string }>(
+  return request<{
+    id: string;
+    name: string;
+    contentMd: string;
+    executiveSummary: string;
+    status: string;
+    visualContext?: {
+      assets?: Array<{
+        id?: string;
+        name?: string | null;
+        mimeType?: string | null;
+        blobUrl?: string | null;
+        base64Data?: string | null;
+      }>;
+      findings?: Array<{
+        id: string;
+        title: string;
+        description?: string | null;
+        severity?: string | null;
+        area?: string | null;
+        screen?: string | null;
+        observation?: string | null;
+        why?: string | null;
+        recommendation?: string | null;
+        businessImpact?: string | null;
+        a11yImpact?: string | null;
+        status?: string | null;
+        bboxRefs?: unknown;
+      }>;
+    };
+  }>(
     `/api/reviews/${id}/export`,
     { method: "POST" }
   );

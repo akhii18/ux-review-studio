@@ -46,6 +46,7 @@ export interface FindingAiMetadata {
   flowName?: string;
   flowDescription?: string;
   flowPageNumbers?: number[];
+  escalationRecipients?: Array<{ label: string; email?: string }>;
 }
 
 // ── Domain Types ─────────────────────────────────────────────────────────────

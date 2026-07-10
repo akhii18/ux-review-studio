@@ -104,6 +104,12 @@
     color: var(--foreground);
     font-family: "Roboto", "Inter", system-ui, sans-serif;
   }
+  input[type="password"]::-ms-reveal,
+  input[type="password"]::-ms-clear,
+  .password-input::-ms-reveal,
+  .password-input::-ms-clear {
+    display: none;
+  }
   h1, h2, h3, h4 {
     letter-spacing: -0.01em;
   }

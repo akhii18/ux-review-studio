@@ -12,6 +12,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription,
 } from "@/components/ui/sheet";
@@ -20,8 +21,9 @@ import { FindingStatusBadge } from "@/components/ui/FindingStatusBadge";
 import { cn } from "@/lib/utils";
 import type { FindingWithBasis, ReviewBasisItem } from "@uxm/shared";
 import { REVIEW_BASIS_LIBRARY } from "@uxm/shared";
-import { useTriageFindingMutation, useEscalateFindingMutation } from "@/store/api/findingsApi";
+import { useTriageFindingMutation } from "@/store/api/findingsApi";
 import { toast } from "sonner";
+import { EscalateDialog } from "./EscalateDialog";
 
 interface FindingCardProps {
   finding: FindingWithBasis;
@@ -31,11 +33,12 @@ interface FindingCardProps {
 
 export function FindingCard({ finding, open, onClose }: FindingCardProps) {
   const [basisSearch, setBasisSearch] = useState("");
-  const [escalateReason, setEscalateReason] = useState("");
   const [showEscalate, setShowEscalate] = useState(false);
+  const escalationRecipientLabels = Array.isArray(finding.aiMetadata?.escalationRecipients)
+    ? finding.aiMetadata.escalationRecipients.map((recipient) => recipient.label).filter(Boolean)
+    : [];
 
   const [triage, { isLoading: triageLoading }] = useTriageFindingMutation();
-  const [escalate, { isLoading: escalateLoading }] = useEscalateFindingMutation();
 
   const handleTriage = async (action: "ACCEPT" | "EDIT" | "DISMISS" | "ESCALATE") => {
     if (action === "ESCALATE") { setShowEscalate(true); return; }
@@ -45,18 +48,6 @@ export function FindingCard({ finding, open, onClose }: FindingCardProps) {
       onClose();
     } catch {
       toast.error("Action failed. Please try again.");
-    }
-  };
-
-  const handleEscalate = async () => {
-    if (!escalateReason.trim()) { toast.error("Please provide an escalation reason"); return; }
-    try {
-      await escalate({ id: finding.id, payload: { reason: escalateReason } }).unwrap();
-      toast.success("Finding escalated");
-      setShowEscalate(false);
-      onClose();
-    } catch {
-      toast.error("Escalation failed");
     }
   };
 
@@ -176,26 +167,32 @@ export function FindingCard({ finding, open, onClose }: FindingCardProps) {
             </div>
           </div>
 
-          {showEscalate && (
-            <div className="rounded-lg border border-border bg-secondary/40 p-3 space-y-2">
-              <p className="text-xs font-medium text-foreground">Escalation reason</p>
-              <Textarea
-                value={escalateReason}
-                onChange={(e) => setEscalateReason(e.target.value)}
-                placeholder="Describe why this is being escalated…"
-                className="text-sm"
-                rows={3}
-              />
-              <div className="flex gap-2">
-                <Button size="sm" variant="destructive" onClick={handleEscalate} disabled={escalateLoading}>
-                  Confirm escalate
-                </Button>
-                <Button size="sm" variant="ghost" onClick={() => setShowEscalate(false)}>Cancel</Button>
+          <EscalateDialog
+            open={showEscalate}
+            onOpenChange={setShowEscalate}
+            findingId={finding.id}
+            findingTitle={finding.title}
+            onEscalated={onClose}
+          />
+
+          <Separator />
+
+          {finding.status === "ESCALATED" && (
+            <div className="rounded-lg border border-border bg-secondary/30 p-3">
+              <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Escalated to</p>
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {escalationRecipientLabels.length > 0 ? (
+                  escalationRecipientLabels.map((label) => (
+                    <Badge key={label} variant="secondary" className="text-xs font-normal">
+                      {label}
+                    </Badge>
+                  ))
+                ) : (
+                  <span className="text-xs text-muted-foreground">Recipient details were not saved for this escalation.</span>
+                )}
               </div>
             </div>
           )}
-
-          <Separator />
 
           <div className="flex flex-wrap gap-2">
             <Button size="sm" onClick={() => handleTriage("ACCEPT")} disabled={triageLoading || finding.status === "ACCEPTED"}>
@@ -207,9 +204,24 @@ export function FindingCard({ finding, open, onClose }: FindingCardProps) {
             <Button size="sm" variant="outline" onClick={() => handleTriage("DISMISS")} disabled={triageLoading || finding.status === "DISMISSED"}>
               <X className="mr-1.5 h-3.5 w-3.5" />Dismiss
             </Button>
-            <Button size="sm" variant="outline" onClick={() => handleTriage("ESCALATE")} disabled={triageLoading}>
-              <ArrowUpRight className="mr-1.5 h-3.5 w-3.5" />Escalate
-            </Button>
+            <TooltipProvider delayDuration={100}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="inline-flex">
+                    <Button size="sm" variant="outline" onClick={() => handleTriage("ESCALATE")} disabled={triageLoading || finding.status === "ESCALATED"}>
+                      <ArrowUpRight className="mr-1.5 h-3.5 w-3.5" />Escalate
+                    </Button>
+                  </span>
+                </TooltipTrigger>
+                {finding.status === "ESCALATED" && (
+                  <TooltipContent className="max-w-xs text-left">
+                    {escalationRecipientLabels.length > 0
+                      ? `Escalated to: ${escalationRecipientLabels.join(", ")}`
+                      : "This finding has already been escalated."}
+                  </TooltipContent>
+                )}
+              </Tooltip>
+            </TooltipProvider>
             <Button size="sm" variant="ghost"><MessageSquare className="mr-1.5 h-3.5 w-3.5" />Comment</Button>
           </div>
         </div>

@@ -44,8 +44,8 @@ export const FindingsController = {
   },
 
   async escalate(req: Request, res: Response) {
-    const { reason } = EscalateFindingSchema.parse(req.body);
-    const finding = await FindingsService.escalate(req.params.id as string, getUserId(req), reason);
+    const { emails, recipients, reason } = EscalateFindingSchema.parse(req.body);
+    const finding = await FindingsService.escalate(req.params.id as string, getUserId(req), emails, reason, recipients);
     res.json({ success: true, data: finding });
   },
 

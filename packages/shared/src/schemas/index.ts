@@ -64,6 +64,11 @@ export const TriageFindingSchema = z.object({
 
 
 export const EscalateFindingSchema = z.object({
+  emails: z.array(z.string().email("Invalid email address")).min(1, "At least one email is required"),
+  recipients: z.array(z.object({
+    label: z.string().min(1),
+    email: z.string().email("Invalid email address").optional(),
+  })).optional(),
   reason: z.string().min(1, "Escalation reason is required"),
 });
 

@@ -23,6 +23,8 @@ export const config = {
   smtpUser: process.env.SMTP_USER,
   smtpPass: process.env.SMTP_PASS,
   smtpFrom: process.env.SMTP_FROM,
+  azureCommunicationEmailConnectionString: process.env.AZURE_COMMUNICATION_EMAIL_CONNECTION_STRING,
+  azureCommunicationEmailSenderAddress: process.env.AZURE_COMMUNICATION_EMAIL_SENDER_ADDRESS,
   jwtSecret: required("JWT_SECRET"),
   jwtExpiresInSeconds: parseInt(process.env.JWT_EXPIRES_IN_SECONDS ?? "604800", 10),
   databaseUrl: required("DATABASE_URL"),

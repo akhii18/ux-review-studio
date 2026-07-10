@@ -5,14 +5,23 @@ import { useRouter } from "next/navigation";
 import { Check, ChevronDown, Eye, EyeOff, Lock, Mail, X } from "lucide-react";
 import { toast } from "sonner";
 import {
+  forgotPassword as apiForgotPassword,
+  resendVerification as apiResendVerification,
   signin as apiSignin,
   signup as apiSignup,
-  verifyEmail as apiVerifyEmail,
 } from "@/lib/api";
+
+type AuthTab = "signin" | "signup" | "forgot" | "sso";
+
+function clearStoredAuth() {
+  localStorage.removeItem("token");
+  localStorage.removeItem("current_user");
+  document.cookie = "token=; Path=/; Max-Age=0; SameSite=Lax";
+}
 
 function AuthPageContent() {
   const router = useRouter();
-  const [tab, setTab] = useState("signin");
+  const [tab, setTab] = useState<AuthTab>("signin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [signupName, setSignupName] = useState("");
@@ -25,6 +34,8 @@ function AuthPageContent() {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [unverifiedEmail, setUnverifiedEmail] = useState<string | null>(null);
   const [didTrySigninSubmit, setDidTrySigninSubmit] = useState(false);
   const [didTrySignupSubmit, setDidTrySignupSubmit] = useState(false);
   const confirmPasswordRef = useRef<HTMLInputElement | null>(null);
@@ -91,6 +102,8 @@ function AuthPageContent() {
     try {
       setIsSubmitting(true);
       setError(null);
+      setNotice(null);
+      setUnverifiedEmail(null);
 
       if (!normalizedEmail) {
         throw new Error("Enter your email to continue");
@@ -111,7 +124,12 @@ function AuthPageContent() {
       document.cookie = `token=${result.token}; Path=/; Max-Age=${result.expiresInSeconds}; SameSite=Lax`;
       router.replace("/dashboard");
     } catch (err: any) {
-      setError(err?.message ?? "Sign-in failed");
+      const message = err?.message ?? "Sign-in failed";
+      setError(message);
+      if (message.toLowerCase().includes("email not verified")) {
+        clearStoredAuth();
+        setUnverifiedEmail(normalizedEmail);
+      }
     } finally {
       setIsSubmitting(false);
     }
@@ -120,6 +138,7 @@ function AuthPageContent() {
   const handleSignIn = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setError(null);
+    setNotice(null);
     setDidTrySigninSubmit(true);
 
     if (!email.trim()) {
@@ -132,12 +151,50 @@ function AuthPageContent() {
 
   const handleForgotPassword = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    setError("Forgot password is disabled for now.");
+    setError(null);
+    setNotice(null);
+
+    const normalizedEmail = email.trim().toLowerCase();
+    if (!normalizedEmail) {
+      setError("Enter your email.");
+      return;
+    }
+
+    try {
+      setIsSubmitting(true);
+      const result = await apiForgotPassword(normalizedEmail);
+      setNotice(result.message);
+    } catch (err: any) {
+      setError(err?.message ?? "Unable to send reset instructions.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleResendVerification = async () => {
+    const targetEmail = unverifiedEmail ?? email.trim().toLowerCase();
+    if (!targetEmail) {
+      setError("Enter your email to resend verification.");
+      return;
+    }
+
+    try {
+      setIsSubmitting(true);
+      setError(null);
+      setNotice(null);
+      const result = await apiResendVerification(targetEmail);
+      setNotice(result.message);
+    } catch (err: any) {
+      setError(err?.message ?? "Unable to resend verification email.");
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleSignUp = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setError(null);
+    setNotice(null);
     setDidTrySignupSubmit(true);
 
     if (!signupName.trim() || !fullNamePattern.test(signupName)) {
@@ -170,7 +227,9 @@ function AuthPageContent() {
         password: signupPassword,
       });
 
-      toast.success("Account Created successfully. Verification email sent.");
+      clearStoredAuth();
+      toast.success("Verification email sent.");
+      setNotice(signupResult.message);
       setEmail(normalizedEmail);
       setPassword("");
       setSignupName("");
@@ -189,36 +248,36 @@ function AuthPageContent() {
     <div
       className={`flex justify-center bg-[#efeeee] px-4 ${
         tab === "signin"
-          ? "h-screen overflow-hidden items-center"
-          : "min-h-screen overflow-y-auto items-start py-6"
+          ? "min-h-dvh items-center overflow-hidden py-3"
+          : "min-h-dvh items-start overflow-y-auto py-6"
       }`}
     >
       <div className="w-full max-w-md text-center">
 
         {/* Logo */}
-        <div className="flex justify-center mb-3">
+        <div className="mb-2 flex justify-center">
           <img src="/logo.png" alt="UX Review Studio" className="h-12 w-12 rounded-xl object-contain" />
         </div>
 
-        <h1 className="text-2xl font-semibold text-[#0f172a]">
+        <h1 className="text-2xl font-semibold leading-tight text-[#0f172a]">
           UX Review Studio
         </h1>
-        <p className="text-sm text-gray-500 mb-6">
+        <p className="mb-4 text-sm text-gray-500">
           Sign in to continue to your workspace
         </p>
 
         {/* Card */}
-        <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-lg text-left">
+        <div className={`rounded-2xl border border-gray-200 bg-white text-left shadow-lg ${tab === "signin" ? "p-5" : "p-6"}`}>
 
-          <h2 className="text-lg font-semibold text-[#0f172a]">
-            Welcome
+          <h2 className="text-lg font-semibold leading-tight text-[#0f172a]">
+            {tab === "forgot" ? "Reset access" : "Welcome"}
           </h2>
-          <p className="text-sm text-gray-500 mb-5">
-            Choose a sign-in method below.
+          <p className={`${tab === "signin" ? "mb-4" : "mb-5"} text-sm text-gray-500`}>
+            {tab === "forgot" ? "Enter your email and we will send reset instructions." : "Choose a sign-in method below."}
           </p>
 
           {/* Google / Apple */}
-          <div className="grid grid-cols-2 gap-3 mb-4">
+          {tab !== "forgot" && <div className={`${tab === "signin" ? "mb-3" : "mb-4"} grid grid-cols-2 gap-3`}>
             <button
               type="button"
               disabled
@@ -240,19 +299,23 @@ function AuthPageContent() {
                 Continue with Apple
               </span>
             </button>
-          </div>
+          </div>}
 
           {/* Divider */}
-          <div className="flex items-center gap-2 mb-5">
+          {tab !== "forgot" && <div className={`${tab === "signin" ? "mb-4" : "mb-5"} flex items-center gap-2`}>
             <div className="flex-1 border-t border-gray-300" />
             <span className="text-xs text-gray-400">OR</span>
             <div className="flex-1 border-t border-gray-300" />
-          </div>
+          </div>}
 
           {/* Tabs */}
-          <div className="bg-[#d9d3cc] p-1 rounded-xl flex mb-5">
+          {tab !== "forgot" && <div className={`${tab === "signin" ? "mb-4" : "mb-5"} flex rounded-xl bg-[#d9d3cc] p-1`}>
             <button
-              onClick={() => setTab("signin")}
+              onClick={() => {
+                setTab("signin");
+                setError(null);
+                setNotice(null);
+              }}
               className={`flex-1 py-2 text-sm font-medium rounded-lg transition ${
                 tab === "signin"
                   ? "bg-white shadow text-gray-900"
@@ -263,7 +326,11 @@ function AuthPageContent() {
             </button>
 
             <button
-              onClick={() => setTab("signup")}
+              onClick={() => {
+                setTab("signup");
+                setError(null);
+                setNotice(null);
+              }}
               className={`flex-1 py-2 text-sm font-medium rounded-lg transition ${
                 tab === "signup"
                   ? "bg-white shadow text-gray-900"
@@ -280,13 +347,13 @@ function AuthPageContent() {
             >
               SSO
             </button>
-          </div>
+          </div>}
 
           {/* ✅ SIGN IN */}
           {tab === "signin" && (
             <form
               onSubmit={handleSignIn}
-              className="space-y-4"
+              className="space-y-3"
             >
 
               <div>
@@ -326,9 +393,10 @@ function AuthPageContent() {
                 <div className="relative mt-1">
                   <input
                     type={showSigninPassword ? "text" : "password"}
+                    autoComplete="current-password"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    className={`w-full border rounded-lg px-3 py-2 pr-10 shadow-sm focus:outline-none focus:ring-2 ${password.length === 0 && !didTrySigninSubmit
+                    className={`password-input w-full border rounded-lg px-3 py-2 pr-10 shadow-sm focus:outline-none focus:ring-2 ${password.length === 0 && !didTrySigninSubmit
                       ? "border-gray-300 focus:ring-gray-300"
                       : isSigninPasswordValid
                         ? "border-green-500 focus:ring-green-500"
@@ -344,9 +412,33 @@ function AuthPageContent() {
                     {showSigninPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </button>
                 </div>
+                <div className="mt-1 flex justify-end">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setTab("forgot");
+                      setError(null);
+                      setNotice(null);
+                    }}
+                    className="text-xs font-medium text-[#12083c] underline-offset-4 hover:underline"
+                  >
+                    Forgot password?
+                  </button>
+                </div>
               </div>
 
               {error && <p className="text-sm text-red-600">{error}</p>}
+              {notice && <p className="text-sm text-green-700">{notice}</p>}
+              {unverifiedEmail && (
+                <button
+                  type="button"
+                  onClick={handleResendVerification}
+                  disabled={isSubmitting}
+                  className="text-sm font-medium text-[#12083c] underline-offset-4 hover:underline disabled:opacity-60"
+                >
+                  Resend verification email
+                </button>
+              )}
 
               <button
                 type="submit"
@@ -356,6 +448,51 @@ function AuthPageContent() {
                 {isSubmitting ? "Signing in..." : "Sign in"}
               </button>
 
+            </form>
+          )}
+
+          {/* ✅ FORGOT PASSWORD */}
+          {tab === "forgot" && (
+            <form onSubmit={handleForgotPassword} className="space-y-4">
+              <div>
+                <label className="text-sm font-medium">Email</label>
+                <input
+                  type="text"
+                  inputMode="email"
+                  autoComplete="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value.replace(/^\s+/, ""))}
+                  className={`w-full mt-1 border rounded-lg px-3 py-2 shadow-sm focus:outline-none focus:ring-2 ${email.length === 0 && !didTrySigninSubmit
+                    ? "border-gray-300 focus:ring-gray-300"
+                    : isSigninEmailValid
+                      ? "border-green-500 focus:ring-green-500"
+                      : "border-red-500 focus:ring-red-500"
+                    }`}
+                />
+              </div>
+
+              {error && <p className="text-sm text-red-600">{error}</p>}
+              {notice && <p className="text-sm text-green-700">{notice}</p>}
+
+              <button
+                type="submit"
+                disabled={isSubmitting}
+                className="w-full bg-[#12083c] text-white py-3 rounded-xl font-medium disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {isSubmitting ? "Sending..." : "Send reset instructions"}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setTab("signin");
+                  setError(null);
+                  setNotice(null);
+                }}
+                className="w-full rounded-xl bg-[#d9d3cc] py-3 font-medium text-gray-900"
+              >
+                Back to sign in
+              </button>
             </form>
           )}
 
@@ -439,6 +576,7 @@ function AuthPageContent() {
                   <Lock className="absolute left-3 top-2.5 w-4 h-4 text-gray-400" />
                   <input
                     type={showSignupPassword ? "text" : "password"}
+                    autoComplete="new-password"
                     value={signupPassword}
                     onChange={(e) => {
                       setSignupPassword(e.target.value);
@@ -448,7 +586,7 @@ function AuthPageContent() {
                         setShowPasswordRules(false);
                       }
                     }}
-                    className={`w-full border rounded-lg pl-9 py-2 shadow-sm focus:outline-none focus:ring-2 ${signupPassword.length === 0 && !didTrySignupSubmit
+                    className={`password-input w-full border rounded-lg pl-9 pr-10 py-2 shadow-sm focus:outline-none focus:ring-2 ${signupPassword.length === 0 && !didTrySignupSubmit
                       ? "border-gray-300 focus:ring-gray-300"
                       : isPasswordReady
                         ? "border-green-500 focus:ring-green-500"
@@ -502,11 +640,12 @@ function AuthPageContent() {
                   <input
                     ref={confirmPasswordRef}
                     type={showConfirmPassword ? "text" : "password"}
+                    autoComplete="new-password"
                     value={confirmPassword}
                     onChange={(e) => {
                       setConfirmPassword(e.target.value);
                     }}
-                    className={`w-full border rounded-lg pl-9 py-2 shadow-sm focus:outline-none focus:ring-2 ${confirmPassword.length === 0 && !didTrySignupSubmit
+                    className={`password-input w-full border rounded-lg pl-9 pr-10 py-2 shadow-sm focus:outline-none focus:ring-2 ${confirmPassword.length === 0 && !didTrySignupSubmit
                       ? "border-gray-300 focus:ring-gray-300"
                       : isConfirmPasswordReady
                         ? "border-green-500 focus:ring-green-500"
@@ -540,6 +679,7 @@ function AuthPageContent() {
               </div>
 
               {error && <p className="text-sm text-red-600">{error}</p>}
+              {notice && <p className="text-sm text-green-700">{notice}</p>}
 
               <button
                 type="submit"
