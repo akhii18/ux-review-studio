@@ -7,6 +7,7 @@ const tones: Record<FindingStatus, string> = {
   EDITED: "bg-blue-100 text-blue-700 border-blue-200 dark:bg-blue-900/30 dark:text-blue-400",
   DISMISSED: "bg-gray-100 text-gray-500 border-gray-200 dark:bg-gray-800 dark:text-gray-400",
   ESCALATED: "bg-slate-200 text-slate-800 border-slate-300 dark:bg-slate-800 dark:text-slate-300",
+  FALSE_POSITIVE: "bg-orange-100 text-orange-700 border-orange-200 dark:bg-orange-900/30 dark:text-orange-400",
 };
 
 export function FindingStatusBadge({ status }: { status: FindingStatus }) {

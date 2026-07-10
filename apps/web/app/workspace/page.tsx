@@ -16,12 +16,12 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import {
   Download, Check, RefreshCw, Sparkles, Image as ImageIcon,
   AlertCircle, ChevronLeft, ChevronRight, X, ArrowUpRight, Edit3, Plus,
-  BookOpen, AlertTriangle, MessageSquare, MonitorPlay, ChevronDown,
+  BookOpen, AlertTriangle, MessageSquare, MonitorPlay, ChevronDown, Loader2,
 } from "lucide-react";
 import { PriorityBadge } from "@/components/ui/PriorityBadge";
 import { FindingStatusBadge } from "@/components/ui/FindingStatusBadge";
 import { cn } from "@/lib/utils";
-import { exportReviewReport, getReview, updateFinding, triageFinding } from "@/lib/api";
+import { exportReviewReport, getReview, updateFinding, triageFinding, addComment, regenerateFinding } from "@/lib/api";
 import { downloadReport } from "@/lib/reportExport";
 import { useAppDispatch } from "@/store/hooks";
 import { addNotification } from "@/store/slices/notificationsSlice";
@@ -35,7 +35,7 @@ import {
 import { toast } from "@/lib/toast";
 import Link from "next/link";
 
-type TriageStatus = "PROPOSED" | "ACCEPTED" | "EDITED" | "DISMISSED" | "ESCALATED";
+type TriageStatus = "PROPOSED" | "ACCEPTED" | "EDITED" | "DISMISSED" | "ESCALATED" | "FALSE_POSITIVE";
 
 interface ReviewBasisItem {
   id?: string;
@@ -52,6 +52,13 @@ interface BoundingBoxRef {
     width: number;
     height: number;
   };
+}
+
+interface FindingComment {
+  id: string;
+  text: string;
+  authorName?: string;
+  createdAt: string;
 }
 
 interface Finding {
@@ -78,6 +85,7 @@ interface Finding {
   notes?: string;
   reviewBasis: ReviewBasisItem[];
   bboxRefs?: unknown;
+  comments?: FindingComment[];
 }
 
 interface WorkspaceScreen {
@@ -1145,6 +1153,7 @@ function WorkspaceContent() {
               findingMetadataOptions={findingMetadataOptions}
               onAction={(status) => handleFindingAction(open.id, status)}
               onBasisChange={(basis) => handleBasisChange(open.id, basis)}
+              onFindingUpdate={(updated) => setOpen(updated)}
             />
           ) : openCluster && clusterViewMode === "list" ? (
             <FindingClusterDetail
@@ -1193,6 +1202,7 @@ interface FindingDetailProps {
   findingMetadataOptions: FindingOutputOptionKey[];
   onAction: (status: TriageStatus) => void;
   onBasisChange: (basis: ReviewBasisItem[]) => void;
+  onFindingUpdate?: (finding: Finding) => void;
 }
 
 interface FindingClusterDetailProps {
@@ -1314,6 +1324,48 @@ function ClusterFindingNavigation({
 
 function FindingDetail({ finding, screenImageUrl, findingMetadataOptions, onAction, onBasisChange }: FindingDetailProps) {
   const [basisSearch, setBasisSearch] = useState("");
+  const [showComment, setShowComment] = useState(false);
+  const [commentText, setCommentText] = useState("");
+  const [isCommenting, setIsCommenting] = useState(false);
+  const [isRegenerating, setIsRegenerating] = useState(false);
+
+  const handleAddComment = async () => {
+    if (!commentText.trim()) { toast.error("Please enter a comment"); return; }
+    setIsCommenting(true);
+    try {
+      const comment = await addComment(finding.id, { text: commentText.trim() });
+      toast.success("Comment added");
+      setCommentText("");
+      setShowComment(false);
+      if (onFindingUpdate) {
+        onFindingUpdate({
+          ...finding,
+          comments: [...(finding.comments || []), comment],
+        });
+      }
+    } catch {
+      toast.error("Failed to add comment");
+    } finally {
+      setIsCommenting(false);
+    }
+  };
+
+  const handleRegenerate = async () => {
+    setIsRegenerating(true);
+    try {
+      const userComments = finding.comments && finding.comments.length > 0
+        ? finding.comments.map((c) => c.text)
+        : undefined;
+      const regenerated = await regenerateFinding(finding.id, { userComments });
+      toast.success("Finding regenerated with AI");
+      if (onFindingUpdate) onFindingUpdate(regenerated);
+    } catch {
+      toast.error("Regeneration failed. Please try again.");
+    } finally {
+      setIsRegenerating(false);
+    }
+  };
+
   const hasOutputOption = (option: FindingOutputOptionKey) => findingMetadataOptions.includes(option);
 
   const filteredLibrary = useMemo(() => {
@@ -1483,14 +1535,57 @@ function FindingDetail({ finding, screenImageUrl, findingMetadataOptions, onActi
           <Section title="WCAG criterion">{finding.aiMetadata.wcagCriteria}</Section>
         )}
 
+        {/* User Comments */}
+        {finding.comments && finding.comments.length > 0 && (
+          <div>
+            <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground mb-2">Comments</p>
+            <div className="space-y-2">
+              {finding.comments.map((comment) => (
+                <div key={comment.id} className="rounded-lg border border-border bg-secondary/30 p-3">
+                  <p className="text-sm">{comment.text}</p>
+                  <p className="mt-1.5 text-[10px] text-muted-foreground">
+                    {comment.authorName ?? "You"} · {new Date(comment.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Comment Input */}
+        {showComment && (
+          <div className="rounded-lg border border-border bg-secondary/40 p-3 space-y-2">
+            <p className="text-xs font-medium text-foreground">Add a comment</p>
+            <Textarea
+              value={commentText}
+              onChange={(e) => setCommentText(e.target.value)}
+              placeholder="Type your comment…"
+              className="text-sm"
+              rows={3}
+            />
+            <div className="flex gap-2">
+              <Button size="sm" onClick={handleAddComment} disabled={isCommenting}>
+                {isCommenting ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : <MessageSquare className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />}
+                Save comment
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => { setShowComment(false); setCommentText(""); }}>Cancel</Button>
+            </div>
+          </div>
+        )}
+
         <div className="rounded-lg border border-accent/30 bg-accent/5 p-3">
           <div className="flex items-center gap-2 text-xs font-medium text-accent">
-            <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
-            AI confidence · {finding.confidence}%
+            {isRegenerating ? (
+              <><Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />Regenerating with AI…</>
+            ) : (
+              <><Sparkles className="h-3.5 w-3.5" aria-hidden="true" />AI confidence · {finding.confidence}%</>
+            )}
           </div>
-          <p className="mt-1 text-xs text-muted-foreground">
-            You decide the final outcome.
-          </p>
+          {!isRegenerating && (
+            <p className="mt-1 text-xs text-muted-foreground">
+              You decide the final outcome.
+            </p>
+          )}
         </div>
 
         <Separator />
@@ -1524,10 +1619,20 @@ function FindingDetail({ finding, screenImageUrl, findingMetadataOptions, onActi
           >
             <ArrowUpRight className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />Escalate
           </Button>
-          <Button size="sm" variant="outline" className="min-h-9"><MessageSquare className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />Comment</Button>
+          <Button size="sm" variant="outline" className="min-h-9" onClick={() => setShowComment(true)} disabled={showComment}>
+            <MessageSquare className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />Comment
+          </Button>
           <Button size="sm" variant="outline" className="min-h-9">Create Jira ticket</Button>
-          <Button size="sm" variant="ghost" className="min-h-9"><RefreshCw className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />Regenerate</Button>
-          <Button size="sm" variant="ghost" className="min-h-9"><AlertCircle className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />False positive</Button>
+          <Button size="sm" variant="ghost" className="min-h-9" onClick={handleRegenerate} disabled={isRegenerating}>
+            <RefreshCw className={cn("mr-1.5 h-3.5 w-3.5", isRegenerating && "animate-spin")} aria-hidden="true" />Regenerate
+          </Button>
+          <Button
+            size="sm" variant="ghost" className="min-h-9"
+            onClick={() => onAction("FALSE_POSITIVE" as TriageStatus)}
+            disabled={finding.status === "FALSE_POSITIVE"}
+          >
+            <AlertCircle className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />False positive
+          </Button>
         </div>
       </div>
     </>

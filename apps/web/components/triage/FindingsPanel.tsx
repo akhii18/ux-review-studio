@@ -66,7 +66,7 @@ export function FindingsPanel({ reviewId }: { reviewId: string }) {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="ALL">All statuses</SelectItem>
-            {["PROPOSED", "ACCEPTED", "EDITED", "DISMISSED", "ESCALATED"].map((s) => (
+            {["PROPOSED", "ACCEPTED", "EDITED", "DISMISSED", "ESCALATED", "FALSE_POSITIVE"].map((s) => (
               <SelectItem key={s} value={s}>{s.toLowerCase()}</SelectItem>
             ))}
           </SelectContent>

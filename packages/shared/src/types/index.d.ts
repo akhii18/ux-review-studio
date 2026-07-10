@@ -1,6 +1,6 @@
 export type ReviewArea = "USABILITY" | "ACCESSIBILITY" | "CONSISTENCY" | "CONTENT_UX" | "RISK" | "RECOMMENDATIONS";
 export type Severity = "P0" | "P1" | "P2";
-export type FindingStatus = "PROPOSED" | "ACCEPTED" | "EDITED" | "DISMISSED" | "ESCALATED";
+export type FindingStatus = "PROPOSED" | "ACCEPTED" | "EDITED" | "DISMISSED" | "ESCALATED" | "FALSE_POSITIVE";
 export type ChecklistStatus = "DRAFT" | "APPROVED" | "DEPRECATED";
 export type PrincipleCategory = "NIELSEN_HEURISTICS" | "COGNITIVE_LAWS" | "GESTALT" | "VISUAL_DESIGN" | "ACCESSIBILITY_WCAG" | "CONTENT_MICROCOPY" | "CUSTOM";
 export type ReviewStatus = "draft" | "in_progress" | "completed" | "failed" | "archived";
@@ -47,6 +47,14 @@ export interface ReviewBasisItem {
 }
 export interface FindingWithBasis extends Finding {
     reviewBasis: ReviewBasisItem[];
+    comments: FindingComment[];
+}
+export interface FindingComment {
+    id: string;
+    findingId: string;
+    text: string;
+    authorName: string;
+    createdAt: string;
 }
 export interface DiscoveredFlow {
     flowName: string;

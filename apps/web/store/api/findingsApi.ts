@@ -1,6 +1,7 @@
 import { createApi, fetchBaseQuery } from "@reduxjs/toolkit/query/react";
 import type {
   FindingWithBasis,
+  FindingComment,
   PaginatedResponse,
   FindingsQuery,
   TriageFinding,
@@ -94,6 +95,37 @@ export const findingsApi = createApi({
       transformResponse: (res: { data: RecurringTrend[] }) => res.data,
       providesTags: ["RecurringFindings"],
     }),
+
+    addComment: builder.mutation<
+      FindingComment,
+      { id: string; payload: { text: string; authorName?: string } }
+    >({
+      query: ({ id, payload }) => ({
+        url: `/findings/${id}/comments`,
+        method: "POST",
+        body: payload,
+      }),
+      transformResponse: (res: { data: FindingComment }) => res.data,
+      invalidatesTags: (_result, _err, { id }) => [
+        { type: "Finding", id },
+      ],
+    }),
+
+    regenerateFinding: builder.mutation<
+      FindingWithBasis,
+      { id: string; payload: { userComments?: string[] } }
+    >({
+      query: ({ id, payload }) => ({
+        url: `/findings/${id}/regenerate`,
+        method: "POST",
+        body: payload,
+      }),
+      transformResponse: (res: { data: FindingWithBasis }) => res.data,
+      invalidatesTags: (_result, _err, { id }) => [
+        { type: "Finding", id },
+        "RecurringFindings",
+      ],
+    }),
   }),
 });
 
@@ -105,4 +137,6 @@ export const {
   useUpdateFindingMutation,
   useEscalateFindingMutation,
   useGetRecurringFindingsQuery,
+  useAddCommentMutation,
+  useRegenerateFindingMutation,
 } = findingsApi;

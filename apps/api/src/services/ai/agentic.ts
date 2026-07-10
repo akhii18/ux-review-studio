@@ -228,7 +228,36 @@ let agenticModulePromise: Promise<{ runReviewGraph: (params: {
   findingMetadataOptions?: string[] | null;
   keyFlowsOnly?: boolean;
   documentPages?: DocumentPageMetadata[];
-}) => Promise<AgenticRunResult> }> | null = null;
+}) => Promise<AgenticRunResult>; refineSingleFinding: (params: {
+  originalFinding: {
+    title: string;
+    description: string | null;
+    observation: string | null;
+    severity: string;
+    area: string;
+    screen: string | null;
+    principle: string | null;
+    why: string | null;
+    recommendation: string | null;
+    businessImpact: string | null;
+    a11yImpact: string | null;
+    confidence: number;
+  };
+  userComments: string[];
+  screenshot: string | null;
+  reviewContext: string;
+  reviewDepth: string;
+}) => Promise<{
+  issue: string;
+  fix: string;
+  severity: "P0" | "P1" | "P2";
+  why: string;
+  confidence: number;
+  businessImpact: string | null;
+  a11yImpact: string | null;
+  acceptanceCriteria: string[];
+  refinementNote: string;
+}> }> | null = null;
 
 async function loadAgenticModule() {
   if (!agenticModulePromise) {
@@ -1015,3 +1044,50 @@ export async function runReviewPipeline(reviewId: string): Promise<void> {
     throw err;
   }
 }
+
+// ── Single Finding Regeneration ───────────────────────────────────────────────
+
+export async function regenerateSingleFinding(params: {
+  screenshot: string | null;
+  originalFinding: {
+    title: string;
+    description: string | null;
+    observation: string | null;
+    severity: string;
+    area: string;
+    screen: string | null;
+    principle: string | null;
+    why: string | null;
+    recommendation: string | null;
+    businessImpact: string | null;
+    a11yImpact: string | null;
+    confidence: number;
+  };
+  userComments: string[];
+  reviewContext: string;
+  reviewDepth: string;
+}): Promise<{
+  issue: string;
+  fix: string;
+  severity: "P0" | "P1" | "P2";
+  why: string;
+  confidence: number;
+  businessImpact: string | null;
+  a11yImpact: string | null;
+  acceptanceCriteria: string[];
+}> {
+  const module = await loadAgenticModule();
+
+  // Use the targeted refineSingleFinding instead of running the full pipeline
+  const refined = await module.refineSingleFinding({
+    originalFinding: params.originalFinding,
+    userComments: params.userComments,
+    screenshot: params.screenshot,
+    reviewContext: params.reviewContext,
+    reviewDepth: params.reviewDepth,
+  });
+
+  return refined;
+}
+
+export { toModelScreenshotDataUrl, type ReviewAssetRecord };
