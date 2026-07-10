@@ -1322,7 +1322,7 @@ function ClusterFindingNavigation({
   );
 }
 
-function FindingDetail({ finding, screenImageUrl, findingMetadataOptions, onAction, onBasisChange }: FindingDetailProps) {
+function FindingDetail({ finding, screenImageUrl, findingMetadataOptions, onAction, onBasisChange, onFindingUpdate }: FindingDetailProps) {
   const [basisSearch, setBasisSearch] = useState("");
   const [showComment, setShowComment] = useState(false);
   const [commentText, setCommentText] = useState("");
