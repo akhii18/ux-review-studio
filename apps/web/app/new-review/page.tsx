@@ -16,7 +16,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Switch } from "@/components/ui/switch";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Badge } from "@/components/ui/badge";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Progress } from "@/components/ui/progress";
 import { Slider } from "@/components/ui/slider";
 import { useAppDispatch } from "@/store/hooks";
@@ -26,7 +26,7 @@ import {
   Sparkles, Loader2, Save, Info, Video, ChevronLeft, ChevronRight, Trash2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import {
   DEFAULT_FINDING_OUTPUT_OPTIONS,
   FINDING_OUTPUT_OPTIONS,
@@ -175,6 +175,8 @@ const progressStages = [
 ];
 
 const backendStageToUiIndex: Record<string, number> = {
+  capturing_figma_prototype: 0,
+  capturing_website_reference: 0,
   reading_inputs: 0,
   discovering_flows: 2,
   analyzing_screens: 3,
@@ -193,6 +195,8 @@ function formatBackendStage(stage?: string | null): string {
   if (stage.startsWith("failed:")) return "Failed";
 
   const labels: Record<string, string> = {
+    capturing_figma_prototype: "Capturing Figma prototype",
+    capturing_website_reference: "Capturing website reference",
     reading_inputs: "Reading inputs",
     discovering_flows: "Discovering key flows",
     analyzing_screens: "Analyzing screens",
@@ -218,6 +222,81 @@ function toAlphaNumeric(value: string): string {
   return value.replace(/[^a-zA-Z0-9 ]/g, "").replace(/\s{2,}/g, " ");
 }
 
+function isValidFigmaPrototypeUrl(value: string): boolean {
+  try {
+    const url = new URL(value.trim());
+    const host = url.hostname.toLowerCase();
+    if (url.protocol !== "https:") return false;
+    if (host !== "figma.com" && host !== "www.figma.com") return false;
+
+    const path = url.pathname.toLowerCase();
+    return Boolean(
+      path.includes("/proto/") ||
+      path.includes("/present/") ||
+      path.includes("/presentation/") ||
+      path.includes("/design/") ||
+      (path.includes("/file/") && url.searchParams.has("node-id")) ||
+      url.searchParams.has("node-id")
+    );
+  } catch {
+    return false;
+  }
+}
+
+function isValidWebsiteReferenceUrl(value: string): boolean {
+  try {
+    const url = new URL(value.trim());
+    if (url.protocol !== "https:" && url.protocol !== "http:") return false;
+    if (url.username || url.password) return false;
+
+    const host = url.hostname.toLowerCase();
+    if (!host) return false;
+    if (host === "localhost" || host === "0.0.0.0" || host === "::1") return false;
+    if (host.endsWith(".localhost") || host.endsWith(".local") || host.endsWith(".internal")) return false;
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function parseStoredContextNotes(noteBlocks: string[]) {
+  let storedFigmaUrl = "";
+  let storedDesignSystemUrl = "";
+  const remainingBlocks: string[] = [];
+
+  for (const block of noteBlocks) {
+    const retainedLines: string[] = [];
+
+    for (const line of block.split(/\r?\n/)) {
+      const trimmedLine = line.trim();
+
+      if (!storedFigmaUrl && /^Figma URL:\s*/i.test(trimmedLine)) {
+        storedFigmaUrl = trimmedLine.replace(/^Figma URL:\s*/i, "").trim();
+        continue;
+      }
+
+      if (!storedDesignSystemUrl && /^Design System URL:\s*/i.test(trimmedLine)) {
+        storedDesignSystemUrl = trimmedLine.replace(/^Design System URL:\s*/i, "").trim();
+        continue;
+      }
+
+      retainedLines.push(line);
+    }
+
+    const retained = retainedLines.join("\n").trim();
+    if (retained) {
+      remainingBlocks.push(retained);
+    }
+  }
+
+  return {
+    figmaUrl: storedFigmaUrl,
+    designSystemUrl: storedDesignSystemUrl,
+    contextText: remainingBlocks.join("\n\n"),
+  };
+}
+
 function formatReviewTypeLabel(value: string): string {
   const label = value.replaceAll("_", " ").trim().toLowerCase();
   if (!label) return "—";
@@ -237,6 +316,83 @@ function getAssetType(asset: { name?: string; mimeType?: string | null }) {
 }
 
 const REVIEW_DEPTH_OPTIONS = ["quick", "standard", "deep"] as const satisfies readonly ReviewDepth[];
+
+interface CriteriaSelectionPanelProps {
+  criteria: string[];
+  onToggleCriterion: (id: string) => void;
+  onToggleGroup: (groupItemIds: string[], selectAll: boolean) => void;
+}
+
+function CriteriaSelectionPanel({
+  criteria,
+  onToggleCriterion,
+  onToggleGroup,
+}: CriteriaSelectionPanelProps) {
+  return (
+    <div className="space-y-6">
+      {SUBCATEGORY_GROUPS.map((group) => {
+        const groupItems = group.items;
+        const allSelected = groupItems.every((item) => criteria.includes(item.id));
+        const someSelected = groupItems.some((item) => criteria.includes(item.id));
+
+        return (
+          <div key={group.category}>
+            <button
+              type="button"
+              onClick={() => onToggleGroup(groupItems.map((item) => item.id), !allSelected)}
+              className="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-widest text-muted-foreground transition hover:text-foreground"
+            >
+              <span
+                className={cn(
+                  "flex h-3.5 w-3.5 items-center justify-center rounded-sm border transition",
+                  allSelected
+                    ? "border-primary bg-primary text-primary-foreground"
+                    : someSelected
+                    ? "border-primary bg-primary/30"
+                    : "border-border bg-card"
+                )}
+              >
+                {allSelected && <Check className="h-2.5 w-2.5" />}
+                {someSelected && !allSelected && (
+                  <span className="block h-0.5 w-2 rounded-full bg-primary" />
+                )}
+              </span>
+              {group.category}
+            </button>
+
+            <div className="grid gap-2 sm:grid-cols-2">
+              {groupItems.map((item) => {
+                const active = criteria.includes(item.id);
+                return (
+                  <button
+                    type="button"
+                    key={item.id}
+                    onClick={() => onToggleCriterion(item.id)}
+                    className={cn(
+                      "flex items-center gap-3 rounded-lg border px-4 py-3 text-left text-sm transition hover:bg-secondary/60",
+                      active
+                        ? "border-primary bg-primary/5 hover:bg-primary/10"
+                        : "border-border bg-card"
+                    )}
+                    aria-pressed={active}
+                  >
+                    <Checkbox checked={active} className="shrink-0" tabIndex={-1} />
+                    <span className={cn("font-medium", active ? "text-foreground" : "text-muted-foreground")}>
+                      {item.label}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
+      {criteria.length === 0 && (
+        <p className="text-xs text-destructive">Select at least one criteria to continue.</p>
+      )}
+    </div>
+  );
+}
 
 export default function NewReviewPage() {
   type UploadAsset = ReviewFileEntry;
@@ -278,6 +434,7 @@ export default function NewReviewPage() {
   const [isScreenshotModalOpen, setIsScreenshotModalOpen] = useState(false);
   const [activeScreenshotIndex, setActiveScreenshotIndex] = useState(0);
   const [isDocumentModalOpen, setIsDocumentModalOpen] = useState(false);
+  const [isCustomCriteriaModalOpen, setIsCustomCriteriaModalOpen] = useState(false);
   const [activeDocumentIndex, setActiveDocumentIndex] = useState(0);
   const [uploadedAssetsStart, setUploadedAssetsStart] = useState(0);
   const [nameTouched, setNameTouched] = useState(false);
@@ -310,7 +467,22 @@ export default function NewReviewPage() {
     criteriaTouchedRef.current = false;
     setReviewType(nextType);
     setCriteria(REVIEW_TYPE_REQUIRED_CRITERIA[nextType] ?? []);
+    if (nextType === "partial") {
+      setIsCustomCriteriaModalOpen(true);
+    } else {
+      setIsCustomCriteriaModalOpen(false);
+    }
   };
+
+  const toggleCriterionGroup = useCallback((groupItemIds: string[], selectAll: boolean) => {
+    setCriteria((current) => {
+      criteriaTouchedRef.current = true;
+      if (selectAll) {
+        return Array.from(new Set([...current, ...groupItemIds]));
+      }
+      return current.filter((id) => !groupItemIds.includes(id));
+    });
+  }, []);
 
   useEffect(() => {
     if (!criteriaTouchedRef.current) return;
@@ -407,8 +579,12 @@ export default function NewReviewPage() {
           });
         }
 
+        const parsedNotes = parseStoredContextNotes(noteBlocks);
+
         setFiles(loadedFiles);
-        setContextText(noteBlocks.join("\n\n"));
+        setContextText(parsedNotes.contextText);
+        setFigmaUrl(parsedNotes.figmaUrl);
+        setDesignSystemUrl(parsedNotes.designSystemUrl);
 
         const stepMatch = typeof review.stage === "string" ? review.stage.match(/^step-(\d+)$/) : null;
         if (stepMatch) {
@@ -777,9 +953,16 @@ export default function NewReviewPage() {
     );
 
   const validStep0 = name.trim().length > 0 && product.trim().length > 0;
-  const validStep1 = files.some(
+  const hasScreenshotAsset = files.some(
     (asset) => asset.type === "Screenshot" && ((Boolean(asset.file) && (asset.file?.type.startsWith("image/") ?? false)) || Boolean(asset.blobUrl || asset.previewUrl))
   );
+  const figmaUrlTrimmed = figmaUrl.trim();
+  const hasValidFigmaUrl = figmaUrlTrimmed.length > 0 && isValidFigmaPrototypeUrl(figmaUrlTrimmed);
+  const figmaUrlError = figmaUrlTrimmed.length > 0 && !hasValidFigmaUrl;
+  const designSystemUrlTrimmed = designSystemUrl.trim();
+  const hasValidDesignSystemUrl = designSystemUrlTrimmed.length > 0 && isValidWebsiteReferenceUrl(designSystemUrlTrimmed);
+  const designSystemUrlError = designSystemUrlTrimmed.length > 0 && !hasValidDesignSystemUrl;
+  const validStep1 = hasScreenshotAsset || hasValidFigmaUrl || hasValidDesignSystemUrl;
   const validStep2 = criteria.length > 0;
   const nameRequiredError = nameTouched && name.trim().length === 0;
   const productRequiredError = productTouched && product.trim().length === 0;
@@ -908,7 +1091,7 @@ export default function NewReviewPage() {
 
   const runReview = async () => {
     if (!validStep1) {
-      toast.error("Add at least one screenshot image before starting the review.");
+      toast.error("Add at least one screenshot image, a valid public Figma prototype URL, or a valid public Design System URL before starting the review.");
       setStep(1);
       return;
     }
@@ -1109,8 +1292,34 @@ export default function NewReviewPage() {
                       </SelectContent>
                     </Select>
                   </Field>
+                  {reviewType === "partial" && (
+                    <div className="md:col-span-2 rounded-lg border border-border bg-secondary/30 p-4">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-medium">Custom criteria</p>
+                          <p className="text-xs text-muted-foreground">
+                            {criteria.length === 0
+                              ? "Choose the checks the AI should run for this review."
+                              : `${criteria.length} criteria selected`}
+                          </p>
+                        </div>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="min-h-9"
+                          onClick={() => setIsCustomCriteriaModalOpen(true)}
+                        >
+                          {criteria.length === 0 ? "Choose criteria" : "Edit criteria"}
+                        </Button>
+                      </div>
+                      {criteria.length === 0 && (
+                        <p className="mt-2 text-xs text-destructive">Select at least one criteria to continue.</p>
+                      )}
+                    </div>
+                  )}
                   <Field label="Reviewer / owner" className="md:col-span-2">
-                    <div className="min-h-10 rounded-md border border-border bg-muted/30 px-3 py-2 text-sm font-medium text-foreground">
+                    <div className="text-sm font-medium text-foreground px-0.5 -mt-2">
                       {owner || "User"}
                     </div>
                   </Field>
@@ -1245,27 +1454,31 @@ export default function NewReviewPage() {
                     </div>
                   )}
                   <div className="grid gap-3 md:grid-cols-2">
-                    <Field label="Figma prototype URL">
+                    <Field label="Figma prototype URL" help="Public prototype link. If you do not upload screenshots, the review will capture the prototype automatically with Playwright.">
                       <div className="relative">
                         <Figma className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
                         <Input
                           placeholder="https://figma.com/proto/…"
-                          className="pl-9"
+                          className={cn("pl-9", figmaUrlError && "border-red-500 focus-visible:ring-red-500")}
                           value={figmaUrl}
                           onChange={(e) => setFigmaUrl(e.target.value)}
                         />
                       </div>
+                      {figmaUrlError ? <p className="mt-1 text-xs text-red-500">Enter a valid public Figma prototype URL.</p> : null}
+                      {!figmaUrlError && hasValidFigmaUrl ? <p className="mt-1 text-xs text-muted-foreground">The prototype will be opened in Playwright and converted into screenshots when the review starts.</p> : null}
                     </Field>
                     <Field label="Design system reference">
                       <div className="relative">
                         <LinkIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
                         <Input
                           placeholder="https://zeroheight.com/…"
-                          className="pl-9"
+                          className={cn("pl-9", designSystemUrlError && "border-red-500 focus-visible:ring-red-500")}
                           value={designSystemUrl}
                           onChange={(e) => setDesignSystemUrl(e.target.value)}
                         />
                       </div>
+                      {designSystemUrlError ? <p className="mt-1 text-xs text-red-500">Enter a valid public website URL.</p> : null}
+                      {!designSystemUrlError && hasValidDesignSystemUrl ? <p className="mt-1 text-xs text-muted-foreground">The crawler will navigate related pages, capture screenshots, and feed the same AI review pipeline used for screenshots and PDFs.</p> : null}
                     </Field>
                   </div>
                   <Field label="Flow screenshots & PRD">
@@ -1285,86 +1498,11 @@ export default function NewReviewPage() {
               )}
 
               {step === 2 && (
-                <div className="space-y-6">
-                  {SUBCATEGORY_GROUPS.map((group) => {
-                    const groupItems = group.items;
-                    const allSelected = groupItems.every((item) => criteria.includes(item.id));
-                    const someSelected = groupItems.some((item) => criteria.includes(item.id));
-
-                    const toggleGroup = () => {
-                      if (allSelected) {
-                        // Deselect all in group
-                        setCriteria((cur) => {
-                          criteriaTouchedRef.current = true;
-                          return cur.filter((c) => !groupItems.some((item) => item.id === c));
-                        });
-                      } else {
-                        // Select all in group
-                        setCriteria((cur) => {
-                          criteriaTouchedRef.current = true;
-                          return Array.from(new Set([...cur, ...groupItems.map((item) => item.id)]));
-                        });
-                      }
-                    };
-
-                    return (
-                      <div key={group.category}>
-                        {/* Category header with select-all toggle */}
-                        <button
-                          type="button"
-                          onClick={toggleGroup}
-                          className="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-widest text-muted-foreground hover:text-foreground transition"
-                        >
-                          <span
-                            className={cn(
-                              "flex h-3.5 w-3.5 items-center justify-center rounded-sm border transition",
-                              allSelected
-                                ? "border-primary bg-primary text-primary-foreground"
-                                : someSelected
-                                ? "border-primary bg-primary/30"
-                                : "border-border bg-card"
-                            )}
-                          >
-                            {allSelected && <Check className="h-2.5 w-2.5" />}
-                            {someSelected && !allSelected && (
-                              <span className="block h-0.5 w-2 rounded-full bg-primary" />
-                            )}
-                          </span>
-                          {group.category}
-                        </button>
-
-                        {/* Subcategory items grid — 2 columns matching the mentor image */}
-                        <div className="grid gap-2 sm:grid-cols-2">
-                          {groupItems.map((item) => {
-                            const active = criteria.includes(item.id);
-                            return (
-                              <button
-                                type="button"
-                                key={item.id}
-                                onClick={() => toggleCriterion(item.id)}
-                                className={cn(
-                                  "flex items-center gap-3 rounded-lg border px-4 py-3 text-left text-sm transition hover:bg-secondary/60",
-                                  active
-                                    ? "border-primary bg-primary/5 hover:bg-primary/10"
-                                    : "border-border bg-card"
-                                )}
-                                aria-pressed={active}
-                              >
-                                <Checkbox checked={active} className="shrink-0" tabIndex={-1} />
-                                <span className={cn("font-medium", active ? "text-foreground" : "text-muted-foreground")}>
-                                  {item.label}
-                                </span>
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    );
-                  })}
-                  {criteria.length === 0 && (
-                    <p className="text-xs text-destructive">Select at least one criterion to continue.</p>
-                  )}
-                </div>
+                <CriteriaSelectionPanel
+                  criteria={criteria}
+                  onToggleCriterion={toggleCriterion}
+                  onToggleGroup={toggleCriterionGroup}
+                />
               )}
 
               {step === 3 && (
@@ -1515,16 +1653,17 @@ export default function NewReviewPage() {
         {/* Navigation */}
         {!running && step < steps.length - 1 && (
           <div className="fixed bottom-0 left-0 right-0 z-20 border-t border-border/80 bg-card/95 px-4 py-3 shadow-[0_-12px_40px_-24px_rgba(15,23,42,0.35)] backdrop-blur-xl md:left-[var(--sidebar-width)] md:px-6 md:peer-data-[state=collapsed]:left-[var(--sidebar-width-icon)]">
-            <div className="mx-auto flex max-w-6xl items-center justify-between">
-              <Button
-                variant="ghost"
-                className="min-h-10 px-2"
-                aria-label="Back"
-                disabled={step === 0}
-                onClick={() => setStep((current) => Math.max(0, current - 1))}
-              >
-                <ChevronLeft className="mr-1 h-4 w-4" aria-hidden="true" />Back
-              </Button>
+            <div className={cn("mx-auto flex max-w-6xl items-center", step > 0 ? "justify-between" : "justify-end")}>
+              {step > 0 && (
+                <Button
+                  variant="ghost"
+                  className="min-h-10 px-2"
+                  aria-label="Back"
+                  onClick={() => setStep((current) => Math.max(0, current - 1))}
+                >
+                  <ChevronLeft className="mr-1 h-4 w-4" aria-hidden="true" />Back
+                </Button>
+              )}
               <div className="flex flex-wrap items-center justify-end gap-2">
                 <Button variant="outline" className="min-h-10 bg-background" onClick={() => void handleSaveDraft()} disabled={isSavingDraft || isLoadingDraft}>
                   {isSavingDraft ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" aria-hidden="true" /> : <Save className="mr-1.5 h-4 w-4" aria-hidden="true" />}
@@ -1542,6 +1681,37 @@ export default function NewReviewPage() {
           </div>
         )}
       </div>
+
+      <Dialog open={isCustomCriteriaModalOpen} onOpenChange={setIsCustomCriteriaModalOpen}>
+        <DialogContent className="flex max-h-[85vh] max-w-2xl flex-col overflow-hidden">
+          <DialogHeader>
+            <DialogTitle>Select criteria</DialogTitle>
+            <DialogDescription>
+              Choose the frameworks and checks the AI should apply for this custom review.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+            <CriteriaSelectionPanel
+              criteria={criteria}
+              onToggleCriterion={toggleCriterion}
+              onToggleGroup={toggleCriterionGroup}
+            />
+          </div>
+          <div className="flex items-center justify-between border-t border-border pt-4">
+            <p className="text-xs text-muted-foreground">
+              {criteria.length} criteria selected
+            </p>
+            <Button
+              type="button"
+              className="min-h-10"
+              disabled={criteria.length === 0}
+              onClick={() => setIsCustomCriteriaModalOpen(false)}
+            >
+              Save
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={isScreenshotModalOpen} onOpenChange={setIsScreenshotModalOpen}>
         <DialogContent className="max-w-4xl p-0 overflow-hidden">

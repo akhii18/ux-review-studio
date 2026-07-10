@@ -24,7 +24,7 @@ export const FindingsRepository = {
     const [data, total] = await Promise.all([
       prisma.finding.findMany({
         where,
-        include: { reviewBasis: true },
+        include: { reviewBasis: true, comments: { orderBy: { createdAt: "asc" } } },
         orderBy,
         skip: (page - 1) * pageSize,
         take: pageSize,
@@ -44,7 +44,7 @@ export const FindingsRepository = {
   async findGroupedByArea(reviewId: string, userId: string) {
     const findings = await prisma.finding.findMany({
       where: { reviewId, review: { userId } },
-      include: { reviewBasis: true },
+      include: { reviewBasis: true, comments: { orderBy: { createdAt: "asc" } } },
       orderBy: [{ severity: "asc" }, { confidence: "desc" }],
     });
 
@@ -59,7 +59,7 @@ export const FindingsRepository = {
   async findNextUntriaged(reviewId: string, userId: string) {
     return prisma.finding.findFirst({
       where: { reviewId, status: "PROPOSED", review: { userId } },
-      include: { reviewBasis: true },
+      include: { reviewBasis: true, comments: { orderBy: { createdAt: "asc" } } },
       orderBy: [{ severity: "asc" }, { confidence: "desc" }],
     });
   },
@@ -67,7 +67,7 @@ export const FindingsRepository = {
   async findById(id: string, userId: string) {
     return prisma.finding.findFirst({
       where: { id, review: { userId } },
-      include: { reviewBasis: true },
+      include: { reviewBasis: true, comments: { orderBy: { createdAt: "asc" } } },
     });
   },
 
@@ -89,7 +89,7 @@ export const FindingsRepository = {
           },
         }),
       },
-      include: { reviewBasis: true },
+      include: { reviewBasis: true, comments: { orderBy: { createdAt: "asc" } } },
     });
   },
 
@@ -103,7 +103,24 @@ export const FindingsRepository = {
         aiMetadata: aiMetadata ?? undefined,
         updatedAt: new Date(),
       },
-      include: { reviewBasis: true },
+      include: { reviewBasis: true, comments: { orderBy: { createdAt: "asc" } } },
+    });
+  },
+
+  async createComment(findingId: string, text: string, authorName: string = "User") {
+    return prisma.comment.create({
+      data: {
+        findingId,
+        text,
+        authorName,
+      },
+    });
+  },
+
+  async getCommentsByFinding(findingId: string) {
+    return prisma.comment.findMany({
+      where: { findingId },
+      orderBy: { createdAt: "asc" },
     });
   },
 

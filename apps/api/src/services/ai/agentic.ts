@@ -1,8 +1,12 @@
 import path from "node:path";
 import fs from "node:fs";
 import { pathToFileURL } from "node:url";
+import OpenAI, { AzureOpenAI } from "openai";
 import { prisma } from "../../config/prisma";
+import { config } from "../../config";
 import { getSignedStorageReadUrl } from "../supabaseStorage";
+import { captureFigmaPrototype, persistCapturedFigmaScreens } from "../figmaCapture.service";
+import { captureWebsiteReference, persistCapturedWebsiteScreens } from "../websiteCapture.service";
 
 // ── Subcategory → Agent mapping (mirrors principles.ts SUBCATEGORY_TO_AGENT_MAP)
 // Duplicated here to avoid a build-time dependency on the agentic-ai package.
@@ -147,6 +151,64 @@ type FlowDiscoveryOutput = {
 
 type PipelineLogLevel = "info" | "warn" | "error";
 
+type PipelineRunMode = "fresh" | "rerun_dedupe";
+
+type RunReviewPipelineOptions = {
+  mode?: PipelineRunMode;
+};
+
+type PersistableBBoxRef = {
+  screenIndex: number;
+  bbox: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  };
+};
+
+export interface PersistableFindingCandidate {
+  title: string;
+  description: string;
+  recommendation: string;
+  severity: "P0" | "P1" | "P2";
+  area: "USABILITY" | "ACCESSIBILITY" | "CONSISTENCY" | "CONTENT_UX" | "RISK" | "RECOMMENDATIONS";
+  screen: string;
+  principle: string;
+  observation: string;
+  why: string;
+  businessImpact?: string;
+  a11yImpact?: string;
+  aiMetadata?: Record<string, string | string[] | number[]>;
+  confidence: number;
+  bboxRefs: PersistableBBoxRef[];
+  reviewBasisName: string;
+  reviewBasisExplanation: string;
+}
+
+interface ExistingFindingForDedup {
+  id: string;
+  observation: string | null;
+  title: string;
+  description: string;
+  recommendation: string;
+  severity: "P0" | "P1" | "P2";
+  area: "USABILITY" | "ACCESSIBILITY" | "CONSISTENCY" | "CONTENT_UX" | "RISK" | "RECOMMENDATIONS";
+  screen: string | null;
+  principle: string | null;
+  why: string | null;
+  businessImpact: string | null;
+  a11yImpact: string | null;
+  aiMetadata: unknown;
+  confidence: number;
+  bboxRefs: unknown;
+}
+
+interface ObservationSimilarityDecision {
+  isDuplicate: boolean;
+  reason: string;
+}
+
 function summarizeError(error: unknown): {
   name: string;
   message: string;
@@ -194,6 +256,108 @@ function logPipeline(level: PipelineLogLevel, reviewId: string, event: string, d
   console.log("[AI_PIPELINE]", payload);
 }
 
+const FINDING_SIMILARITY_PROMPT_TEMPLATE = [
+  "You are deduplicating UX findings from two runs of the same review.",
+  "Determine whether OLD and NEW describe the exact same issue.",
+  "Rules:",
+  "1) Return duplicate=true only when the core problem is materially the same.",
+  "2) Different root cause, user impact, or recommended fix means duplicate=false.",
+  "3) Ignore wording differences; focus on issue semantics.",
+  "Return strict JSON: {\"isDuplicate\": boolean, \"reason\": string}.",
+].join("\n");
+
+function resolveAzureConfig(endpoint: string): { mode: "classic" | "v1"; baseUrl: string } {
+  const trimmed = endpoint.replace(/\/+$/, "");
+  if (/\/openai\/v1$/i.test(trimmed)) return { mode: "v1", baseUrl: trimmed };
+  const resourceUrl = trimmed.replace(/\/openai\/?$/i, "");
+  return { mode: "classic", baseUrl: resourceUrl };
+}
+
+let dedupeClient: OpenAI | null | undefined;
+let dedupeModelName: string | undefined;
+
+function getDedupeClient(): { client: OpenAI; model: string } | null {
+  if (dedupeClient === undefined) {
+    if (!config.azureOpenAiEndpoint || !config.azureOpenAiKey) {
+      dedupeClient = null;
+    } else {
+      const deployment = process.env.AZURE_OPENAI_MODEL ?? process.env.AZURE_OPENAI_DEPLOYMENT ?? "DeepSeek-V4-Pro";
+      const { mode, baseUrl } = resolveAzureConfig(config.azureOpenAiEndpoint);
+      dedupeClient = mode === "v1"
+        ? new OpenAI({
+            apiKey: config.azureOpenAiKey,
+            baseURL: baseUrl,
+            defaultHeaders: { "api-key": config.azureOpenAiKey },
+          })
+        : new AzureOpenAI({
+            apiKey: config.azureOpenAiKey,
+            endpoint: baseUrl,
+            deployment,
+            apiVersion: config.azureOpenAiApiVersion,
+          });
+      dedupeModelName = deployment;
+    }
+  }
+
+  if (!dedupeClient || !dedupeModelName) return null;
+  return { client: dedupeClient, model: dedupeModelName };
+}
+
+function safeText(value: string | null | undefined): string {
+  return (value ?? "").trim();
+}
+
+async function classifyObservationSimilarity(params: {
+  reviewId: string;
+  oldFinding: ExistingFindingForDedup;
+  newFinding: PersistableFindingCandidate;
+}): Promise<ObservationSimilarityDecision> {
+  const oldObservation = safeText(params.oldFinding.observation) || safeText(params.oldFinding.description) || safeText(params.oldFinding.title);
+  const newObservation = safeText(params.newFinding.observation) || safeText(params.newFinding.description) || safeText(params.newFinding.title);
+
+  const llm = getDedupeClient();
+  if (!llm) {
+    logPipeline("warn", params.reviewId, "dedupe_llm_unavailable", {
+      oldFindingId: params.oldFinding.id,
+      newFindingTitle: params.newFinding.title.slice(0, 120),
+    });
+    return { isDuplicate: false, reason: "LLM unavailable" };
+  }
+
+  const completion = await llm.client.chat.completions.create({
+    model: llm.model,
+    temperature: 0,
+    response_format: { type: "json_object" },
+    messages: [
+      { role: "system", content: FINDING_SIMILARITY_PROMPT_TEMPLATE },
+      {
+        role: "user",
+        content: JSON.stringify({
+          oldFinding: {
+            observation: oldObservation,
+            title: params.oldFinding.title,
+            recommendation: params.oldFinding.recommendation,
+            why: params.oldFinding.why,
+          },
+          newFinding: {
+            observation: newObservation,
+            title: params.newFinding.title,
+            recommendation: params.newFinding.recommendation,
+            why: params.newFinding.why,
+          },
+        }),
+      },
+    ],
+  });
+
+  const raw = completion.choices[0]?.message?.content?.trim() ?? "{}";
+  const parsed = JSON.parse(raw) as Partial<ObservationSimilarityDecision>;
+  return {
+    isDuplicate: parsed.isDuplicate === true,
+    reason: typeof parsed.reason === "string" ? parsed.reason : "No reason provided",
+  };
+}
+
 // ── Module loader ─────────────────────────────────────────────────────────────
 
 const agenticSourceCandidates = [
@@ -228,7 +392,36 @@ let agenticModulePromise: Promise<{ runReviewGraph: (params: {
   findingMetadataOptions?: string[] | null;
   keyFlowsOnly?: boolean;
   documentPages?: DocumentPageMetadata[];
-}) => Promise<AgenticRunResult> }> | null = null;
+}) => Promise<AgenticRunResult>; refineSingleFinding: (params: {
+  originalFinding: {
+    title: string;
+    description: string | null;
+    observation: string | null;
+    severity: string;
+    area: string;
+    screen: string | null;
+    principle: string | null;
+    why: string | null;
+    recommendation: string | null;
+    businessImpact: string | null;
+    a11yImpact: string | null;
+    confidence: number;
+  };
+  userComments: string[];
+  screenshot: string | null;
+  reviewContext: string;
+  reviewDepth: string;
+}) => Promise<{
+  issue: string;
+  fix: string;
+  severity: "P0" | "P1" | "P2";
+  why: string;
+  confidence: number;
+  businessImpact: string | null;
+  a11yImpact: string | null;
+  acceptanceCriteria: string[];
+  refinementNote: string;
+}> }> | null = null;
 
 async function loadAgenticModule() {
   if (!agenticModulePromise) {
@@ -685,17 +878,33 @@ function buildReportMarkdown(params: {
 
 // ── Persist findings to DB ────────────────────────────────────────────────────
 
-async function persistFindings(params: {
+function buildBBoxLocationKey(ref: PersistableBBoxRef): string {
+  return [
+    ref.screenIndex,
+    ref.bbox.x.toFixed(6),
+    ref.bbox.y.toFixed(6),
+    ref.bbox.width.toFixed(6),
+    ref.bbox.height.toFixed(6),
+  ].join("|");
+}
+
+function normalizeExistingBBoxRefs(value: unknown): PersistableBBoxRef[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => normalizePersistableBBoxRef(item))
+    .filter((item): item is PersistableBBoxRef => Boolean(item));
+}
+
+function buildPersistableFindingCandidates(params: {
   reviewId: string;
   findings: SynthesizedFinding[];
   imageAssetNames: string[];
   groundingElements: GroundingElement[];
   flowDiscovery: FlowDiscoveryOutput;
-}) {
+}): PersistableFindingCandidate[] {
   const { reviewId, findings, imageAssetNames, groundingElements, flowDiscovery } = params;
 
-  for (let findingIndex = 0; findingIndex < findings.length; findingIndex += 1) {
-    const finding = findings[findingIndex];
+  return findings.map((finding, findingIndex) => {
     const screenName = extractScreenName(finding, imageAssetNames);
     const normalizedRefs = normalizePersistableBBoxRefs(finding, groundingElements);
     const bboxRefs = normalizedRefs ?? [
@@ -714,25 +923,52 @@ async function persistFindings(params: {
       });
     }
 
+    const basisExplanation = finding.mergedFrom.length > 0
+      ? `Synthesized from ${finding.sources.join(", ")} and merged from ${finding.mergedFrom.join(", ")}.`
+      : `Synthesized from ${finding.sources.join(", ")}.`;
+
+    return {
+      title: finding.issue.slice(0, 200),
+      description: finding.issue,
+      recommendation: finding.fix,
+      severity: finding.severity,
+      area: resolveArea(finding),
+      screen: screenName,
+      principle: finding.principle,
+      observation: finding.issue,
+      why: finding.why,
+      businessImpact: finding.businessImpact ?? undefined,
+      a11yImpact: finding.a11yImpact ?? undefined,
+      aiMetadata: buildFindingAiMetadataWithFlow(finding, flowDiscovery),
+      confidence: clampConfidence(finding.confidence),
+      bboxRefs,
+      reviewBasisName: finding.principle,
+      reviewBasisExplanation: basisExplanation,
+    };
+  });
+}
+
+async function persistFindingCandidates(reviewId: string, candidates: PersistableFindingCandidate[]) {
+  for (const candidate of candidates) {
     const createdFinding = await prisma.finding.create({
       data: {
         reviewId,
-        title: finding.issue.slice(0, 200),
-        description: finding.issue,
-        recommendation: finding.fix,
-        severity: finding.severity,
-        area: resolveArea(finding),
-        screen: screenName,
-        principle: finding.principle,
-        observation: finding.issue,
-        why: finding.why,
-        businessImpact: finding.businessImpact ?? undefined,
-        a11yImpact: finding.a11yImpact ?? undefined,
-        aiMetadata: buildFindingAiMetadataWithFlow(finding, flowDiscovery),
-        confidence: clampConfidence(finding.confidence),
+        title: candidate.title,
+        description: candidate.description,
+        recommendation: candidate.recommendation,
+        severity: candidate.severity,
+        area: candidate.area,
+        screen: candidate.screen,
+        principle: candidate.principle,
+        observation: candidate.observation,
+        why: candidate.why,
+        businessImpact: candidate.businessImpact,
+        a11yImpact: candidate.a11yImpact,
+        aiMetadata: candidate.aiMetadata,
+        confidence: candidate.confidence,
         status: "PROPOSED",
         isAiGenerated: true,
-        bboxRefs,
+        bboxRefs: candidate.bboxRefs,
       },
     });
 
@@ -740,7 +976,7 @@ async function persistFindings(params: {
       try {
         await prisma.finding.update({
           where: { id: createdFinding.id },
-          data: { bboxRefs },
+          data: { bboxRefs: candidate.bboxRefs },
         });
 
         const reloadedFinding = await prisma.finding.findUnique({
@@ -755,35 +991,113 @@ async function persistFindings(params: {
             ? "bbox_refs_force_written"
             : "bbox_refs_force_write_verification_failed",
           {
-          findingId: createdFinding.id,
-          fallbackRefCount: bboxRefs.length,
-          verificationHasRefs: hasNonEmptyBBoxRefs(reloadedFinding?.bboxRefs),
+            findingId: createdFinding.id,
+            fallbackRefCount: candidate.bboxRefs.length,
+            verificationHasRefs: hasNonEmptyBBoxRefs(reloadedFinding?.bboxRefs),
           }
         );
       } catch (error) {
         const summary = summarizeError(error);
         logPipeline("error", reviewId, "bbox_refs_force_write_failed", {
           findingId: createdFinding.id,
-          fallbackRefCount: bboxRefs.length,
+          fallbackRefCount: candidate.bboxRefs.length,
           errorName: summary.name,
           errorMessage: summary.message,
         });
       }
     }
 
-    const basisExplanation = finding.mergedFrom.length > 0
-      ? `Synthesized from ${finding.sources.join(", ")} and merged from ${finding.mergedFrom.join(", ")}.`
-      : `Synthesized from ${finding.sources.join(", ")}.`;
-
     await prisma.reviewBasisItem.create({
       data: {
         findingId: createdFinding.id,
         type: "LangGraph synthesis",
-        name: finding.principle,
-        explanation: basisExplanation,
+        name: candidate.reviewBasisName,
+        explanation: candidate.reviewBasisExplanation,
       },
     });
   }
+}
+
+async function deduplicateCandidatesAgainstExisting(params: {
+  reviewId: string;
+  existingFindings: ExistingFindingForDedup[];
+  newCandidates: PersistableFindingCandidate[];
+}) {
+  const existingByLocation = new Map<string, ExistingFindingForDedup[]>();
+
+  for (const finding of params.existingFindings) {
+    const refs = normalizeExistingBBoxRefs(finding.bboxRefs);
+    for (const ref of refs) {
+      const key = buildBBoxLocationKey(ref);
+      const list = existingByLocation.get(key);
+      if (list) {
+        list.push(finding);
+      } else {
+        existingByLocation.set(key, [finding]);
+      }
+    }
+  }
+
+  const candidatesToPersist: PersistableFindingCandidate[] = [];
+  let mergedCount = 0;
+  let comparedPairs = 0;
+
+  for (const candidate of params.newCandidates) {
+    const locationKeys = candidate.bboxRefs.map((ref) => buildBBoxLocationKey(ref));
+    const locationMatches = new Map<string, ExistingFindingForDedup>();
+
+    for (const key of locationKeys) {
+      for (const existing of existingByLocation.get(key) ?? []) {
+        locationMatches.set(existing.id, existing);
+      }
+    }
+
+    if (locationMatches.size === 0) {
+      candidatesToPersist.push(candidate);
+      continue;
+    }
+
+    let duplicateFound = false;
+    for (const existing of locationMatches.values()) {
+      comparedPairs += 1;
+      try {
+        const decision = await classifyObservationSimilarity({
+          reviewId: params.reviewId,
+          oldFinding: existing,
+          newFinding: candidate,
+        });
+
+        if (decision.isDuplicate) {
+          mergedCount += 1;
+          duplicateFound = true;
+          logPipeline("info", params.reviewId, "rerun_finding_merged", {
+            existingFindingId: existing.id,
+            newFindingTitle: candidate.title.slice(0, 120),
+            reason: decision.reason,
+          });
+          break;
+        }
+      } catch (error) {
+        const summary = summarizeError(error);
+        logPipeline("warn", params.reviewId, "dedupe_similarity_check_failed", {
+          existingFindingId: existing.id,
+          newFindingTitle: candidate.title.slice(0, 120),
+          errorName: summary.name,
+          errorMessage: summary.message,
+        });
+      }
+    }
+
+    if (!duplicateFound) {
+      candidatesToPersist.push(candidate);
+    }
+  }
+
+  return {
+    candidatesToPersist,
+    mergedCount,
+    comparedPairs,
+  };
 }
 
 // ── Build context string ──────────────────────────────────────────────────────
@@ -802,15 +1116,45 @@ function buildReviewContext(review: NonNullable<ReviewRecord>): string {
   ].join("\n");
 }
 
+function extractFigmaUrlFromAssets(assets: ReviewAssetRecord[]): string | null {
+  for (const asset of assets) {
+    const contentText = asset.contentText?.trim();
+    if (!contentText) continue;
+
+    const match = contentText.match(/(?:^|\n)Figma URL:\s*(https?:\/\/\S+)/i);
+    if (match?.[1]) {
+      return match[1].trim();
+    }
+  }
+
+  return null;
+}
+
+function extractWebsiteUrlFromAssets(assets: ReviewAssetRecord[]): string | null {
+  for (const asset of assets) {
+    const contentText = asset.contentText?.trim();
+    if (!contentText) continue;
+
+    const match = contentText.match(/(?:^|\n)Design System URL:\s*(https?:\/\/\S+)/i);
+    if (match?.[1]) {
+      return match[1].trim();
+    }
+  }
+
+  return null;
+}
+
 // ── Main pipeline ─────────────────────────────────────────────────────────────
 
-export async function runReviewPipeline(reviewId: string): Promise<void> {
+export async function runReviewPipeline(reviewId: string, options?: RunReviewPipelineOptions): Promise<void> {
   const pipelineStartedAt = Date.now();
+  const mode: PipelineRunMode = options?.mode ?? "fresh";
   logPipeline("info", reviewId, "pipeline_started", {
     nodeEnv: process.env.NODE_ENV ?? "unknown",
+    mode,
   });
 
-  const review = await prisma.review.findUnique({
+  let review = await prisma.review.findUnique({
     where: { id: reviewId },
     include: { assets: true },
   });
@@ -821,19 +1165,86 @@ export async function runReviewPipeline(reviewId: string): Promise<void> {
   }
 
   try {
-    logPipeline("info", reviewId, "stage_updating", { stage: "reading_inputs" });
-    await prisma.review.update({ where: { id: reviewId }, data: { stage: "reading_inputs" } });
-
-    // Collect image assets in order — the index maps to "screen{N}" in elementRefs
-    const sortedAssets = [...review.assets].sort((a, b) => {
+    let sortedAssets = [...review.assets].sort((a, b) => {
       const createdDiff = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
       if (createdDiff !== 0) return createdDiff;
       return a.id.localeCompare(b.id);
     });
 
-    const imageAssets = sortedAssets.filter(
+    let imageAssets = sortedAssets.filter(
       (asset: ReviewAssetRecord) => asset.mimeType.startsWith("image/")
     );
+
+    if (imageAssets.length === 0) {
+      const figmaUrl = extractFigmaUrlFromAssets(review.assets);
+      const websiteUrl = extractWebsiteUrlFromAssets(review.assets);
+
+      if (figmaUrl) {
+        logPipeline("info", reviewId, "stage_updating", { stage: "capturing_figma_prototype", figmaUrl });
+        await prisma.review.update({ where: { id: reviewId }, data: { stage: "capturing_figma_prototype" } });
+
+        const captureResult = await captureFigmaPrototype({ url: figmaUrl });
+        await persistCapturedFigmaScreens(reviewId, captureResult.screens);
+
+        logPipeline("info", reviewId, "figma_capture_completed", {
+          capturedScreens: captureResult.screens.length,
+          visitedUrls: captureResult.visitedUrls,
+          titles: captureResult.titles,
+        });
+
+        review = await prisma.review.findUnique({
+          where: { id: reviewId },
+          include: { assets: true },
+        });
+
+        if (!review) {
+          throw new Error(`Review ${reviewId} not found after Figma capture`);
+        }
+
+        sortedAssets = [...review.assets].sort((a, b) => {
+          const createdDiff = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+          if (createdDiff !== 0) return createdDiff;
+          return a.id.localeCompare(b.id);
+        });
+        imageAssets = sortedAssets.filter(
+          (asset: ReviewAssetRecord) => asset.mimeType.startsWith("image/")
+        );
+      } else if (websiteUrl) {
+        logPipeline("info", reviewId, "stage_updating", { stage: "capturing_website_reference", websiteUrl });
+        await prisma.review.update({ where: { id: reviewId }, data: { stage: "capturing_website_reference" } });
+
+        const captureResult = await captureWebsiteReference({ url: websiteUrl });
+        await persistCapturedWebsiteScreens(reviewId, captureResult.screens);
+
+        logPipeline("info", reviewId, "website_capture_completed", {
+          capturedScreens: captureResult.screens.length,
+          visitedUrls: captureResult.visitedUrls,
+          titles: captureResult.titles,
+        });
+
+        review = await prisma.review.findUnique({
+          where: { id: reviewId },
+          include: { assets: true },
+        });
+
+        if (!review) {
+          throw new Error(`Review ${reviewId} not found after website capture`);
+        }
+
+        sortedAssets = [...review.assets].sort((a, b) => {
+          const createdDiff = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+          if (createdDiff !== 0) return createdDiff;
+          return a.id.localeCompare(b.id);
+        });
+        imageAssets = sortedAssets.filter(
+          (asset: ReviewAssetRecord) => asset.mimeType.startsWith("image/")
+        );
+      }
+    }
+
+    logPipeline("info", reviewId, "stage_updating", { stage: "reading_inputs" });
+    await prisma.review.update({ where: { id: reviewId }, data: { stage: "reading_inputs" } });
+
     const imageAssetNames = imageAssets.map((asset: ReviewAssetRecord) => asset.name);
     const documentPages = imageAssetNames.map((assetName, index) => ({
       pageNumber: index + 1,
@@ -929,13 +1340,7 @@ export async function runReviewPipeline(reviewId: string): Promise<void> {
       uxScore,
     });
 
-    // Clear any existing findings/reports from previous runs
-    await prisma.$transaction([
-      prisma.finding.deleteMany({ where: { reviewId } }),
-      prisma.report.deleteMany({ where: { reviewId } }),
-    ]);
-
-    await persistFindings({
+    const newCandidates = buildPersistableFindingCandidates({
       reviewId,
       findings,
       imageAssetNames,
@@ -943,8 +1348,63 @@ export async function runReviewPipeline(reviewId: string): Promise<void> {
       flowDiscovery,
     });
 
+    let persistedFindings = newCandidates.length;
+    let mergedCount = 0;
+
+    if (mode === "fresh") {
+      // Fresh run replaces previous findings and reports.
+      await prisma.$transaction([
+        prisma.finding.deleteMany({ where: { reviewId } }),
+        prisma.report.deleteMany({ where: { reviewId } }),
+      ]);
+
+      await persistFindingCandidates(reviewId, newCandidates);
+    } else {
+      const existingFindings = await prisma.finding.findMany({
+        where: { reviewId },
+        select: {
+          id: true,
+          observation: true,
+          title: true,
+          description: true,
+          recommendation: true,
+          severity: true,
+          area: true,
+          screen: true,
+          principle: true,
+          why: true,
+          businessImpact: true,
+          a11yImpact: true,
+          aiMetadata: true,
+          confidence: true,
+          bboxRefs: true,
+        },
+      });
+
+      const dedupeResult = await deduplicateCandidatesAgainstExisting({
+        reviewId,
+        existingFindings,
+        newCandidates,
+      });
+
+      mergedCount = dedupeResult.mergedCount;
+      persistedFindings = dedupeResult.candidatesToPersist.length;
+
+      await persistFindingCandidates(reviewId, dedupeResult.candidatesToPersist);
+
+      logPipeline("info", reviewId, "rerun_dedup_completed", {
+        generatedFindings: newCandidates.length,
+        existingFindings: existingFindings.length,
+        mergedCount,
+        insertedFindings: persistedFindings,
+        comparedPairs: dedupeResult.comparedPairs,
+      });
+    }
+
     logPipeline("info", reviewId, "findings_persisted", {
-      persistedFindings: findings.length,
+      persistedFindings,
+      mergedCount,
+      mode,
     });
 
     logPipeline("info", reviewId, "stage_updating", { stage: "generating_report", uxScore });
@@ -953,11 +1413,15 @@ export async function runReviewPipeline(reviewId: string): Promise<void> {
       data: { stage: "generating_report", uxScore, flowDiscovery: flowDiscovery as any },
     });
 
+    const dedupeNote = mode === "rerun_dedupe"
+      ? `${synthesis.deduplicationNote} Run-again dedupe merged ${mergedCount} findings with existing findings at identical pin locations.`
+      : synthesis.deduplicationNote;
+
     const report = buildReportMarkdown({
       review,
       findings,
       uxScore,
-      deduplicationNote: synthesis.deduplicationNote,
+      deduplicationNote: dedupeNote,
     });
 
     await prisma.report.create({
@@ -989,7 +1453,7 @@ export async function runReviewPipeline(reviewId: string): Promise<void> {
       durationMs: Date.now() - pipelineStartedAt,
       status: "completed",
       uxScore,
-      findingCount: findings.length,
+      findingCount: persistedFindings,
     });
   } catch (err) {
     const errorSummary = summarizeError(err);
@@ -1015,3 +1479,50 @@ export async function runReviewPipeline(reviewId: string): Promise<void> {
     throw err;
   }
 }
+
+// ── Single Finding Regeneration ───────────────────────────────────────────────
+
+export async function regenerateSingleFinding(params: {
+  screenshot: string | null;
+  originalFinding: {
+    title: string;
+    description: string | null;
+    observation: string | null;
+    severity: string;
+    area: string;
+    screen: string | null;
+    principle: string | null;
+    why: string | null;
+    recommendation: string | null;
+    businessImpact: string | null;
+    a11yImpact: string | null;
+    confidence: number;
+  };
+  userComments: string[];
+  reviewContext: string;
+  reviewDepth: string;
+}): Promise<{
+  issue: string;
+  fix: string;
+  severity: "P0" | "P1" | "P2";
+  why: string;
+  confidence: number;
+  businessImpact: string | null;
+  a11yImpact: string | null;
+  acceptanceCriteria: string[];
+}> {
+  const module = await loadAgenticModule();
+
+  // Use the targeted refineSingleFinding instead of running the full pipeline
+  const refined = await module.refineSingleFinding({
+    originalFinding: params.originalFinding,
+    userComments: params.userComments,
+    screenshot: params.screenshot,
+    reviewContext: params.reviewContext,
+    reviewDepth: params.reviewDepth,
+  });
+
+  return refined;
+}
+
+export { toModelScreenshotDataUrl, type ReviewAssetRecord };

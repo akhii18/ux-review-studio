@@ -35,3 +35,5 @@ export async function runReviewGraph(input: RunReviewGraphInput): Promise<GraphS
 export type { ReviewAgentName };
 export type { SelectedPrinciples };
 export type { FindingOutputOptionKey };
+export { refineSingleFinding } from "./refineFinding.js";
+export type { RefineFindingInput, RefinedFinding } from "./refineFinding.js";

@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { useApproveChecklistMutation } from "@/store/api/checklistsApi";
 import type { Checklist } from "@uxm/shared";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 
 export function ApprovalWorkflow({ checklist }: { checklist: Checklist }) {

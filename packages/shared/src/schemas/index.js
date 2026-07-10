@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.UpdateSettingsSchema = exports.UpdatePrincipleSchema = exports.CreatePrincipleSchema = exports.ApproveChecklistSchema = exports.UpdateChecklistSchema = exports.CreateChecklistSchema = exports.ChecklistItemSchema = exports.FindingsQuerySchema = exports.EscalateFindingSchema = exports.TriageFindingSchema = exports.UpdateFindingSchema = exports.ReviewBasisItemSchema = exports.PrincipleCategorySchema = exports.ChecklistStatusSchema = exports.FindingStatusSchema = exports.SeveritySchema = exports.ReviewAreaSchema = void 0;
+exports.RegenerateFindingSchema = exports.CreateCommentSchema = exports.UpdateSettingsSchema = exports.UpdatePrincipleSchema = exports.CreatePrincipleSchema = exports.ApproveChecklistSchema = exports.UpdateChecklistSchema = exports.CreateChecklistSchema = exports.ChecklistItemSchema = exports.FindingsQuerySchema = exports.EscalateFindingSchema = exports.TriageFindingSchema = exports.UpdateFindingSchema = exports.ReviewBasisItemSchema = exports.PrincipleCategorySchema = exports.ChecklistStatusSchema = exports.FindingStatusSchema = exports.SeveritySchema = exports.ReviewAreaSchema = void 0;
 const zod_1 = require("zod");
 // ── Enums ─────────────────────────────────────────────────────────────────────
 exports.ReviewAreaSchema = zod_1.z.enum([
@@ -18,6 +18,7 @@ exports.FindingStatusSchema = zod_1.z.enum([
     "EDITED",
     "DISMISSED",
     "ESCALATED",
+    "FALSE_POSITIVE",
 ]);
 exports.ChecklistStatusSchema = zod_1.z.enum(["DRAFT", "APPROVED", "DEPRECATED"]);
 exports.PrincipleCategorySchema = zod_1.z.enum([
@@ -46,7 +47,7 @@ exports.UpdateFindingSchema = zod_1.z.object({
     reviewBasis: zod_1.z.array(exports.ReviewBasisItemSchema).optional(),
 });
 exports.TriageFindingSchema = zod_1.z.object({
-    action: zod_1.z.enum(["ACCEPT", "EDIT", "DISMISS", "ESCALATE"]),
+    action: zod_1.z.enum(["ACCEPT", "EDIT", "DISMISS", "ESCALATE", "FALSE_POSITIVE"]),
     title: zod_1.z.string().min(1).optional(),
     description: zod_1.z.string().optional(),
     recommendation: zod_1.z.string().optional(),
@@ -61,6 +62,13 @@ exports.EscalateFindingSchema = zod_1.z.object({
         email: zod_1.z.string().email("Invalid email address").optional(),
     })).optional(),
     reason: zod_1.z.string().min(1, "Escalation reason is required"),
+});
+exports.CreateCommentSchema = zod_1.z.object({
+    text: zod_1.z.string().min(1, "Comment text is required"),
+    authorName: zod_1.z.string().default("User"),
+});
+exports.RegenerateFindingSchema = zod_1.z.object({
+    userComments: zod_1.z.array(zod_1.z.string()).optional(),
 });
 exports.FindingsQuerySchema = zod_1.z.object({
     area: exports.ReviewAreaSchema.optional(),

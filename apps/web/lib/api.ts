@@ -169,6 +169,10 @@ export function startReview(id: string) {
   return request<any>(`/api/reviews/${id}/start`, { method: "POST" });
 }
 
+export function runAgainReview(id: string) {
+  return request<any>(`/api/reviews/${id}/run-again`, { method: "POST" });
+}
+
 export function exportReviewReport(id: string) {
   return request<{
     id: string;
@@ -234,6 +238,14 @@ export function triageFinding(id: string, payload: { action: string; notes?: str
 
 export function updateFinding(id: string, data: Record<string, unknown>) {
   return request<any>(`/api/findings/${id}`, { method: "PATCH", body: JSON.stringify(data) });
+}
+
+export function addComment(id: string, payload: { text: string; authorName?: string }) {
+  return request<any>(`/api/findings/${id}/comments`, { method: "POST", body: JSON.stringify(payload) });
+}
+
+export function regenerateFinding(id: string, payload: { userComments?: string[] }) {
+  return request<any>(`/api/findings/${id}/regenerate`, { method: "POST", body: JSON.stringify(payload) });
 }
 
 // ── Principles ────────────────────────────────────────────────────────────────

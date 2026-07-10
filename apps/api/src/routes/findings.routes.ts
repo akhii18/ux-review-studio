@@ -10,5 +10,9 @@ router.get("/recurring", FindingsController.getRecurring);
 router.patch("/:id", FindingsController.update);
 router.post("/:id/escalate", FindingsController.escalate);
 router.patch("/:id/triage", FindingsController.triage);
+router.post("/:id/comments", FindingsController.addComment);
+router.post("/:id/regenerate", FindingsController.regenerate);
+router.post("/:id/comments", FindingsController.addComment);
+router.post("/:id/regenerate", FindingsController.regenerate);
 
 export default router;

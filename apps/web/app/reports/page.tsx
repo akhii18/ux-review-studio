@@ -13,7 +13,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { FileText, Download, Eye, ChevronDown } from "lucide-react";
 import { exportReviewReport, listReviews } from "@/lib/api";
 import { buildReportPreviewHtml, downloadReport } from "@/lib/reportExport";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 
 function ReportsPageContent() {
   const searchParams = useSearchParams();

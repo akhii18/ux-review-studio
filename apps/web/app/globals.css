@@ -23,7 +23,7 @@
   --secondary-foreground: oklch(0.18 0.05 285);
 
   --muted: oklch(0.95 0.01 80);
-  --muted-foreground: oklch(0.42 0.005 60);        /* Steel Grey #4D4D4F */
+  --muted-foreground: oklch(0.36 0.01 60);        /* Steel Grey — 4.5:1+ on background */
 
   --accent: oklch(0.2 0 0);                        /* Black accent */
   --accent-foreground: oklch(0.99 0.005 80);
@@ -75,7 +75,7 @@
   --secondary: oklch(0.24 0.06 285);
   --secondary-foreground: oklch(0.96 0.008 80);
   --muted: oklch(0.24 0.06 285);
-  --muted-foreground: oklch(0.72 0.01 80);
+  --muted-foreground: oklch(0.78 0.01 80);
   --accent: oklch(0.92 0 0);
   --accent-foreground: oklch(0.99 0.005 80);
   --border: oklch(1 0 0 / 10%);

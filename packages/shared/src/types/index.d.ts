@@ -1,6 +1,6 @@
 export type ReviewArea = "USABILITY" | "ACCESSIBILITY" | "CONSISTENCY" | "CONTENT_UX" | "RISK" | "RECOMMENDATIONS";
 export type Severity = "P0" | "P1" | "P2";
-export type FindingStatus = "PROPOSED" | "ACCEPTED" | "EDITED" | "DISMISSED" | "ESCALATED";
+export type FindingStatus = "PROPOSED" | "ACCEPTED" | "EDITED" | "DISMISSED" | "ESCALATED" | "FALSE_POSITIVE";
 export type ChecklistStatus = "DRAFT" | "APPROVED" | "DEPRECATED";
 export type PrincipleCategory = "NIELSEN_HEURISTICS" | "COGNITIVE_LAWS" | "GESTALT" | "VISUAL_DESIGN" | "ACCESSIBILITY_WCAG" | "CONTENT_MICROCOPY" | "CUSTOM";
 export type ReviewStatus = "draft" | "in_progress" | "completed" | "failed" | "archived";
@@ -14,6 +14,35 @@ export interface FindingAiMetadata {
     flowDescription?: string;
     flowPageNumbers?: number[];
     escalationRecipients?: Array<{ label: string; email?: string }>;
+}
+export interface BoundingBoxRef {
+    screenIndex: number;
+    bbox: {
+        x: number;
+        y: number;
+        width: number;
+        height: number;
+    };
+}
+export interface FindingSimilarityCheckInput {
+    oldObservation: string;
+    newObservation: string;
+    oldTitle?: string;
+    newTitle?: string;
+    oldRecommendation?: string;
+    newRecommendation?: string;
+}
+export interface FindingSimilarityCheckResult {
+    isDuplicate: boolean;
+    reason: string;
+}
+export interface RunAgainDedupCandidateFinding {
+    title: string;
+    observation?: string;
+    description?: string;
+    recommendation?: string;
+    why?: string;
+    bboxRefs: BoundingBoxRef[];
 }
 export interface Finding {
     id: string;
@@ -35,7 +64,7 @@ export interface Finding {
     notes?: string;
     escalationReason?: string;
     isAiGenerated: boolean;
-    bboxRefs?: Array<{ screenIndex: number; bbox: { x: number; y: number; width: number; height: number } }>;
+    bboxRefs?: BoundingBoxRef[];
     createdAt: string;
     updatedAt: string;
 }
@@ -48,6 +77,14 @@ export interface ReviewBasisItem {
 }
 export interface FindingWithBasis extends Finding {
     reviewBasis: ReviewBasisItem[];
+    comments: FindingComment[];
+}
+export interface FindingComment {
+    id: string;
+    findingId: string;
+    text: string;
+    authorName: string;
+    createdAt: string;
 }
 export interface DiscoveredFlow {
     flowName: string;

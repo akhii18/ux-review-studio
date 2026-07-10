@@ -174,6 +174,32 @@ The following capabilities are included in this repo and wired into the dev flow
 
 ---
 
+## Figma prototype reviews
+
+Figma prototype URLs are now supported as a first-class review input.
+
+- In the New Review flow, paste a public Figma prototype URL.
+- If you do not upload screenshots, the backend captures the prototype with Playwright when the review starts.
+- Captured prototype screens are persisted as normal image assets, so the same AI pipeline used for screenshots and PDF-derived pages runs unchanged.
+
+Local browser behavior:
+
+- The API first tries a configured `FIGMA_BROWSER_EXECUTABLE_PATH`.
+- If that is not set, it tries installed Chrome and Edge paths on Windows.
+- If no local browser is available, it falls back to bundled Chromium from Playwright.
+
+Smoke tests:
+
+```bash
+# Capture-only validation
+npm run test:figma:capture --workspace @uxm/api -- "https://www.figma.com/proto/..."
+
+# Full end-to-end review validation
+npm run test:figma:review --workspace @uxm/api -- "https://www.figma.com/proto/..."
+```
+
+The full review smoke test requires the normal API prerequisites: database access, `JWT_SECRET`, and Azure OpenAI configuration.
+
 ## Phase 2 scope (not yet implemented)
 
-Authentication (Azure AD / MSAL), AI Review Engine (Azure OpenAI), Reports & Export, Analytics, BullMQ background jobs, Socket.IO real-time, Figma Integration, Recording Analysis.
+Authentication (Azure AD / MSAL), BullMQ background jobs, Socket.IO real-time, Recording Analysis.

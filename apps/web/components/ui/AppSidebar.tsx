@@ -108,7 +108,7 @@ export function AppSidebar() {
           <img src="/logo.png" alt="UXNavigator" width={40} height={40} className="h-10 w-10 shrink-0 object-contain" />
           <div className="flex min-w-0 flex-col leading-tight group-data-[collapsible=icon]:hidden">
             <span className="truncate text-[13px] font-semibold text-sidebar-foreground">UXNavigator</span>
-            <span className="truncate text-[11px] leading-tight text-sidebar-foreground/60">AI-assisted UX governance</span>
+            <span className="truncate text-[11px] leading-tight text-muted-foreground">AI-assisted UX governance</span>
           </div>
         </div>
       </SidebarHeader>
@@ -116,57 +116,50 @@ export function AppSidebar() {
       <SidebarContent className="gap-1 p-2">
         {navGroups.map((group) => (
           <SidebarGroup key={group.group} className="p-0">
-            <SidebarGroupLabel className="px-2 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70">
+            <SidebarGroupLabel className="px-2 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
               {group.group}
             </SidebarGroupLabel>
             <SidebarGroupContent>
+              <nav aria-label={group.group}>
               <SidebarMenu className="gap-0.5">
-                {group.items.map((item) => (
+                {group.items.map((item) => {
+                  const active = isActive(item.url);
+                  return (
                   <SidebarMenuItem key={item.url}>
                     <SidebarMenuButton
                       asChild
-                      isActive={isActive(item.url)}
+                      isActive={active}
                       tooltip={item.title}
                       className={cn(
-                        isActive(item.url)
+                        active
                           ? "bg-sidebar-accent text-sidebar-foreground"
-                          : "text-sidebar-foreground/70 hover:bg-sidebar-accent/60 hover:text-sidebar-foreground",
+                          : "text-sidebar-foreground hover:bg-sidebar-accent/60 hover:text-sidebar-foreground",
                       )}
                     >
-                      <Link href={item.url} onClick={() => handleNavClick(item.url)}>
+                      <Link
+                        href={item.url}
+                        onClick={() => handleNavClick(item.url)}
+                        aria-current={active ? "page" : undefined}
+                      >
                         <item.icon className="h-4 w-4 shrink-0" aria-hidden />
                         <span>{item.title}</span>
                       </Link>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
-                ))}
+                  );
+                })}
               </SidebarMenu>
+              </nav>
             </SidebarGroupContent>
           </SidebarGroup>
         ))}
       </SidebarContent>
 
       <SidebarFooter className="border-t border-sidebar-border p-2">
+        <nav aria-label="Account">
         <SidebarMenu>
-          <SidebarMenuItem>
-            <SidebarMenuButton asChild tooltip="Documentation" className="text-sidebar-foreground/70 hover:bg-sidebar-accent/60 hover:text-sidebar-foreground">
-              <Link href="/settings" onClick={() => handleNavClick("/settings")}>
-                <BookOpen className="h-4 w-4 shrink-0" aria-hidden />
-                <span>Documentation</span>
-              </Link>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-          <SidebarMenuItem>
-            <SidebarMenuButton
-              tooltip="Log out"
-              onClick={handleLogout}
-              className="text-sidebar-foreground/70 hover:bg-sidebar-accent/60 hover:text-sidebar-foreground"
-            >
-              <LogOut className="h-4 w-4 shrink-0" aria-hidden />
-              <span>Log out</span>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
         </SidebarMenu>
+        </nav>
       </SidebarFooter>
       <SidebarRail />
     </Sidebar>

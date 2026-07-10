@@ -5,6 +5,8 @@ import {
   TriageFindingSchema,
   UpdateFindingSchema,
   EscalateFindingSchema,
+  CreateCommentSchema,
+  RegenerateFindingSchema,
 } from "@uxm/shared";
 import { AppError } from "../middleware/errorHandler";
 
@@ -52,5 +54,17 @@ export const FindingsController = {
   async getRecurring(req: Request, res: Response) {
     const result = await FindingsService.getRecurring(getUserId(req));
     res.json({ success: true, data: result });
+  },
+
+  async addComment(req: Request, res: Response) {
+    const { text, authorName } = CreateCommentSchema.parse(req.body);
+    const comment = await FindingsService.addComment(req.params.id as string, getUserId(req), text, authorName);
+    res.status(201).json({ success: true, data: comment });
+  },
+
+  async regenerate(req: Request, res: Response) {
+    const { userComments } = RegenerateFindingSchema.parse(req.body);
+    const finding = await FindingsService.regenerate(req.params.id as string, getUserId(req), userComments);
+    res.json({ success: true, data: finding });
   },
 };

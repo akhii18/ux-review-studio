@@ -16,12 +16,12 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import {
   Download, Check, RefreshCw, Sparkles, Image as ImageIcon,
   AlertCircle, ChevronLeft, ChevronRight, X, ArrowUpRight, Edit3, Plus,
-  BookOpen, AlertTriangle, MessageSquare, MonitorPlay, ChevronDown,
+  BookOpen, AlertTriangle, MessageSquare, MonitorPlay, ChevronDown, Loader2,
 } from "lucide-react";
 import { PriorityBadge } from "@/components/ui/PriorityBadge";
 import { FindingStatusBadge } from "@/components/ui/FindingStatusBadge";
 import { cn } from "@/lib/utils";
-import { exportReviewReport, getReview, updateFinding, triageFinding } from "@/lib/api";
+import { exportReviewReport, getReview, getReviewProgress, runAgainReview, updateFinding, triageFinding, addComment, regenerateFinding } from "@/lib/api";
 import { downloadReport } from "@/lib/reportExport";
 import { useAppDispatch } from "@/store/hooks";
 import { addNotification } from "@/store/slices/notificationsSlice";
@@ -32,11 +32,11 @@ import {
   type FindingOutputOptionKey,
   type FindingAiMetadata,
 } from "@uxm/shared";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import Link from "next/link";
 import { EscalateDialog } from "@/components/triage/EscalateDialog";
 
-type TriageStatus = "PROPOSED" | "ACCEPTED" | "EDITED" | "DISMISSED" | "ESCALATED";
+type TriageStatus = "PROPOSED" | "ACCEPTED" | "EDITED" | "DISMISSED" | "ESCALATED" | "FALSE_POSITIVE";
 
 interface ReviewBasisItem {
   id?: string;
@@ -53,6 +53,13 @@ interface BoundingBoxRef {
     width: number;
     height: number;
   };
+}
+
+interface FindingComment {
+  id: string;
+  text: string;
+  authorName?: string;
+  createdAt: string;
 }
 
 interface Finding {
@@ -79,6 +86,7 @@ interface Finding {
   notes?: string;
   reviewBasis: ReviewBasisItem[];
   bboxRefs?: unknown;
+  comments?: FindingComment[];
 }
 
 interface WorkspaceScreen {
@@ -416,10 +424,15 @@ function WorkspaceContent() {
   const [selectedScreen, setSelectedScreen] = useState<string | null>(null);
   const [open, setOpen] = useState<Finding | null>(null);
   const [openCluster, setOpenCluster] = useState<PinCluster | null>(null);
+  const [clusterFindingIndex, setClusterFindingIndex] = useState(0);
+  const [clusterViewMode, setClusterViewMode] = useState<"list" | "detail">("list");
   const [imageLoadFailed, setImageLoadFailed] = useState(false);
+  const [runAgainPending, setRunAgainPending] = useState(false);
   const unplacedDiagToastShownRef = useRef<string | null>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
   const imageRef = useRef<HTMLImageElement>(null);
+  const runAgainPollRef = useRef<number | null>(null);
+  const runAgainAttemptRef = useRef(0);
   const [imageLayout, setImageLayout] = useState<ImageLayout | null>(null);
 
   const findingId = params.get("findingId");
@@ -445,6 +458,14 @@ function WorkspaceContent() {
       fetchReview();
     }
   }, [reviewId, fetchReview]);
+
+  useEffect(() => {
+    return () => {
+      if (runAgainPollRef.current !== null) {
+        window.clearTimeout(runAgainPollRef.current);
+      }
+    };
+  }, []);
 
   const allFindings: Finding[] = useMemo(() => {
     if (reviewData?.findings) {
@@ -605,6 +626,10 @@ function WorkspaceContent() {
       setSelectedScreen(screens[0].id);
     }
   }, [screens, selectedScreen]);
+
+  useEffect(() => {
+    toast.dismiss();
+  }, [clusterFindingIndex, open, openCluster, selectedScreen]);
 
   const screen = screens.find((s) => s.id === selectedScreen) ?? screens[0] ?? null;
   const idx = screen ? screens.findIndex((s) => s.id === screen.id) : -1;
@@ -785,6 +810,77 @@ function WorkspaceContent() {
     }
   }, [dispatch, handleDownload, reviewData?.name, reviewId]);
 
+  const handleRunAgain = useCallback(async () => {
+    if (!reviewId || runAgainPending) return;
+
+    runAgainAttemptRef.current += 1;
+    const attemptId = runAgainAttemptRef.current;
+
+    if (runAgainPollRef.current !== null) {
+      window.clearTimeout(runAgainPollRef.current);
+      runAgainPollRef.current = null;
+    }
+
+    setRunAgainPending(true);
+
+    try {
+      await runAgainReview(reviewId);
+      toast.success("Run again started");
+
+      const stopPolling = () => {
+        if (runAgainPollRef.current !== null) {
+          window.clearTimeout(runAgainPollRef.current);
+          runAgainPollRef.current = null;
+        }
+      };
+
+      const pollOnce = async () => {
+        if (runAgainAttemptRef.current !== attemptId) return;
+
+        try {
+          const progress = await getReviewProgress(reviewId);
+          if (runAgainAttemptRef.current !== attemptId) return;
+
+          if (progress.status === "completed") {
+            stopPolling();
+            setRunAgainPending(false);
+            await fetchReview();
+            toast.success(`Run again complete — ${progress.findingCount ?? 0} findings now in workspace.`);
+            return;
+          }
+
+          if (progress.status === "failed") {
+            stopPolling();
+            setRunAgainPending(false);
+            toast.error("Run again failed");
+            return;
+          }
+
+          runAgainPollRef.current = window.setTimeout(() => {
+            void pollOnce();
+          }, 2000);
+        } catch {
+          if (runAgainAttemptRef.current !== attemptId) return;
+
+          runAgainPollRef.current = window.setTimeout(() => {
+            void pollOnce();
+          }, 3000);
+        }
+      };
+
+      void pollOnce();
+    } catch (error: any) {
+      if (runAgainAttemptRef.current === attemptId) {
+        if (runAgainPollRef.current !== null) {
+          window.clearTimeout(runAgainPollRef.current);
+          runAgainPollRef.current = null;
+        }
+      }
+      setRunAgainPending(false);
+      toast.error(error?.message ?? "Failed to start run again");
+    }
+  }, [fetchReview, reviewId, runAgainPending]);
+
   const handleFindingAction = useCallback(
     (findingId: string, actionStatus: TriageStatus) => {
       updateFinding(findingId, { status: actionStatus })
@@ -818,6 +914,26 @@ function WorkspaceContent() {
     },
     [fetchReview]
   );
+
+  useEffect(() => {
+    setClusterFindingIndex(0);
+    setClusterViewMode("list");
+  }, [openCluster?.id]);
+
+  const activeClusterFinding = useMemo(() => {
+    if (!openCluster) return null;
+    const placement = openCluster.placements[clusterFindingIndex];
+    if (!placement) return null;
+    return allFindings.find((finding) => finding.id === placement.finding.id) ?? placement.finding;
+  }, [openCluster, clusterFindingIndex, allFindings]);
+
+  const escalationFinding = open ?? activeClusterFinding;
+
+  const closeFindingSheet = useCallback(() => {
+    setOpen(null);
+    setOpenCluster(null);
+    setClusterViewMode("list");
+  }, []);
 
   if (!reviewId) {
     return (
@@ -864,44 +980,47 @@ function WorkspaceContent() {
           <Badge variant="outline" className="gap-1 text-[10px]"><ArrowUpRight className="h-3 w-3 text-destructive" />Escalated {triage.escalated}</Badge>
         </div>
         <div className="flex w-full items-center gap-2 sm:ml-auto sm:w-auto">
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span tabIndex={0} className="flex-1 sm:flex-none">
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button variant="outline" size="sm" className="min-h-9 w-full sm:w-auto" disabled={!exportable}>
-                        <Download className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />Export
-                        <ChevronDown className="ml-1.5 h-3.5 w-3.5" aria-hidden="true" />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      <DropdownMenuItem onSelect={() => { void handleExport("pdf"); }}>
-                        Export as PDF
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onSelect={() => { void handleExport("word"); }}>
-                        Export as Word
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onSelect={() => { void handleExport("html"); }}>
-                        Export as HTML
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </span>
-              </TooltipTrigger>
-              {!exportable && (
-                <TooltipContent side="bottom" className="max-w-xs">
-                  {!allAcceptedHaveBasis
-                    ? "Ensure all accepted/edited findings have at least one Review Basis item."
-                    : triage.proposed > 0
-                    ? `Triage the remaining ${triage.proposed} findings to enable export.`
-                    : "Accept at least one finding to enable export."}
-                </TooltipContent>
-              )}
-            </Tooltip>
-          </TooltipProvider>
-          <Button size="sm" className="min-h-9 flex-1 bg-accent text-accent-foreground hover:bg-accent/90 sm:flex-none">
-            <Sparkles className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />Run again
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="outline"
+                size="sm"
+                className="min-h-11 w-full sm:w-auto"
+                disabled={!exportable}
+                aria-describedby={!exportable ? "export-help" : undefined}
+              >
+                <Download className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />Export
+                <ChevronDown className="ml-1.5 h-3.5 w-3.5" aria-hidden="true" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onSelect={() => { void handleExport("pdf"); }}>
+                Export as PDF
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => { void handleExport("word"); }}>
+                Export as Word
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => { void handleExport("html"); }}>
+                Export as HTML
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          {!exportable && (
+            <p id="export-help" className="sr-only">
+              {!allAcceptedHaveBasis
+                ? "Ensure all accepted or edited findings have at least one review basis item."
+                : triage.proposed > 0
+                ? `Triage the remaining ${triage.proposed} findings to enable export.`
+                : "Accept at least one finding to enable export."}
+            </p>
+          )}
+          <Button
+            size="sm"
+            className="min-h-11 flex-1 bg-accent text-accent-foreground hover:bg-accent/90 sm:flex-none"
+            onClick={() => { void handleRunAgain(); }}
+            disabled={runAgainPending}
+          >
+            {runAgainPending ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : <Sparkles className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />}Run again
           </Button>
         </div>
       </div>
@@ -1032,8 +1151,8 @@ function WorkspaceContent() {
                                 }}
                                 className={cn(
                                   "absolute z-10 flex h-7 w-7 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full text-[10px] font-bold text-white shadow-md ring-2 ring-card transition hover:scale-110",
-                                  isCluster ? "bg-[rgb(174, 55, 166)]" : pinTone[severity],
-                                  isCluster && "h-8 w-8 bg-[rgb(174, 55, 166)] ring-4 ring-[rgb(174, 55, 166)] before:absolute before:inset-[-5px] before:-z-10 before:rounded-full before:border-2 before:border-[rgb(174, 55, 166)] before:bg-transparent before:opacity-100 after:absolute after:inset-[-9px] after:-z-20 after:rounded-full after:border after:border-[rgb(174, 55, 166)] after:opacity-35"
+                                  isCluster ? "bg-[#AE37A6]" : pinTone[severity],
+                                  isCluster && "h-8 w-8 bg-[#AE37A6] ring-4 ring-[#AE37A6] before:absolute before:inset-[-5px] before:-z-10 before:rounded-full before:border-2 before:border-[#AE37A6] before:bg-[#AE37A6] before:opacity-100 after:absolute after:inset-[-9px] after:-z-20 after:rounded-full after:border after:border-[#AE37A6] after:opacity-35"
                                 )}
                                 style={style}
                                 aria-label={isCluster
@@ -1052,23 +1171,23 @@ function WorkspaceContent() {
                                 ) : i + 1}
                               </button>
                             </TooltipTrigger>
-                            <TooltipContent side="top" className="max-w-xs">
+                            <TooltipContent side="top" className="max-w-xs text-white">
                               {isCluster ? (
                                 <div className="space-y-1">
-                                  <p className="text-xs font-medium">{cluster.placements.length} findings here</p>
+                                  <p className="text-xs font-semibold text-white">{cluster.placements.length} findings here</p>
                                   {cluster.placements.slice(0, 3).map(({ finding }) => (
-                                    <p key={finding.id} className="truncate text-[10px] text-muted-foreground">
+                                    <p key={finding.id} className="truncate text-[10px] text-white/95">
                                       {finding.severity} · {finding.title}
                                     </p>
                                   ))}
                                   {cluster.placements.length > 3 && (
-                                    <p className="text-[10px] text-muted-foreground">+{cluster.placements.length - 3} more</p>
+                                    <p className="text-[10px] text-white/95">+{cluster.placements.length - 3} more</p>
                                   )}
                                 </div>
                               ) : primaryFinding ? (
                                 <>
-                                  <p className="text-xs font-medium">{primaryFinding.title}</p>
-                                  <p className="text-[10px] text-muted-foreground">{primaryFinding.severity} · {primaryFinding.area}</p>
+                                  <p className="text-xs font-semibold text-white">{primaryFinding.title}</p>
+                                  <p className="text-[10px] text-white/95">{primaryFinding.severity} · {primaryFinding.area}</p>
                                 </>
                               ) : null}
                             </TooltipContent>
@@ -1137,10 +1256,7 @@ function WorkspaceContent() {
       </div>
 
       <Sheet open={!!open || !!openCluster} onOpenChange={(o) => {
-        if (!o) {
-          setOpen(null);
-          setOpenCluster(null);
-        }
+        if (!o) closeFindingSheet();
       }}>
         <SheetContent className="w-full overflow-y-auto sm:max-w-xl">
           {open ? (
@@ -1151,25 +1267,51 @@ function WorkspaceContent() {
               onAction={(status) => handleFindingAction(open.id, status)}
               onBasisChange={(basis) => handleBasisChange(open.id, basis)}
               onEscalate={() => setShowEscalate(true)}
+              onFindingUpdate={(updated) => setOpen(updated)}
             />
-          ) : openCluster ? (
+          ) : openCluster && clusterViewMode === "list" ? (
             <FindingClusterDetail
               cluster={openCluster}
-              onSelect={(finding) => {
-                setOpenCluster(null);
-                setOpen(finding);
+              allFindings={allFindings}
+              onSelect={(index) => {
+                setClusterFindingIndex(index);
+                setClusterViewMode("detail");
               }}
             />
+          ) : openCluster && clusterViewMode === "detail" && activeClusterFinding ? (
+            <div className="flex h-full flex-col">
+              <div className="flex-1 overflow-y-auto">
+                <FindingDetail
+                  finding={activeClusterFinding}
+                  screenImageUrl={screen?.imageUrl}
+                  findingMetadataOptions={findingMetadataOptions}
+                  onAction={(status) => handleFindingAction(activeClusterFinding.id, status)}
+                  onBasisChange={(basis) => handleBasisChange(activeClusterFinding.id, basis)}
+                  onEscalate={() => setShowEscalate(true)}
+                />
+              </div>
+              <ClusterFindingNavigation
+                currentIndex={clusterFindingIndex}
+                total={openCluster.placements.length}
+                onBack={() => setClusterViewMode("list")}
+                onPrevious={() => setClusterFindingIndex((index) => Math.max(0, index - 1))}
+                onNext={() =>
+                  setClusterFindingIndex((index) =>
+                    Math.min(openCluster.placements.length - 1, index + 1)
+                  )
+                }
+              />
+            </div>
           ) : null}
         </SheetContent>
       </Sheet>
 
-      {open && (
+      {escalationFinding && (
         <EscalateDialog
           open={showEscalate}
           onOpenChange={setShowEscalate}
-          findingId={open.id}
-          findingTitle={open.title}
+          findingId={escalationFinding.id}
+          findingTitle={escalationFinding.title}
           onEscalated={() => {
             fetchReview();
             setOpen((prev) => prev ? { ...prev, status: "ESCALATED" } : prev);
@@ -1191,14 +1333,24 @@ interface FindingDetailProps {
   onAction: (status: TriageStatus) => void;
   onBasisChange: (basis: ReviewBasisItem[]) => void;
   onEscalate: () => void;
+  onFindingUpdate?: (finding: Finding) => void;
 }
 
 interface FindingClusterDetailProps {
   cluster: PinCluster;
-  onSelect: (finding: Finding) => void;
+  allFindings: Finding[];
+  onSelect: (index: number) => void;
 }
 
-function FindingClusterDetail({ cluster, onSelect }: FindingClusterDetailProps) {
+interface ClusterFindingNavigationProps {
+  currentIndex: number;
+  total: number;
+  onBack: () => void;
+  onPrevious: () => void;
+  onNext: () => void;
+}
+
+function FindingClusterDetail({ cluster, allFindings, onSelect }: FindingClusterDetailProps) {
   const severity = getClusterSeverity(cluster);
 
   return (
@@ -1216,29 +1368,135 @@ function FindingClusterDetail({ cluster, onSelect }: FindingClusterDetailProps) 
       </SheetHeader>
 
       <div className="mt-5 space-y-2">
-        {cluster.placements.map(({ finding }) => (
-          <button
-            key={finding.id}
-            onClick={() => onSelect(finding)}
-            className="w-full rounded-lg border border-border bg-card p-3 text-left transition hover:border-accent hover:bg-secondary/60"
-          >
-            <div className="flex flex-wrap items-center gap-2">
-              <PriorityBadge priority={finding.severity} compact />
-              <FindingStatusBadge status={finding.status as any} />
-              <Badge variant="outline" className="text-[10px]">{finding.area}</Badge>
-              {finding.flowName && <Badge variant="secondary" className="text-[10px]">{finding.flowName}</Badge>}
-            </div>
-            <p className="mt-2 text-sm font-medium">{finding.title}</p>
-            <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{finding.observation || finding.description}</p>
-          </button>
-        ))}
+        {cluster.placements.map(({ finding }, index) => {
+          const currentFinding = allFindings.find((item) => item.id === finding.id) ?? finding;
+
+          return (
+            <button
+              key={finding.id}
+              onClick={() => onSelect(index)}
+              className="w-full rounded-lg border border-border bg-card p-3 text-left transition hover:border-accent hover:bg-secondary/60"
+            >
+              <div className="flex flex-wrap items-center gap-2">
+                <PriorityBadge priority={currentFinding.severity} compact />
+                <FindingStatusBadge status={currentFinding.status as any} />
+                <Badge variant="outline" className="text-[10px]">{currentFinding.area}</Badge>
+                {currentFinding.flowName && (
+                  <Badge variant="secondary" className="text-[10px]">{currentFinding.flowName}</Badge>
+                )}
+              </div>
+              <p className="mt-2 text-sm font-medium">{currentFinding.title}</p>
+              <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">
+                {currentFinding.observation || currentFinding.description}
+              </p>
+            </button>
+          );
+        })}
       </div>
     </>
   );
 }
 
-function FindingDetail({ finding, screenImageUrl, findingMetadataOptions, onAction, onBasisChange, onEscalate }: FindingDetailProps) {
+function ClusterFindingNavigation({
+  currentIndex,
+  total,
+  onBack,
+  onPrevious,
+  onNext,
+}: ClusterFindingNavigationProps) {
+  return (
+    <div className="border-t border-border bg-background px-3 py-2 space-y-1">
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        className="h-6 gap-0.5 px-1.5 w-auto text-xs"
+        onClick={onBack}
+        aria-label="Back to all findings at this location"
+      >
+        <ChevronLeft className="h-3 w-3" aria-hidden="true" />
+        Back
+      </Button>
+      <div
+        className="flex items-center justify-center gap-1.5 rounded-md border border-border bg-secondary/30 px-2 py-1"
+        aria-label="Findings at this location"
+      >
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="h-6 gap-0.5 px-1.5 text-[11px]"
+          disabled={currentIndex <= 0}
+          onClick={onPrevious}
+          aria-label="Previous finding at this location"
+        >
+          <ChevronLeft className="h-3 w-3" aria-hidden="true" />
+          Prev
+        </Button>
+        <span className="text-[11px] font-medium text-muted-foreground whitespace-nowrap">
+          {currentIndex + 1} / {total}
+        </span>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="h-6 gap-0.5 px-1.5 text-[11px]"
+          disabled={currentIndex >= total - 1}
+          onClick={onNext}
+          aria-label="Next finding at this location"
+        >
+          Next
+          <ChevronRight className="h-3 w-3" aria-hidden="true" />
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function FindingDetail({ finding, screenImageUrl, findingMetadataOptions, onAction, onBasisChange, onEscalate, onFindingUpdate }: FindingDetailProps) {
   const [basisSearch, setBasisSearch] = useState("");
+  const [showComment, setShowComment] = useState(false);
+  const [commentText, setCommentText] = useState("");
+  const [isCommenting, setIsCommenting] = useState(false);
+  const [isRegenerating, setIsRegenerating] = useState(false);
+
+  const handleAddComment = async () => {
+    if (!commentText.trim()) { toast.error("Please enter a comment"); return; }
+    setIsCommenting(true);
+    try {
+      const comment = await addComment(finding.id, { text: commentText.trim() });
+      toast.success("Comment added");
+      setCommentText("");
+      setShowComment(false);
+      if (onFindingUpdate) {
+        onFindingUpdate({
+          ...finding,
+          comments: [...(finding.comments || []), comment],
+        });
+      }
+    } catch {
+      toast.error("Failed to add comment");
+    } finally {
+      setIsCommenting(false);
+    }
+  };
+
+  const handleRegenerate = async () => {
+    setIsRegenerating(true);
+    try {
+      const userComments = finding.comments && finding.comments.length > 0
+        ? finding.comments.map((c) => c.text)
+        : undefined;
+      const regenerated = await regenerateFinding(finding.id, { userComments });
+      toast.success("Finding regenerated with AI");
+      if (onFindingUpdate) onFindingUpdate(regenerated);
+    } catch {
+      toast.error("Regeneration failed. Please try again.");
+    } finally {
+      setIsRegenerating(false);
+    }
+  };
+
   const hasOutputOption = (option: FindingOutputOptionKey) => findingMetadataOptions.includes(option);
   const escalationRecipientLabels = Array.isArray(finding.aiMetadata?.escalationRecipients)
     ? finding.aiMetadata.escalationRecipients.map((recipient) => recipient.label).filter(Boolean)
@@ -1411,14 +1669,57 @@ function FindingDetail({ finding, screenImageUrl, findingMetadataOptions, onActi
           <Section title="WCAG criterion">{finding.aiMetadata.wcagCriteria}</Section>
         )}
 
+        {/* User Comments */}
+        {finding.comments && finding.comments.length > 0 && (
+          <div>
+            <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground mb-2">Comments</p>
+            <div className="space-y-2">
+              {finding.comments.map((comment) => (
+                <div key={comment.id} className="rounded-lg border border-border bg-secondary/30 p-3">
+                  <p className="text-sm">{comment.text}</p>
+                  <p className="mt-1.5 text-[10px] text-muted-foreground">
+                    {comment.authorName ?? "You"} · {new Date(comment.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Comment Input */}
+        {showComment && (
+          <div className="rounded-lg border border-border bg-secondary/40 p-3 space-y-2">
+            <p className="text-xs font-medium text-foreground">Add a comment</p>
+            <Textarea
+              value={commentText}
+              onChange={(e) => setCommentText(e.target.value)}
+              placeholder="Type your comment…"
+              className="text-sm"
+              rows={3}
+            />
+            <div className="flex gap-2">
+              <Button size="sm" onClick={handleAddComment} disabled={isCommenting}>
+                {isCommenting ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : <MessageSquare className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />}
+                Save comment
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => { setShowComment(false); setCommentText(""); }}>Cancel</Button>
+            </div>
+          </div>
+        )}
+
         <div className="rounded-lg border border-accent/30 bg-accent/5 p-3">
           <div className="flex items-center gap-2 text-xs font-medium text-accent">
-            <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
-            AI confidence · {finding.confidence}%
+            {isRegenerating ? (
+              <><Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />Regenerating with AI…</>
+            ) : (
+              <><Sparkles className="h-3.5 w-3.5" aria-hidden="true" />AI confidence · {finding.confidence}%</>
+            )}
           </div>
-          <p className="mt-1 text-xs text-muted-foreground">
-            You decide the final outcome.
-          </p>
+          {!isRegenerating && (
+            <p className="mt-1 text-xs text-muted-foreground">
+              You decide the final outcome.
+            </p>
+          )}
         </div>
 
         <Separator />
@@ -1484,10 +1785,20 @@ function FindingDetail({ finding, screenImageUrl, findingMetadataOptions, onActi
               )}
             </Tooltip>
           </TooltipProvider>
-          <Button size="sm" variant="outline" className="min-h-9"><MessageSquare className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />Comment</Button>
+          <Button size="sm" variant="outline" className="min-h-9" onClick={() => setShowComment(true)} disabled={showComment}>
+            <MessageSquare className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />Comment
+          </Button>
           <Button size="sm" variant="outline" className="min-h-9">Create Jira ticket</Button>
-          <Button size="sm" variant="ghost" className="min-h-9"><RefreshCw className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />Regenerate</Button>
-          <Button size="sm" variant="ghost" className="min-h-9"><AlertCircle className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />False positive</Button>
+          <Button size="sm" variant="ghost" className="min-h-9" onClick={handleRegenerate} disabled={isRegenerating}>
+            <RefreshCw className={cn("mr-1.5 h-3.5 w-3.5", isRegenerating && "animate-spin")} aria-hidden="true" />Regenerate
+          </Button>
+          <Button
+            size="sm" variant="ghost" className="min-h-9"
+            onClick={() => onAction("FALSE_POSITIVE" as TriageStatus)}
+            disabled={finding.status === "FALSE_POSITIVE"}
+          >
+            <AlertCircle className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />False positive
+          </Button>
         </div>
       </div>
     </>

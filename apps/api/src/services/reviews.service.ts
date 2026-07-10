@@ -511,7 +511,6 @@ export const ReviewsService = {
     const review = await ReviewsRepository.findById(reviewId, userId);
     if (!review) throw new AppError(404, "Review not found");
     if (review.status === "in_progress") throw new AppError(409, "Review already in progress");
-    if (review.status === "completed")   throw new AppError(409, "Review already completed");
 
     await ReviewsRepository.setInProgress(reviewId, userId);
 
@@ -525,6 +524,24 @@ export const ReviewsService = {
     });
 
     return { started: true };
+  },
+
+  async runReviewAgain(reviewId: string, userId: string) {
+    const review = await ReviewsRepository.findById(reviewId, userId);
+    if (!review) throw new AppError(404, "Review not found");
+    if (review.status === "in_progress") throw new AppError(409, "Review already in progress");
+
+    await ReviewsRepository.setInProgress(reviewId, userId);
+
+    setImmediate(() => {
+      import("./ai/agentic.js").then(({ runReviewPipeline }) => {
+        runReviewPipeline(reviewId, { mode: "rerun_dedupe" }).catch((err: unknown) => {
+          console.error("Run-again pipeline failed for review", reviewId, err);
+        });
+      });
+    });
+
+    return { started: true, mode: "rerun_dedupe" as const };
   },
 
   async getProgress(reviewId: string, userId: string) {

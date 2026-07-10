@@ -12,9 +12,12 @@ function required(key: string): string {
   return val;
 }
 
+const nodeEnv = process.env.NODE_ENV ?? "development";
+const jwtSecret = process.env.JWT_SECRET ?? (nodeEnv === "development" ? "local-dev-jwt-secret-change-me" : required("JWT_SECRET"));
+
 export const config = {
   port: parseInt(process.env.PORT ?? "4000", 10),
-  nodeEnv: process.env.NODE_ENV ?? "development",
+  nodeEnv,
   corsOrigin: process.env.CORS_ORIGIN ?? "http://localhost:3000",
   webAppUrl: process.env.WEB_APP_URL ?? process.env.CORS_ORIGIN ?? "http://localhost:3000",
   smtpHost: process.env.SMTP_HOST,
@@ -25,7 +28,7 @@ export const config = {
   smtpFrom: process.env.SMTP_FROM,
   azureCommunicationEmailConnectionString: process.env.AZURE_COMMUNICATION_EMAIL_CONNECTION_STRING,
   azureCommunicationEmailSenderAddress: process.env.AZURE_COMMUNICATION_EMAIL_SENDER_ADDRESS,
-  jwtSecret: required("JWT_SECRET"),
+  jwtSecret,
   jwtExpiresInSeconds: parseInt(process.env.JWT_EXPIRES_IN_SECONDS ?? "604800", 10),
   databaseUrl: required("DATABASE_URL"),
   directUrl: process.env.DIRECT_URL ?? process.env.DATABASE_URL,

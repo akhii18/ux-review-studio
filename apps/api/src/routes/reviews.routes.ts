@@ -19,6 +19,7 @@ router.post(   "/:id/assets",             ReviewsController.saveAsset);
 
 // AI pipeline
 router.post(   "/:id/start",             ReviewsController.start);
+router.post(   "/:id/run-again",         ReviewsController.runAgain);
 router.get(    "/:id/progress",          ReviewsController.getProgress);
 
 // Findings sub-routes (existing)

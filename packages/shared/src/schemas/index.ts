@@ -19,6 +19,7 @@ export const FindingStatusSchema = z.enum([
   "EDITED",
   "DISMISSED",
   "ESCALATED",
+  "FALSE_POSITIVE",
 ]);
 
 export const ChecklistStatusSchema = z.enum(["DRAFT", "APPROVED", "DEPRECATED"]);
@@ -53,7 +54,7 @@ export const UpdateFindingSchema = z.object({
 });
 
 export const TriageFindingSchema = z.object({
-  action: z.enum(["ACCEPT", "EDIT", "DISMISS", "ESCALATE"]),
+  action: z.enum(["ACCEPT", "EDIT", "DISMISS", "ESCALATE", "FALSE_POSITIVE"]),
   title: z.string().min(1).optional(),
   description: z.string().optional(),
   recommendation: z.string().optional(),
@@ -70,6 +71,15 @@ export const EscalateFindingSchema = z.object({
     email: z.string().email("Invalid email address").optional(),
   })).optional(),
   reason: z.string().min(1, "Escalation reason is required"),
+});
+
+export const CreateCommentSchema = z.object({
+  text: z.string().min(1, "Comment text is required"),
+  authorName: z.string().default("User"),
+});
+
+export const RegenerateFindingSchema = z.object({
+  userComments: z.array(z.string()).optional(),
 });
 
 export const FindingsQuerySchema = z.object({
@@ -159,3 +169,5 @@ export type ApproveChecklist = z.infer<typeof ApproveChecklistSchema>;
 export type CreatePrinciple = z.infer<typeof CreatePrincipleSchema>;
 export type UpdatePrinciple = z.infer<typeof UpdatePrincipleSchema>;
 export type UpdateSettings = z.infer<typeof UpdateSettingsSchema>;
+export type CreateComment = z.infer<typeof CreateCommentSchema>;
+export type RegenerateFinding = z.infer<typeof RegenerateFindingSchema>;
