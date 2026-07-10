@@ -138,21 +138,4 @@ export const FindingsRepository = {
       count: r._count.id,
     }));
   },
-
-  async createComment(findingId: string, text: string, authorName: string = "User") {
-    return prisma.comment.create({
-      data: {
-        findingId,
-        text,
-        authorName,
-      },
-    });
-  },
-
-  async getCommentsByFinding(findingId: string) {
-    return prisma.comment.findMany({
-      where: { findingId },
-      orderBy: { createdAt: "asc" },
-    });
-  },
 };
