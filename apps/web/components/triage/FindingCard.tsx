@@ -26,7 +26,7 @@ import {
   useAddCommentMutation,
   useRegenerateFindingMutation,
 } from "@/store/api/findingsApi";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 
 interface FindingCardProps {
   finding: FindingWithBasis;
