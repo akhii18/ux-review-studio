@@ -21,7 +21,7 @@ import { cn } from "@/lib/utils";
 import type { FindingWithBasis, ReviewBasisItem } from "@uxm/shared";
 import { REVIEW_BASIS_LIBRARY } from "@uxm/shared";
 import { useTriageFindingMutation, useEscalateFindingMutation } from "@/store/api/findingsApi";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 
 interface FindingCardProps {
   finding: FindingWithBasis;

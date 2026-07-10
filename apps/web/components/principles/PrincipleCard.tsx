@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useUpdatePrincipleMutation } from "@/store/api/principlesApi";
 import type { UxPrinciple } from "@uxm/shared";
 import { PRINCIPLE_CATEGORY_LABELS } from "@uxm/shared";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 
 export function PrincipleCard({ principle }: { principle: UxPrinciple }) {
   const [update] = useUpdatePrincipleMutation();

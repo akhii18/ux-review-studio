@@ -20,7 +20,7 @@ import {
   MoreVertical,
 } from "lucide-react";
 import { deleteReview, getAnalytics, listReviews } from "@/lib/api";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 
 function toTitleCase(value: string) {
   const titleCased = value

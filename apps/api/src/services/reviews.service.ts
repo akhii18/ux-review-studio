@@ -509,7 +509,6 @@ export const ReviewsService = {
     const review = await ReviewsRepository.findById(reviewId, userId);
     if (!review) throw new AppError(404, "Review not found");
     if (review.status === "in_progress") throw new AppError(409, "Review already in progress");
-    if (review.status === "completed")   throw new AppError(409, "Review already completed");
 
     await ReviewsRepository.setInProgress(reviewId, userId);
 

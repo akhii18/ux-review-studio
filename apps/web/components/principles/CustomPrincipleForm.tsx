@@ -16,7 +16,7 @@ import {
 import { CreatePrincipleSchema, PRINCIPLE_CATEGORY_LABELS } from "@uxm/shared";
 import type { CreatePrinciple } from "@uxm/shared";
 import { useCreatePrincipleMutation } from "@/store/api/principlesApi";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import { useState } from "react";
 
 export function CustomPrincipleForm() {

@@ -111,7 +111,18 @@ export function AppHeader({
         <form role="search" className="relative hidden md:block" onSubmit={(e) => e.preventDefault()}>
           <label htmlFor="global-search" className="sr-only">Search reviews, screens, and principles</label>
           <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
-          <Input id="global-search" type="search" placeholder="Search reviews, screens, principles…" className="h-10 w-72 pl-8 text-sm" />
+          <Input
+            id="global-search"
+            type="search"
+            placeholder="Search reviews, screens, principles…"
+            className="h-11 w-72 pl-8 text-sm"
+            disabled
+            aria-disabled="true"
+            aria-describedby="global-search-help"
+          />
+          <p id="global-search-help" className="sr-only">
+            Global search is coming soon. Use Review History to find past reviews.
+          </p>
         </form>
         <NotificationBellMenu />
 
@@ -119,10 +130,10 @@ export function AppHeader({
           <DropdownMenuTrigger asChild>
             <button
               type="button"
-              className="rounded-full focus:outline-none focus:ring-2 focus:ring-ring"
+              className="flex min-h-11 min-w-11 items-center justify-center rounded-full focus:outline-none focus:ring-2 focus:ring-ring"
               aria-label={`Signed in as ${activeUser.name}`}
             >
-              <Avatar className="h-8 w-8 ring-2 ring-border sm:h-9 sm:w-9">
+              <Avatar className="h-9 w-9 ring-2 ring-border sm:h-10 sm:w-10">
                 <AvatarFallback className="bg-primary text-[12px] font-semibold text-primary-foreground">
                   {activeUser.initials}
                 </AvatarFallback>
