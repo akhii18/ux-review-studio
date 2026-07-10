@@ -176,6 +176,7 @@ const progressStages = [
 
 const backendStageToUiIndex: Record<string, number> = {
   capturing_figma_prototype: 0,
+  capturing_website_reference: 0,
   reading_inputs: 0,
   discovering_flows: 2,
   analyzing_screens: 3,
@@ -195,6 +196,7 @@ function formatBackendStage(stage?: string | null): string {
 
   const labels: Record<string, string> = {
     capturing_figma_prototype: "Capturing Figma prototype",
+    capturing_website_reference: "Capturing website reference",
     reading_inputs: "Reading inputs",
     discovering_flows: "Discovering key flows",
     analyzing_screens: "Analyzing screens",
@@ -236,6 +238,23 @@ function isValidFigmaPrototypeUrl(value: string): boolean {
       (path.includes("/file/") && url.searchParams.has("node-id")) ||
       url.searchParams.has("node-id")
     );
+  } catch {
+    return false;
+  }
+}
+
+function isValidWebsiteReferenceUrl(value: string): boolean {
+  try {
+    const url = new URL(value.trim());
+    if (url.protocol !== "https:" && url.protocol !== "http:") return false;
+    if (url.username || url.password) return false;
+
+    const host = url.hostname.toLowerCase();
+    if (!host) return false;
+    if (host === "localhost" || host === "0.0.0.0" || host === "::1") return false;
+    if (host.endsWith(".localhost") || host.endsWith(".local") || host.endsWith(".internal")) return false;
+
+    return true;
   } catch {
     return false;
   }
@@ -940,7 +959,10 @@ export default function NewReviewPage() {
   const figmaUrlTrimmed = figmaUrl.trim();
   const hasValidFigmaUrl = figmaUrlTrimmed.length > 0 && isValidFigmaPrototypeUrl(figmaUrlTrimmed);
   const figmaUrlError = figmaUrlTrimmed.length > 0 && !hasValidFigmaUrl;
-  const validStep1 = hasScreenshotAsset || hasValidFigmaUrl;
+  const designSystemUrlTrimmed = designSystemUrl.trim();
+  const hasValidDesignSystemUrl = designSystemUrlTrimmed.length > 0 && isValidWebsiteReferenceUrl(designSystemUrlTrimmed);
+  const designSystemUrlError = designSystemUrlTrimmed.length > 0 && !hasValidDesignSystemUrl;
+  const validStep1 = hasScreenshotAsset || hasValidFigmaUrl || hasValidDesignSystemUrl;
   const validStep2 = criteria.length > 0;
   const nameRequiredError = nameTouched && name.trim().length === 0;
   const productRequiredError = productTouched && product.trim().length === 0;
@@ -1069,7 +1091,7 @@ export default function NewReviewPage() {
 
   const runReview = async () => {
     if (!validStep1) {
-      toast.error("Add at least one screenshot image or enter a valid public Figma prototype URL before starting the review.");
+      toast.error("Add at least one screenshot image, a valid public Figma prototype URL, or a valid public Design System URL before starting the review.");
       setStep(1);
       return;
     }
@@ -1450,11 +1472,13 @@ export default function NewReviewPage() {
                         <LinkIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
                         <Input
                           placeholder="https://zeroheight.com/…"
-                          className="pl-9"
+                          className={cn("pl-9", designSystemUrlError && "border-red-500 focus-visible:ring-red-500")}
                           value={designSystemUrl}
                           onChange={(e) => setDesignSystemUrl(e.target.value)}
                         />
                       </div>
+                      {designSystemUrlError ? <p className="mt-1 text-xs text-red-500">Enter a valid public website URL.</p> : null}
+                      {!designSystemUrlError && hasValidDesignSystemUrl ? <p className="mt-1 text-xs text-muted-foreground">The crawler will navigate related pages, capture screenshots, and feed the same AI review pipeline used for screenshots and PDFs.</p> : null}
                     </Field>
                   </div>
                   <Field label="Flow screenshots & PRD">
