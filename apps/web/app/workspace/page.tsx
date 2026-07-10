@@ -21,7 +21,7 @@ import {
 import { PriorityBadge } from "@/components/ui/PriorityBadge";
 import { FindingStatusBadge } from "@/components/ui/FindingStatusBadge";
 import { cn } from "@/lib/utils";
-import { exportReviewReport, getReview, updateFinding, triageFinding, addComment, regenerateFinding } from "@/lib/api";
+import { exportReviewReport, getReview, getReviewProgress, runAgainReview, updateFinding, triageFinding, addComment, regenerateFinding } from "@/lib/api";
 import { downloadReport } from "@/lib/reportExport";
 import { useAppDispatch } from "@/store/hooks";
 import { addNotification } from "@/store/slices/notificationsSlice";
@@ -426,9 +426,12 @@ function WorkspaceContent() {
   const [clusterFindingIndex, setClusterFindingIndex] = useState(0);
   const [clusterViewMode, setClusterViewMode] = useState<"list" | "detail">("list");
   const [imageLoadFailed, setImageLoadFailed] = useState(false);
+  const [runAgainPending, setRunAgainPending] = useState(false);
   const unplacedDiagToastShownRef = useRef<string | null>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
   const imageRef = useRef<HTMLImageElement>(null);
+  const runAgainPollRef = useRef<number | null>(null);
+  const runAgainAttemptRef = useRef(0);
   const [imageLayout, setImageLayout] = useState<ImageLayout | null>(null);
 
   const fetchReview = useCallback(() => {
@@ -450,6 +453,14 @@ function WorkspaceContent() {
       fetchReview();
     }
   }, [reviewId, fetchReview]);
+
+  useEffect(() => {
+    return () => {
+      if (runAgainPollRef.current !== null) {
+        window.clearTimeout(runAgainPollRef.current);
+      }
+    };
+  }, []);
 
   const allFindings: Finding[] = useMemo(() => {
     if (reviewData?.findings) {
@@ -775,6 +786,77 @@ function WorkspaceContent() {
     }
   }, [dispatch, handleDownload, reviewData?.name, reviewId]);
 
+  const handleRunAgain = useCallback(async () => {
+    if (!reviewId || runAgainPending) return;
+
+    runAgainAttemptRef.current += 1;
+    const attemptId = runAgainAttemptRef.current;
+
+    if (runAgainPollRef.current !== null) {
+      window.clearTimeout(runAgainPollRef.current);
+      runAgainPollRef.current = null;
+    }
+
+    setRunAgainPending(true);
+
+    try {
+      await runAgainReview(reviewId);
+      toast.success("Run again started");
+
+      const stopPolling = () => {
+        if (runAgainPollRef.current !== null) {
+          window.clearTimeout(runAgainPollRef.current);
+          runAgainPollRef.current = null;
+        }
+      };
+
+      const pollOnce = async () => {
+        if (runAgainAttemptRef.current !== attemptId) return;
+
+        try {
+          const progress = await getReviewProgress(reviewId);
+          if (runAgainAttemptRef.current !== attemptId) return;
+
+          if (progress.status === "completed") {
+            stopPolling();
+            setRunAgainPending(false);
+            await fetchReview();
+            toast.success(`Run again complete — ${progress.findingCount ?? 0} findings now in workspace.`);
+            return;
+          }
+
+          if (progress.status === "failed") {
+            stopPolling();
+            setRunAgainPending(false);
+            toast.error("Run again failed");
+            return;
+          }
+
+          runAgainPollRef.current = window.setTimeout(() => {
+            void pollOnce();
+          }, 2000);
+        } catch {
+          if (runAgainAttemptRef.current !== attemptId) return;
+
+          runAgainPollRef.current = window.setTimeout(() => {
+            void pollOnce();
+          }, 3000);
+        }
+      };
+
+      void pollOnce();
+    } catch (error: any) {
+      if (runAgainAttemptRef.current === attemptId) {
+        if (runAgainPollRef.current !== null) {
+          window.clearTimeout(runAgainPollRef.current);
+          runAgainPollRef.current = null;
+        }
+      }
+      setRunAgainPending(false);
+      toast.error(error?.message ?? "Failed to start run again");
+    }
+  }, [fetchReview, reviewId, runAgainPending]);
+
   const handleFindingAction = useCallback(
     (findingId: string, actionStatus: TriageStatus) => {
       updateFinding(findingId, { status: actionStatus })
@@ -906,8 +988,13 @@ function WorkspaceContent() {
                 : "Accept at least one finding to enable export."}
             </p>
           )}
-          <Button size="sm" className="min-h-11 flex-1 bg-accent text-accent-foreground hover:bg-accent/90 sm:flex-none">
-            <Sparkles className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />Run again
+          <Button
+            size="sm"
+            className="min-h-11 flex-1 bg-accent text-accent-foreground hover:bg-accent/90 sm:flex-none"
+            onClick={() => { void handleRunAgain(); }}
+            disabled={runAgainPending}
+          >
+            {runAgainPending ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : <Sparkles className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />}Run again
           </Button>
         </div>
       </div>
@@ -1165,7 +1252,16 @@ function WorkspaceContent() {
               }}
             />
           ) : openCluster && clusterViewMode === "detail" && activeClusterFinding ? (
-            <>
+            <div className="flex h-full flex-col">
+              <div className="flex-1 overflow-y-auto">
+                <FindingDetail
+                  finding={activeClusterFinding}
+                  screenImageUrl={screen?.imageUrl}
+                  findingMetadataOptions={findingMetadataOptions}
+                  onAction={(status) => handleFindingAction(activeClusterFinding.id, status)}
+                  onBasisChange={(basis) => handleBasisChange(activeClusterFinding.id, basis)}
+                />
+              </div>
               <ClusterFindingNavigation
                 currentIndex={clusterFindingIndex}
                 total={openCluster.placements.length}
@@ -1177,14 +1273,7 @@ function WorkspaceContent() {
                   )
                 }
               />
-              <FindingDetail
-                finding={activeClusterFinding}
-                screenImageUrl={screen?.imageUrl}
-                findingMetadataOptions={findingMetadataOptions}
-                onAction={(status) => handleFindingAction(activeClusterFinding.id, status)}
-                onBasisChange={(basis) => handleBasisChange(activeClusterFinding.id, basis)}
-              />
-            </>
+            </div>
           ) : null}
         </SheetContent>
       </Sheet>
@@ -1274,48 +1363,48 @@ function ClusterFindingNavigation({
   onNext,
 }: ClusterFindingNavigationProps) {
   return (
-    <div className="mb-4 space-y-2">
+    <div className="border-t border-border bg-background px-3 py-2 space-y-1">
       <Button
         type="button"
         variant="ghost"
         size="sm"
-        className="h-8 gap-1 px-2"
+        className="h-6 gap-0.5 px-1.5 w-auto text-xs"
         onClick={onBack}
         aria-label="Back to all findings at this location"
       >
-        <ChevronLeft className="h-4 w-4" aria-hidden="true" />
-        Back to all findings
+        <ChevronLeft className="h-3 w-3" aria-hidden="true" />
+        Back
       </Button>
       <div
-        className="flex items-center justify-between gap-2 rounded-lg border border-border bg-secondary/40 px-2 py-2"
+        className="flex items-center justify-center gap-1.5 rounded-md border border-border bg-secondary/30 px-2 py-1"
         aria-label="Findings at this location"
       >
         <Button
           type="button"
           variant="ghost"
           size="sm"
-          className="h-8 gap-1 px-2"
+          className="h-6 gap-0.5 px-1.5 text-[11px]"
           disabled={currentIndex <= 0}
           onClick={onPrevious}
           aria-label="Previous finding at this location"
         >
-          <ChevronLeft className="h-4 w-4" aria-hidden="true" />
-          Previous
+          <ChevronLeft className="h-3 w-3" aria-hidden="true" />
+          Prev
         </Button>
-        <span className="text-xs font-medium text-muted-foreground">
+        <span className="text-[11px] font-medium text-muted-foreground whitespace-nowrap">
           {currentIndex + 1} / {total}
         </span>
         <Button
           type="button"
           variant="ghost"
           size="sm"
-          className="h-8 gap-1 px-2"
+          className="h-6 gap-0.5 px-1.5 text-[11px]"
           disabled={currentIndex >= total - 1}
           onClick={onNext}
           aria-label="Next finding at this location"
         >
           Next
-          <ChevronRight className="h-4 w-4" aria-hidden="true" />
+          <ChevronRight className="h-3 w-3" aria-hidden="true" />
         </Button>
       </div>
     </div>

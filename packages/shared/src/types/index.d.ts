@@ -14,6 +14,35 @@ export interface FindingAiMetadata {
     flowDescription?: string;
     flowPageNumbers?: number[];
 }
+export interface BoundingBoxRef {
+    screenIndex: number;
+    bbox: {
+        x: number;
+        y: number;
+        width: number;
+        height: number;
+    };
+}
+export interface FindingSimilarityCheckInput {
+    oldObservation: string;
+    newObservation: string;
+    oldTitle?: string;
+    newTitle?: string;
+    oldRecommendation?: string;
+    newRecommendation?: string;
+}
+export interface FindingSimilarityCheckResult {
+    isDuplicate: boolean;
+    reason: string;
+}
+export interface RunAgainDedupCandidateFinding {
+    title: string;
+    observation?: string;
+    description?: string;
+    recommendation?: string;
+    why?: string;
+    bboxRefs: BoundingBoxRef[];
+}
 export interface Finding {
     id: string;
     reviewId: string;
@@ -34,7 +63,7 @@ export interface Finding {
     notes?: string;
     escalationReason?: string;
     isAiGenerated: boolean;
-    bboxRefs?: Array<{ screenIndex: number; bbox: { x: number; y: number; width: number; height: number } }>;
+    bboxRefs?: BoundingBoxRef[];
     createdAt: string;
     updatedAt: string;
 }
