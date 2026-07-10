@@ -417,7 +417,7 @@ function AuthPageContent() {
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     aria-invalid={password.length === 0 && didTrySigninSubmit}
-                    className={`password-input w-full border rounded-lg px-3 py-2 pr-10 shadow-sm focus:outline-none focus:ring-2 ${password.length === 0 && !didTrySigninSubmit
+                    className={`password-input w-full border rounded-lg px-3 py-2 pr-12 shadow-sm focus:outline-none focus:ring-2 ${password.length === 0 && !didTrySigninSubmit
                       ? "border-gray-300 focus:ring-gray-300"
                       : isSigninPasswordValid
                         ? "border-green-500 focus:ring-green-500"
@@ -427,7 +427,7 @@ function AuthPageContent() {
                   <button
                     type="button"
                     onClick={() => setShowSigninPassword((prev) => !prev)}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 min-h-11 min-w-11 rounded p-1 text-gray-600 hover:text-gray-800"
+                    className="absolute right-0 top-0 flex h-full w-10 items-center justify-center rounded-r-lg text-gray-600 hover:text-gray-800"
                     aria-label={showSigninPassword ? "Hide password" : "Show password"}
                   >
                     {showSigninPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
@@ -617,7 +617,7 @@ function AuthPageContent() {
                         setShowPasswordRules(false);
                       }
                     }}
-                    className={`password-input w-full border rounded-lg pl-9 pr-10 py-2 shadow-sm focus:outline-none focus:ring-2 ${signupPassword.length === 0 && !didTrySignupSubmit
+                    className={`password-input w-full border rounded-lg pl-9 pr-12 py-2 shadow-sm focus:outline-none focus:ring-2 ${signupPassword.length === 0 && !didTrySignupSubmit
                       ? "border-gray-300 focus:ring-gray-300"
                       : isPasswordReady
                         ? "border-green-500 focus:ring-green-500"
@@ -627,7 +627,7 @@ function AuthPageContent() {
                   <button
                     type="button"
                     onClick={() => setShowSignupPassword((prev) => !prev)}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 min-h-11 min-w-11 rounded p-1 text-gray-600 hover:text-gray-800"
+                    className="absolute right-0 top-0 flex h-full w-10 items-center justify-center rounded-r-lg text-gray-600 hover:text-gray-800"
                     aria-label={showSignupPassword ? "Hide password" : "Show password"}
                   >
                     {showSignupPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
@@ -677,7 +677,7 @@ function AuthPageContent() {
                     onChange={(e) => {
                       setConfirmPassword(e.target.value);
                     }}
-                    className={`password-input w-full border rounded-lg pl-9 pr-10 py-2 shadow-sm focus:outline-none focus:ring-2 ${confirmPassword.length === 0 && !didTrySignupSubmit
+                    className={`password-input w-full border rounded-lg pl-9 pr-12 py-2 shadow-sm focus:outline-none focus:ring-2 ${confirmPassword.length === 0 && !didTrySignupSubmit
                       ? "border-gray-300 focus:ring-gray-300"
                       : isConfirmPasswordReady
                         ? "border-green-500 focus:ring-green-500"
@@ -687,7 +687,7 @@ function AuthPageContent() {
                   <button
                     type="button"
                     onClick={() => setShowConfirmPassword((prev) => !prev)}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 min-h-11 min-w-11 rounded p-1 text-gray-600 hover:text-gray-800"
+                    className="absolute right-0 top-0 flex h-full w-10 items-center justify-center rounded-r-lg text-gray-600 hover:text-gray-800"
                     aria-label={showConfirmPassword ? "Hide password" : "Show password"}
                   >
                     {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}

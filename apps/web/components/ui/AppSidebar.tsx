@@ -15,7 +15,6 @@ import {
   BarChart3,
   Settings,
   BookOpen,
-  LogOut,
   Sparkles,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -66,7 +65,6 @@ const navGroups = [
 
 export function AppSidebar() {
   const pathname = usePathname();
-  const router = useRouter();
   const [pendingRoute, setPendingRoute] = useState<string | null>(null);
   const { isMobile, setOpenMobile } = useSidebar();
 
@@ -87,16 +85,6 @@ export function AppSidebar() {
     if (url === "/dashboard") return pathname === "/dashboard";
     if (url === "/workspace") return pathname.startsWith("/workspace") || pathname.startsWith("/reviews/");
     return pathname.startsWith(url);
-  };
-
-  const handleLogout = () => {
-    localStorage.removeItem("token");
-    localStorage.removeItem("current_user");
-    document.cookie = "token=; Path=/; Max-Age=0; SameSite=Lax";
-    if (isMobile) {
-      setOpenMobile(false);
-    }
-    router.replace("/auth");
   };
 
   return (
