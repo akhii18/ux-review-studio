@@ -1,0 +1,504 @@
+import crypto from "node:crypto";
+import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
+import { AppError } from "../middleware/errorHandler";
+import { config } from "../config";
+import { prisma } from "../config/prisma";
+import { uploadReviewAssetToStorage } from "./supabaseStorage";
+
+const DEFAULT_MAX_SCREENS = 10;
+const MAX_SCREEN_LIMIT = 16;
+const NAVIGATION_TIMEOUT_MS = 45000;
+const COMMON_BROWSER_PATHS = [
+  process.env.FIGMA_BROWSER_EXECUTABLE_PATH,
+  "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+  "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
+  "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe",
+  "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
+].filter((value): value is string => Boolean(value));
+
+export type FigmaCapturedScreen = {
+  name: string;
+  mimeType: "image/png";
+  base64Data: string;
+  sizeBytes: number;
+  contentText: string;
+  sourceUrl: string;
+  title: string;
+};
+
+export type FigmaCaptureResult = {
+  requestedUrl: string;
+  finalUrl: string;
+  screens: FigmaCapturedScreen[];
+  visitedUrls: string[];
+  titles: string[];
+  navigationSummary: string;
+};
+
+type BrowserLaunchCandidate = {
+  label: string;
+  executablePath?: string;
+  channel?: "chrome" | "msedge";
+};
+
+type ScreenCandidate = {
+  hash: string;
+  screen: FigmaCapturedScreen;
+};
+
+type HotspotCandidate = {
+  key: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  label: string;
+  href?: string;
+};
+
+function normalizeWhitespace(value: string): string {
+  return value.replace(/\s+/g, " ").trim();
+}
+
+function normalizePotentialUrl(value: string): string {
+  let normalized = value
+    .replace(/[\u0000-\u001f\u007f]/g, "")
+    .replace(/^['"`]+|['"`]+$/g, "")
+    .trim();
+
+  // Common copy/paste artifact from logs/messages: trailing arrow markers like "--->".
+  normalized = normalized.replace(/-+>+$/g, "");
+
+  // Remove trailing characters that cannot terminate a URL.
+  normalized = normalized.replace(/[>\])}]+$/g, "");
+
+  try {
+    const parsed = new URL(normalized);
+    const nodeId = parsed.searchParams.get("node-id");
+    if (nodeId) {
+      const cleanNodeId = nodeId.replace(/[^0-9:-]/g, "");
+      if (cleanNodeId) {
+        parsed.searchParams.set("node-id", cleanNodeId);
+        normalized = parsed.toString();
+      }
+    }
+  } catch {
+    // Validation will throw later with a user-facing message.
+  }
+
+  return normalized;
+}
+
+function sanitizeFileStem(value: string): string {
+  const normalized = normalizeWhitespace(value)
+    .replace(/[^a-zA-Z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .toLowerCase();
+
+  return normalized || "screen";
+}
+
+function buildBrowserCandidates(): BrowserLaunchCandidate[] {
+  const pathCandidates = COMMON_BROWSER_PATHS.map((executablePath, index) => ({
+    label: index === 0 && process.env.FIGMA_BROWSER_EXECUTABLE_PATH ? "configured browser" : `system browser ${index + 1}`,
+    executablePath,
+  }));
+
+  return [
+    ...pathCandidates,
+    { label: "chrome channel", channel: "chrome" },
+    { label: "edge channel", channel: "msedge" },
+    { label: "bundled chromium" },
+  ];
+}
+
+export function isValidFigmaPrototypeUrl(value: string): boolean {
+  try {
+    const url = new URL(normalizePotentialUrl(value));
+    const host = url.hostname.toLowerCase();
+    if (url.protocol !== "https:") return false;
+    if (host !== "figma.com" && host !== "www.figma.com") return false;
+
+    const path = url.pathname.toLowerCase();
+    return Boolean(
+      path.includes("/proto/") ||
+      path.includes("/present/") ||
+      path.includes("/presentation/") ||
+      path.includes("/design/") ||
+      (path.includes("/file/") && url.searchParams.has("node-id")) ||
+      url.searchParams.has("node-id")
+    );
+  } catch {
+    return false;
+  }
+}
+
+export function assertValidFigmaPrototypeUrl(value: string): string {
+  const normalized = normalizePotentialUrl(value);
+  if (!isValidFigmaPrototypeUrl(normalized)) {
+    throw new AppError(400, "Enter a valid public Figma prototype URL.");
+  }
+  return normalized;
+}
+
+async function launchBrowser(): Promise<Browser> {
+  const errors: string[] = [];
+
+  for (const candidate of buildBrowserCandidates()) {
+    try {
+      return await chromium.launch({
+        headless: true,
+        ...(candidate.executablePath ? { executablePath: candidate.executablePath } : {}),
+        ...(candidate.channel ? { channel: candidate.channel } : {}),
+        args: [
+          "--disable-dev-shm-usage",
+          "--disable-gpu",
+          "--no-first-run",
+          "--no-default-browser-check",
+        ],
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      errors.push(`${candidate.label}: ${message}`);
+    }
+  }
+
+  throw new AppError(
+    503,
+    `Unable to launch a browser for Figma capture. Checked local Chrome/Edge and bundled Chromium. ${errors.join(" | ")}`
+  );
+}
+
+async function createContext(browser: Browser): Promise<BrowserContext> {
+  return browser.newContext({
+    viewport: { width: 1440, height: 1024 },
+    deviceScaleFactor: 1,
+    ignoreHTTPSErrors: true,
+    userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+  });
+}
+
+async function settlePage(page: Page, waitMs = 900): Promise<void> {
+  await page.waitForLoadState("domcontentloaded").catch(() => undefined);
+  await page.waitForLoadState("networkidle", { timeout: 2500 }).catch(() => undefined);
+  await page.waitForTimeout(waitMs);
+}
+
+async function gotoWithRetry(page: Page, url: string): Promise<void> {
+  const attempts: Array<{ waitUntil: "domcontentloaded" | "commit"; timeout: number }> = [
+    { waitUntil: "domcontentloaded", timeout: NAVIGATION_TIMEOUT_MS },
+    { waitUntil: "commit", timeout: NAVIGATION_TIMEOUT_MS },
+  ];
+
+  let lastError: unknown = null;
+  for (const attempt of attempts) {
+    try {
+      await page.goto(url, { waitUntil: attempt.waitUntil, timeout: attempt.timeout });
+      return;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  const message = lastError instanceof Error ? lastError.message : String(lastError);
+  throw new AppError(422, `Could not load the Figma prototype URL. ${message}`);
+}
+
+async function dismissCommonOverlays(page: Page): Promise<void> {
+  const selectors = [
+    'button:has-text("Accept")',
+    'button:has-text("I agree")',
+    'button:has-text("Got it")',
+    'button:has-text("Continue")',
+    '[aria-label*="close" i]',
+  ];
+
+  for (const selector of selectors) {
+    const locator = page.locator(selector).first();
+    if (await locator.isVisible().catch(() => false)) {
+      await locator.click({ timeout: 1000 }).catch(() => undefined);
+      await page.waitForTimeout(250);
+    }
+  }
+}
+
+async function extractVisibleText(page: Page): Promise<string> {
+  const text = await page.evaluate(() => {
+    const bodyText = document.body?.innerText ?? "";
+    const labels = Array.from(document.querySelectorAll("a, button, [role='button']"))
+      .map((element) => {
+        const text = (element.textContent ?? "").trim();
+        const aria = element.getAttribute("aria-label")?.trim() ?? "";
+        return [text, aria].filter(Boolean).join(" ");
+      })
+      .filter(Boolean)
+      .join("\n");
+
+    return [bodyText, labels].filter(Boolean).join("\n");
+  }).catch(() => "");
+
+  return normalizeWhitespace(text).slice(0, 6000);
+}
+
+function buildScreenName(order: number, title: string, url: string): string {
+  const derived = title || (() => {
+    try {
+      const parsed = new URL(url);
+      return parsed.searchParams.get("node-id") ?? parsed.pathname.split("/").filter(Boolean).at(-1) ?? "screen";
+    } catch {
+      return "screen";
+    }
+  })();
+
+  return `figma-screen-${String(order).padStart(2, "0")}-${sanitizeFileStem(derived)}.png`;
+}
+
+async function captureScreen(page: Page, order: number, seenHashes: Set<string>): Promise<ScreenCandidate | null> {
+  const title = normalizeWhitespace(await page.title().catch(() => ""));
+  const sourceUrl = page.url();
+  const visibleText = await extractVisibleText(page);
+  const buffer = await page.screenshot({ type: "png", fullPage: false, animations: "disabled" });
+  const hash = crypto.createHash("sha1").update(buffer).digest("hex");
+
+  if (seenHashes.has(hash)) {
+    return null;
+  }
+
+  seenHashes.add(hash);
+  const contentTextParts = [
+    "Source: Figma prototype",
+    `Captured URL: ${sourceUrl}`,
+    title ? `Screen title: ${title}` : "",
+    visibleText ? `Visible text: ${visibleText}` : "Visible text: No DOM text extracted from the prototype frame.",
+  ].filter(Boolean);
+
+  return {
+    hash,
+    screen: {
+      name: buildScreenName(order, title, sourceUrl),
+      mimeType: "image/png",
+      base64Data: buffer.toString("base64"),
+      sizeBytes: buffer.byteLength,
+      contentText: contentTextParts.join("\n"),
+      sourceUrl,
+      title,
+    },
+  };
+}
+
+async function collectHotspots(page: Page): Promise<HotspotCandidate[]> {
+  const hotspots = await page.evaluate(() => {
+    const isVisible = (element: Element, rect: DOMRect) => {
+      const style = window.getComputedStyle(element as HTMLElement);
+      if (style.display === "none" || style.visibility === "hidden" || style.pointerEvents === "none") return false;
+      return rect.width >= 24 && rect.height >= 24 && rect.bottom >= 0 && rect.right >= 0;
+    };
+
+    const candidates: HotspotCandidate[] = [];
+
+    for (const element of Array.from(document.querySelectorAll("a, button, [role='button'], [tabindex='0']"))) {
+        const rect = element.getBoundingClientRect();
+        const label = [
+          (element.textContent ?? "").trim(),
+          element.getAttribute("aria-label")?.trim() ?? "",
+          element.getAttribute("title")?.trim() ?? "",
+        ].filter(Boolean).join(" ");
+
+        if (!isVisible(element, rect)) continue;
+
+        candidates.push({
+          key: `${Math.round(rect.x)}:${Math.round(rect.y)}:${Math.round(rect.width)}:${Math.round(rect.height)}:${label}`,
+          x: rect.x,
+          y: rect.y,
+          width: rect.width,
+          height: rect.height,
+          label,
+          href: element instanceof HTMLAnchorElement ? element.href : undefined,
+        });
+    }
+
+    return candidates;
+  }).catch(() => [] as HotspotCandidate[]);
+
+  const scoreCandidate = (candidate: HotspotCandidate) => {
+    const area = candidate.width * candidate.height;
+    const label = candidate.label.toLowerCase();
+    let score = area / 250;
+    score += candidate.x / 10;
+
+    if (/(next|continue|proceed|start|play|open|forward)/i.test(label)) score += 2000;
+    if (/(back|previous|close|cancel|sign in|log in|home)/i.test(label)) score -= 2000;
+    if (!label) score += 150;
+
+    return score;
+  };
+
+  return hotspots.sort((left, right) => scoreCandidate(right) - scoreCandidate(left));
+}
+
+async function pageLooksInaccessible(page: Page): Promise<boolean> {
+  const currentUrl = page.url().toLowerCase();
+  if (currentUrl.includes("/login") || currentUrl.includes("/signin")) {
+    return true;
+  }
+
+  const text = (await extractVisibleText(page)).toLowerCase();
+  const blockingSignals = [
+    "request access",
+    "this file is private",
+    "you need permission",
+    "ask the owner for access",
+    "sign up for figma",
+    "continue with google",
+    "continue with email",
+  ];
+
+  const matchedSignals = blockingSignals.filter((snippet) => text.includes(snippet));
+
+  // Require stronger evidence than a single generic phrase to avoid false
+  // positives from normal prototype copy that may include terms like "login".
+  return matchedSignals.length >= 2;
+}
+
+async function tryAdvance(page: Page, currentHash: string, seenHashes: Set<string>, attemptedActions: Set<string>, nextOrder: number) {
+  const selectorActions = [
+    { key: `${currentHash}:key:ArrowRight`, run: () => page.keyboard.press("ArrowRight") },
+    { key: `${currentHash}:key:PageDown`, run: () => page.keyboard.press("PageDown") },
+    { key: `${currentHash}:key:Space`, run: () => page.keyboard.press("Space") },
+    { key: `${currentHash}:selector:next`, run: () => page.locator('[aria-label*="next" i], button:has-text("Next"), a:has-text("Next")').first().click({ timeout: 1200 }) },
+    { key: `${currentHash}:selector:continue`, run: () => page.locator('button:has-text("Continue"), a:has-text("Continue"), [aria-label*="continue" i]').first().click({ timeout: 1200 }) },
+  ];
+
+  for (const action of selectorActions) {
+    if (attemptedActions.has(action.key)) continue;
+    attemptedActions.add(action.key);
+
+    await action.run().catch(() => undefined);
+    await settlePage(page, 700);
+
+    const candidate = await captureScreen(page, nextOrder, seenHashes);
+    if (candidate) return candidate;
+  }
+
+  const hotspots = await collectHotspots(page);
+  for (const hotspot of hotspots) {
+    const actionKey = `${currentHash}:hotspot:${hotspot.key}`;
+    if (attemptedActions.has(actionKey)) continue;
+    attemptedActions.add(actionKey);
+
+    const clickX = hotspot.x + hotspot.width / 2;
+    const clickY = hotspot.y + hotspot.height / 2;
+    await page.mouse.click(clickX, clickY).catch(() => undefined);
+    await settlePage(page, 700);
+
+    const host = (() => {
+      try {
+        return new URL(page.url()).hostname.toLowerCase();
+      } catch {
+        return "";
+      }
+    })();
+
+    if (host && host !== "figma.com" && host !== "www.figma.com") {
+      await page.goBack({ waitUntil: "domcontentloaded" }).catch(() => undefined);
+      await settlePage(page, 500);
+      continue;
+    }
+
+    const candidate = await captureScreen(page, nextOrder, seenHashes);
+    if (candidate) return candidate;
+  }
+
+  return null;
+}
+
+export async function captureFigmaPrototype(input: { url: string; maxScreens?: number }): Promise<FigmaCaptureResult> {
+  const requestedUrl = assertValidFigmaPrototypeUrl(input.url);
+  const maxScreens = Math.min(MAX_SCREEN_LIMIT, Math.max(1, input.maxScreens ?? DEFAULT_MAX_SCREENS));
+  const browser = await launchBrowser();
+  const context = await createContext(browser);
+  const page = await context.newPage();
+  const seenHashes = new Set<string>();
+  const attemptedActions = new Set<string>();
+  const screens: ScreenCandidate[] = [];
+  const visitedUrls = new Set<string>();
+  const titles = new Set<string>();
+
+  try {
+    page.setDefaultNavigationTimeout(NAVIGATION_TIMEOUT_MS);
+    page.setDefaultTimeout(12000);
+
+    await gotoWithRetry(page, requestedUrl);
+    await settlePage(page, 1200);
+    await dismissCommonOverlays(page);
+    await settlePage(page, 600);
+
+    if (await pageLooksInaccessible(page)) {
+      throw new AppError(422, "Unable to access the Figma prototype. Ensure the link is public and does not require sign-in.");
+    }
+
+    const first = await captureScreen(page, 1, seenHashes);
+    if (!first) {
+      throw new AppError(422, "Figma prototype loaded, but no reviewable screen could be captured.");
+    }
+
+    screens.push(first);
+    visitedUrls.add(page.url());
+    if (first.screen.title) titles.add(first.screen.title);
+
+    while (screens.length < maxScreens) {
+      const current = screens.at(-1);
+      if (!current) break;
+
+      const next = await tryAdvance(page, current.hash, seenHashes, attemptedActions, screens.length + 1);
+      if (!next) break;
+
+      screens.push(next);
+      visitedUrls.add(page.url());
+      if (next.screen.title) titles.add(next.screen.title);
+    }
+
+    return {
+      requestedUrl,
+      finalUrl: page.url(),
+      screens: screens.map((item) => item.screen),
+      visitedUrls: Array.from(visitedUrls),
+      titles: Array.from(titles),
+      navigationSummary: `Captured ${screens.length} unique screen${screens.length === 1 ? "" : "s"} from the public Figma prototype.`,
+    };
+  } finally {
+    await context.close().catch(() => undefined);
+    await browser.close().catch(() => undefined);
+  }
+}
+
+export async function persistCapturedFigmaScreens(reviewId: string, screens: FigmaCapturedScreen[]) {
+  const hasSupabaseStorageConfig = Boolean(config.supabaseUrl && config.supabaseServiceRoleKey);
+
+  const createdAssetIds: string[] = [];
+  for (const screen of screens) {
+    const blobUrl = hasSupabaseStorageConfig
+      ? (await uploadReviewAssetToStorage({
+          reviewId,
+          name: screen.name,
+          mimeType: screen.mimeType,
+          base64Data: screen.base64Data,
+        })).storageRef
+      : `data:${screen.mimeType};base64,${screen.base64Data}`;
+
+    const asset = await prisma.asset.create({
+      data: {
+        reviewId,
+        name: screen.name,
+        mimeType: screen.mimeType,
+        blobUrl,
+        contentText: screen.contentText,
+        sizeBytes: screen.sizeBytes,
+      },
+    });
+
+    createdAssetIds.push(asset.id);
+  }
+
+  return createdAssetIds;
+}

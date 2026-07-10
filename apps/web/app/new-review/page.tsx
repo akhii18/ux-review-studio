@@ -175,6 +175,7 @@ const progressStages = [
 ];
 
 const backendStageToUiIndex: Record<string, number> = {
+  capturing_figma_prototype: 0,
   reading_inputs: 0,
   discovering_flows: 2,
   analyzing_screens: 3,
@@ -193,6 +194,7 @@ function formatBackendStage(stage?: string | null): string {
   if (stage.startsWith("failed:")) return "Failed";
 
   const labels: Record<string, string> = {
+    capturing_figma_prototype: "Capturing Figma prototype",
     reading_inputs: "Reading inputs",
     discovering_flows: "Discovering key flows",
     analyzing_screens: "Analyzing screens",
@@ -216,6 +218,64 @@ function getFailureReason(stage?: string | null): string | null {
 
 function toAlphaNumeric(value: string): string {
   return value.replace(/[^a-zA-Z0-9 ]/g, "").replace(/\s{2,}/g, " ");
+}
+
+function isValidFigmaPrototypeUrl(value: string): boolean {
+  try {
+    const url = new URL(value.trim());
+    const host = url.hostname.toLowerCase();
+    if (url.protocol !== "https:") return false;
+    if (host !== "figma.com" && host !== "www.figma.com") return false;
+
+    const path = url.pathname.toLowerCase();
+    return Boolean(
+      path.includes("/proto/") ||
+      path.includes("/present/") ||
+      path.includes("/presentation/") ||
+      path.includes("/design/") ||
+      (path.includes("/file/") && url.searchParams.has("node-id")) ||
+      url.searchParams.has("node-id")
+    );
+  } catch {
+    return false;
+  }
+}
+
+function parseStoredContextNotes(noteBlocks: string[]) {
+  let storedFigmaUrl = "";
+  let storedDesignSystemUrl = "";
+  const remainingBlocks: string[] = [];
+
+  for (const block of noteBlocks) {
+    const retainedLines: string[] = [];
+
+    for (const line of block.split(/\r?\n/)) {
+      const trimmedLine = line.trim();
+
+      if (!storedFigmaUrl && /^Figma URL:\s*/i.test(trimmedLine)) {
+        storedFigmaUrl = trimmedLine.replace(/^Figma URL:\s*/i, "").trim();
+        continue;
+      }
+
+      if (!storedDesignSystemUrl && /^Design System URL:\s*/i.test(trimmedLine)) {
+        storedDesignSystemUrl = trimmedLine.replace(/^Design System URL:\s*/i, "").trim();
+        continue;
+      }
+
+      retainedLines.push(line);
+    }
+
+    const retained = retainedLines.join("\n").trim();
+    if (retained) {
+      remainingBlocks.push(retained);
+    }
+  }
+
+  return {
+    figmaUrl: storedFigmaUrl,
+    designSystemUrl: storedDesignSystemUrl,
+    contextText: remainingBlocks.join("\n\n"),
+  };
 }
 
 function formatReviewTypeLabel(value: string): string {
@@ -500,8 +560,12 @@ export default function NewReviewPage() {
           });
         }
 
+        const parsedNotes = parseStoredContextNotes(noteBlocks);
+
         setFiles(loadedFiles);
-        setContextText(noteBlocks.join("\n\n"));
+        setContextText(parsedNotes.contextText);
+        setFigmaUrl(parsedNotes.figmaUrl);
+        setDesignSystemUrl(parsedNotes.designSystemUrl);
 
         const stepMatch = typeof review.stage === "string" ? review.stage.match(/^step-(\d+)$/) : null;
         if (stepMatch) {
@@ -869,13 +933,14 @@ export default function NewReviewPage() {
         : [...current, optionKey]
     );
 
-  const validStep0 =
-    name.trim().length > 0 &&
-    product.trim().length > 0 &&
-    (reviewType !== "partial" || criteria.length > 0);
-  const validStep1 = files.some(
+  const validStep0 = name.trim().length > 0 && product.trim().length > 0;
+  const hasScreenshotAsset = files.some(
     (asset) => asset.type === "Screenshot" && ((Boolean(asset.file) && (asset.file?.type.startsWith("image/") ?? false)) || Boolean(asset.blobUrl || asset.previewUrl))
   );
+  const figmaUrlTrimmed = figmaUrl.trim();
+  const hasValidFigmaUrl = figmaUrlTrimmed.length > 0 && isValidFigmaPrototypeUrl(figmaUrlTrimmed);
+  const figmaUrlError = figmaUrlTrimmed.length > 0 && !hasValidFigmaUrl;
+  const validStep1 = hasScreenshotAsset || hasValidFigmaUrl;
   const validStep2 = criteria.length > 0;
   const nameRequiredError = nameTouched && name.trim().length === 0;
   const productRequiredError = productTouched && product.trim().length === 0;
@@ -1004,7 +1069,7 @@ export default function NewReviewPage() {
 
   const runReview = async () => {
     if (!validStep1) {
-      toast.error("Add at least one screenshot image before starting the review.");
+      toast.error("Add at least one screenshot image or enter a valid public Figma prototype URL before starting the review.");
       setStep(1);
       return;
     }
@@ -1367,16 +1432,18 @@ export default function NewReviewPage() {
                     </div>
                   )}
                   <div className="grid gap-3 md:grid-cols-2">
-                    <Field label="Figma prototype URL">
+                    <Field label="Figma prototype URL" help="Public prototype link. If you do not upload screenshots, the review will capture the prototype automatically with Playwright.">
                       <div className="relative">
                         <Figma className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
                         <Input
                           placeholder="https://figma.com/proto/…"
-                          className="pl-9"
+                          className={cn("pl-9", figmaUrlError && "border-red-500 focus-visible:ring-red-500")}
                           value={figmaUrl}
                           onChange={(e) => setFigmaUrl(e.target.value)}
                         />
                       </div>
+                      {figmaUrlError ? <p className="mt-1 text-xs text-red-500">Enter a valid public Figma prototype URL.</p> : null}
+                      {!figmaUrlError && hasValidFigmaUrl ? <p className="mt-1 text-xs text-muted-foreground">The prototype will be opened in Playwright and converted into screenshots when the review starts.</p> : null}
                     </Field>
                     <Field label="Design system reference">
                       <div className="relative">
