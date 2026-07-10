@@ -124,6 +124,11 @@ export const ReviewsController = {
     res.json({ success: true, data: result });
   },
 
+  async runAgain(req: Request, res: Response) {
+    const result = await ReviewsService.runReviewAgain(req.params.id as string, getUserId(req));
+    res.json({ success: true, data: result });
+  },
+
   async getProgress(req: Request, res: Response) {
     const progress = await ReviewsService.getProgress(req.params.id as string, getUserId(req));
     res.json({ success: true, data: progress });
