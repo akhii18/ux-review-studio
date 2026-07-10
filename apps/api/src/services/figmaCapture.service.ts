@@ -1,4 +1,7 @@
 import crypto from "node:crypto";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
 import { AppError } from "../middleware/errorHandler";
 import { config } from "../config";
@@ -91,6 +94,54 @@ function sanitizeFileStem(value: string): string {
   return normalized || "screen";
 }
 
+function findExistingPaths(candidates: string[]): string[] {
+  const existing = new Set<string>();
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+    try {
+      if (fs.existsSync(candidate)) {
+        existing.add(candidate);
+      }
+    } catch {
+      // Ignore invalid path checks.
+    }
+  }
+  return Array.from(existing);
+}
+
+function getPlaywrightCachedChromiumPaths(): string[] {
+  const roots = findExistingPaths([
+    process.env.PLAYWRIGHT_BROWSERS_PATH,
+    path.join(os.homedir(), ".cache", "ms-playwright"),
+    "/ms-playwright",
+    "/home/site/wwwroot/.cache/ms-playwright",
+    "/home/.cache/ms-playwright",
+  ].filter((candidate): candidate is string => Boolean(candidate)));
+
+  const discovered: string[] = [];
+
+  for (const root of roots) {
+    let entries: string[] = [];
+    try {
+      entries = fs.readdirSync(root);
+    } catch {
+      continue;
+    }
+
+    const chromiumDirs = entries.filter((entry) => /^chromium-\d+/i.test(entry));
+    for (const chromiumDir of chromiumDirs) {
+      const base = path.join(root, chromiumDir);
+      discovered.push(
+        path.join(base, "chrome-linux", "chrome"),
+        path.join(base, "chrome-mac", "Chromium.app", "Contents", "MacOS", "Chromium"),
+        path.join(base, "chrome-win", "chrome.exe")
+      );
+    }
+  }
+
+  return findExistingPaths(discovered);
+}
+
 function getCommonBrowserPaths(): string[] {
   const configured = [
     process.env.FIGMA_BROWSER_EXECUTABLE_PATH,
@@ -98,9 +149,12 @@ function getCommonBrowserPaths(): string[] {
     process.env.CHROME_BIN,
   ].filter((value): value is string => Boolean(value));
 
+  const cachedPlaywrightBinaries = getPlaywrightCachedChromiumPaths();
+
   if (process.platform === "win32") {
     return [
       ...configured,
+      ...cachedPlaywrightBinaries,
       "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
       "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
       "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe",
@@ -111,6 +165,7 @@ function getCommonBrowserPaths(): string[] {
   if (process.platform === "darwin") {
     return [
       ...configured,
+      ...cachedPlaywrightBinaries,
       "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
       "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
       "/Applications/Chromium.app/Contents/MacOS/Chromium",
@@ -119,6 +174,7 @@ function getCommonBrowserPaths(): string[] {
 
   return [
     ...configured,
+    ...cachedPlaywrightBinaries,
     "/usr/bin/chromium-browser",
     "/usr/bin/chromium",
     "/usr/bin/google-chrome",
