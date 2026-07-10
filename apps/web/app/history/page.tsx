@@ -30,8 +30,8 @@ import {
   PaginationPrevious,
 } from "@/components/ui/pagination";
 import { PriorityBadge } from "@/components/ui/PriorityBadge";
-import { Search, MoreVertical, X, ExternalLink, FileBarChart, Trash2, Download, ChevronDown } from "lucide-react";
-import { deleteReview, exportReviewReport, getReview, listReviews } from "@/lib/api";
+import { Search, MoreVertical, X, ExternalLink, FileBarChart, Trash2, Download, ChevronDown, Pencil, Upload, ImageIcon } from "lucide-react";
+import { deleteReview, exportReviewReport, getReview, listReviews, saveReviewDraft, startReview } from "@/lib/api";
 import { downloadReport } from "@/lib/reportExport";
 import { toast } from "@/lib/toast";
 
@@ -211,18 +211,27 @@ export default function HistoryPage() {
   const [loadingReportReviewId, setLoadingReportReviewId] = useState<string | null>(null);
   const [reportPreview, setReportPreview] = useState<{ title: string; html: string; report: any } | null>(null);
   const [pendingDeleteReview, setPendingDeleteReview] = useState<{ id: string; name: string } | null>(null);
+  const [editSheetOpen, setEditSheetOpen] = useState(false);
+  const [editingReview, setEditingReview] = useState<any | null>(null);
+  const [editAssets, setEditAssets] = useState<Array<{ id?: string; name: string; mimeType: string; base64Data?: string; blobUrl?: string; storageRef?: string | null; contentText?: string; sizeBytes?: number; previewUrl?: string }>>([]);
+  const [isSavingReview, setIsSavingReview] = useState(false);
+  const [isUploadingFiles, setIsUploadingFiles] = useState(false);
+
+  const loadReviews = async () => {
+    setIsLoading(true);
+    try {
+      const data = await listReviews();
+      setReviews(data);
+    } catch (err) {
+      console.error(err);
+      toast.error("Failed to load review history");
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   useEffect(() => {
-    setIsLoading(true);
-    listReviews()
-      .then((data) => {
-        setReviews(data);
-      })
-      .catch((err) => {
-        console.error(err);
-        toast.error("Failed to load review history");
-      })
-      .finally(() => setIsLoading(false));
+    void loadReviews();
   }, []);
 
   const domains = useMemo(() => {
@@ -288,6 +297,131 @@ export default function HistoryPage() {
       toast.error((err as any)?.message ?? "Failed to load report");
     } finally {
       setLoadingReportReviewId(null);
+    }
+  }
+
+  async function handleOpenEditSheet(reviewId: string) {
+    setEditSheetOpen(true);
+    setEditingReview(null);
+    setEditAssets([]);
+    try {
+      const review = await getReview(reviewId);
+      setEditingReview(review);
+      setEditAssets(
+        (review?.assets ?? []).map((asset: any) => ({
+          id: asset.id,
+          name: asset.name,
+          mimeType: asset.mimeType,
+          blobUrl: asset.blobUrl ?? undefined,
+          storageRef: asset.storageRef ?? asset.blobUrl ?? undefined,
+          contentText: asset.contentText ?? undefined,
+          sizeBytes: asset.sizeBytes ?? undefined,
+          previewUrl: asset.blobUrl ?? undefined,
+        }))
+      );
+    } catch (err) {
+      console.error(err);
+      toast.error("Failed to load review details for editing");
+      setEditSheetOpen(false);
+    }
+  }
+
+  async function handleAddScreenshots(event: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(event.target.files ?? []);
+    if (files.length === 0) return;
+
+    setIsUploadingFiles(true);
+    try {
+      const uploadedAssets = await Promise.all(
+        files.map(
+          (file) =>
+            new Promise<{ name: string; mimeType: string; base64Data: string; sizeBytes?: number; previewUrl: string }>((resolve, reject) => {
+              const reader = new FileReader();
+              reader.onload = () => {
+                const result = reader.result;
+                if (typeof result !== "string") {
+                  reject(new Error("Unable to read file"));
+                  return;
+                }
+                const base64Data = result.includes(",") ? result.split(",")[1] : result;
+                resolve({
+                  name: file.name,
+                  mimeType: file.type || "image/png",
+                  base64Data,
+                  sizeBytes: file.size,
+                  previewUrl: result,
+                });
+              };
+              reader.onerror = () => reject(new Error("Unable to read file"));
+              reader.readAsDataURL(file);
+            })
+        )
+      );
+
+      setEditAssets((prev) => [
+        ...prev,
+        ...uploadedAssets.map((asset) => ({
+          name: asset.name,
+          mimeType: asset.mimeType,
+          base64Data: asset.base64Data,
+          sizeBytes: asset.sizeBytes,
+          previewUrl: asset.previewUrl,
+        })),
+      ]);
+      toast.success(`${uploadedAssets.length} screenshot${uploadedAssets.length === 1 ? "" : "s"} added`);
+    } catch (err) {
+      console.error(err);
+      toast.error("Failed to add screenshots");
+    } finally {
+      setIsUploadingFiles(false);
+      event.target.value = "";
+    }
+  }
+
+  async function handleSaveAndRerun() {
+    if (!editingReview) return;
+
+    setIsSavingReview(true);
+    try {
+      const payload = {
+        reviewId: editingReview.id,
+        name: editingReview.name || "Untitled review",
+        product: editingReview.product || "Unknown product",
+        domain: editingReview.domain || undefined,
+        reviewType: editingReview.reviewType || undefined,
+        owner: editingReview.owner || undefined,
+        criteria: Array.isArray(editingReview.criteria) ? editingReview.criteria.filter((value: unknown): value is string => typeof value === "string") : [],
+        findingMetadataOptions: Array.isArray(editingReview.findingMetadataOptions)
+          ? editingReview.findingMetadataOptions.filter((value: unknown): value is string => typeof value === "string")
+          : [],
+        analysisScope: editingReview.analysisScope || "all",
+        depth: editingReview.depth || "standard",
+        confidenceThreshold: typeof editingReview.confidenceThreshold === "number" ? editingReview.confidenceThreshold : 75,
+        stage: "draft:setup",
+        assets: editAssets
+          .map((asset) => ({
+            name: asset.name,
+            mimeType: asset.mimeType,
+            ...(asset.base64Data ? { base64Data: asset.base64Data } : {}),
+            ...(asset.base64Data ? {} : { blobUrl: asset.storageRef ?? asset.blobUrl ?? undefined }),
+            ...(asset.contentText ? { contentText: asset.contentText } : {}),
+            ...(typeof asset.sizeBytes === "number" ? { sizeBytes: asset.sizeBytes } : {}),
+          }))
+          .filter((asset) => Boolean(asset.name) && Boolean(asset.mimeType)),
+      };
+
+      await saveReviewDraft(payload);
+      await startReview(editingReview.id);
+      toast.success("Review updated and rerun started");
+      setEditSheetOpen(false);
+      setEditingReview(null);
+      setEditAssets([]);
+      await loadReviews();
+    } catch (err) {
+      console.error(err);
+      toast.error((err as any)?.message ?? "Failed to update and rerun review");
+    } finally {
+      setIsSavingReview(false);
     }
   }
 
@@ -404,7 +538,16 @@ export default function HistoryPage() {
                   <td className="hidden px-4 py-3 align-middle text-xs xl:table-cell">{r.owner || "User"}</td>
                   <td className="hidden px-4 py-3 align-middle text-xs text-muted-foreground xl:table-cell">{formatReviewDate(r.updatedAt)}</td>
                   <td className="px-1 py-3 align-middle text-right">
-                    <div className="flex justify-end">
+                    <div className="flex justify-end gap-1">
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        aria-label={`Edit screenshots for ${r.name || "review"}`}
+                        className="h-9 w-9"
+                        onClick={() => void handleOpenEditSheet(r.id)}
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </Button>
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
                           <Button
@@ -552,6 +695,80 @@ export default function HistoryPage() {
           </div>
         )}
       </div>
+
+      <Sheet open={editSheetOpen} onOpenChange={(open) => {
+        setEditSheetOpen(open);
+        if (!open) {
+          setEditingReview(null);
+          setEditAssets([]);
+        }
+      }}>
+        <SheetContent side="right" className="w-full sm:max-w-lg">
+          <SheetHeader className="border-b border-border pb-4">
+            <SheetTitle>Edit screenshots & rerun</SheetTitle>
+          </SheetHeader>
+          <div className="mt-5 space-y-4">
+            <div className="rounded-lg border border-border bg-secondary/30 p-4">
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <p className="text-sm font-medium">{editingReview?.name || "Review"}</p>
+                  <p className="text-xs text-muted-foreground">Add or remove screenshots, then rerun the review.</p>
+                </div>
+                <label className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-border bg-background px-3 py-2 text-xs font-medium hover:bg-secondary">
+                  <Upload className="h-3.5 w-3.5" />
+                  Add screenshot
+                  <input type="file" accept="image/*" multiple className="sr-only" onChange={handleAddScreenshots} />
+                </label>
+              </div>
+
+              <div className="mt-4 space-y-2">
+                {editAssets.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-border bg-background/70 px-4 py-6 text-center text-sm text-muted-foreground">
+                    <ImageIcon className="mb-2 h-5 w-5" />
+                    No screenshots yet. Add one to rerun the review.
+                  </div>
+                ) : (
+                  editAssets.map((asset, index) => (
+                    <div key={`${asset.name}-${index}`} className="flex items-center justify-between gap-3 rounded-md border border-border bg-background px-3 py-2">
+                      <div className="flex min-w-0 items-center gap-3">
+                        {(asset.previewUrl || asset.blobUrl || asset.storageRef) && asset.mimeType.startsWith("image/") ? (
+                          <img
+                            src={asset.previewUrl || asset.blobUrl || asset.storageRef || undefined}
+                            alt={asset.name}
+                            className="h-12 w-12 rounded-md border border-border object-cover"
+                          />
+                        ) : (
+                          <div className="flex h-12 w-12 items-center justify-center rounded-md border border-border bg-secondary/40 text-muted-foreground">
+                            <ImageIcon className="h-5 w-5" />
+                          </div>
+                        )}
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-medium">{asset.name}</p>
+                          <p className="text-[11px] text-muted-foreground">{asset.mimeType}</p>
+                        </div>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 shrink-0"
+                        onClick={() => setEditAssets((prev) => prev.filter((_, itemIndex) => itemIndex !== index))}
+                        aria-label={`Remove ${asset.name}`}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+
+            <Button onClick={() => void handleSaveAndRerun()} disabled={isSavingReview || isUploadingFiles} className="w-full">
+              {isSavingReview ? "Updating review…" : "Save and rerun review"}
+            </Button>
+          </div>
+        </SheetContent>
+      </Sheet>
 
       <AlertDialog open={Boolean(pendingDeleteReview)} onOpenChange={(open) => !open && setPendingDeleteReview(null)}>
         <AlertDialogContent>
