@@ -1165,7 +1165,16 @@ function WorkspaceContent() {
               }}
             />
           ) : openCluster && clusterViewMode === "detail" && activeClusterFinding ? (
-            <>
+            <div className="flex h-full flex-col">
+              <div className="flex-1 overflow-y-auto">
+                <FindingDetail
+                  finding={activeClusterFinding}
+                  screenImageUrl={screen?.imageUrl}
+                  findingMetadataOptions={findingMetadataOptions}
+                  onAction={(status) => handleFindingAction(activeClusterFinding.id, status)}
+                  onBasisChange={(basis) => handleBasisChange(activeClusterFinding.id, basis)}
+                />
+              </div>
               <ClusterFindingNavigation
                 currentIndex={clusterFindingIndex}
                 total={openCluster.placements.length}
@@ -1177,14 +1186,7 @@ function WorkspaceContent() {
                   )
                 }
               />
-              <FindingDetail
-                finding={activeClusterFinding}
-                screenImageUrl={screen?.imageUrl}
-                findingMetadataOptions={findingMetadataOptions}
-                onAction={(status) => handleFindingAction(activeClusterFinding.id, status)}
-                onBasisChange={(basis) => handleBasisChange(activeClusterFinding.id, basis)}
-              />
-            </>
+            </div>
           ) : null}
         </SheetContent>
       </Sheet>
@@ -1274,48 +1276,48 @@ function ClusterFindingNavigation({
   onNext,
 }: ClusterFindingNavigationProps) {
   return (
-    <div className="mb-4 space-y-2">
+    <div className="border-t border-border bg-background px-3 py-2 space-y-1">
       <Button
         type="button"
         variant="ghost"
         size="sm"
-        className="h-8 gap-1 px-2"
+        className="h-6 gap-0.5 px-1.5 w-auto text-xs"
         onClick={onBack}
         aria-label="Back to all findings at this location"
       >
-        <ChevronLeft className="h-4 w-4" aria-hidden="true" />
-        Back to all findings
+        <ChevronLeft className="h-3 w-3" aria-hidden="true" />
+        Back
       </Button>
       <div
-        className="flex items-center justify-between gap-2 rounded-lg border border-border bg-secondary/40 px-2 py-2"
+        className="flex items-center justify-center gap-1.5 rounded-md border border-border bg-secondary/30 px-2 py-1"
         aria-label="Findings at this location"
       >
         <Button
           type="button"
           variant="ghost"
           size="sm"
-          className="h-8 gap-1 px-2"
+          className="h-6 gap-0.5 px-1.5 text-[11px]"
           disabled={currentIndex <= 0}
           onClick={onPrevious}
           aria-label="Previous finding at this location"
         >
-          <ChevronLeft className="h-4 w-4" aria-hidden="true" />
-          Previous
+          <ChevronLeft className="h-3 w-3" aria-hidden="true" />
+          Prev
         </Button>
-        <span className="text-xs font-medium text-muted-foreground">
+        <span className="text-[11px] font-medium text-muted-foreground whitespace-nowrap">
           {currentIndex + 1} / {total}
         </span>
         <Button
           type="button"
           variant="ghost"
           size="sm"
-          className="h-8 gap-1 px-2"
+          className="h-6 gap-0.5 px-1.5 text-[11px]"
           disabled={currentIndex >= total - 1}
           onClick={onNext}
           aria-label="Next finding at this location"
         >
           Next
-          <ChevronRight className="h-4 w-4" aria-hidden="true" />
+          <ChevronRight className="h-3 w-3" aria-hidden="true" />
         </Button>
       </div>
     </div>
