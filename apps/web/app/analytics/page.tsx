@@ -10,7 +10,7 @@ import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, ResponsiveContainer, XAxis, YAxis, LineChart, Line } from "recharts";
 import { TrendingUp, TrendingDown, CheckCircle2, AlertOctagon, FileBarChart, BarChart2 } from "lucide-react";
 import { getAnalytics, listReviews } from "@/lib/api";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 
 const chartConfig = {
   score:   { label: "UX Score",        color: "var(--color-primary)" },
@@ -451,7 +451,11 @@ export default function AnalyticsPage() {
               {isLoading ? <ChartSkeleton /> : !data?.trend?.length ? (
                 <EmptyChart message="No completed reviews with UX scores yet." />
               ) : (
-                <ChartContainer config={chartConfig} className="h-64 w-full">
+                <ChartContainer
+                  config={chartConfig}
+                  className="h-64 w-full"
+                  ariaLabel="Line chart showing UX score trend over time"
+                >
                   <ResponsiveContainer>
                     <AreaChart data={data.trend}>
                       <defs>
@@ -479,7 +483,11 @@ export default function AnalyticsPage() {
               {isLoading ? <ChartSkeleton /> : !data?.byCategory?.length ? (
                 <EmptyChart message="No findings recorded yet." />
               ) : (
-                <ChartContainer config={chartConfig} className="h-64 w-full">
+                <ChartContainer
+                  config={chartConfig}
+                  className="h-64 w-full"
+                  ariaLabel="Bar chart showing findings grouped by area"
+                >
                   <ResponsiveContainer>
                     <BarChart data={data.byCategory}>
                       <CartesianGrid vertical={false} stroke="var(--border)" />
@@ -511,7 +519,11 @@ export default function AnalyticsPage() {
               {isLoading ? <ChartSkeleton /> : !data?.byProduct?.length ? (
                 <EmptyChart message="No findings recorded yet." />
               ) : (
-                <ChartContainer config={chartConfig} className="h-56 w-full">
+                <ChartContainer
+                  config={chartConfig}
+                  className="h-56 w-full"
+                  ariaLabel="Horizontal bar chart showing findings grouped by product"
+                >
                   <ResponsiveContainer>
                     <BarChart data={data.byProduct} layout="vertical">
                       <CartesianGrid horizontal={false} stroke="var(--border)" />
@@ -533,7 +545,11 @@ export default function AnalyticsPage() {
               {isLoading ? <ChartSkeleton /> : !data?.a11yTrend?.length ? (
                 <EmptyChart message="No accessibility findings recorded yet." />
               ) : (
-                <ChartContainer config={chartConfig} className="h-56 w-full">
+                <ChartContainer
+                  config={chartConfig}
+                  className="h-56 w-full"
+                  ariaLabel="Line chart showing accessibility findings resolved over time"
+                >
                   <ResponsiveContainer>
                     <LineChart data={data.a11yTrend}>
                       <CartesianGrid vertical={false} stroke="var(--border)" />
@@ -555,7 +571,11 @@ export default function AnalyticsPage() {
               {isLoading ? <ChartSkeleton /> : !data?.trend?.length ? (
                 <EmptyChart message="No review data yet." />
               ) : (
-                <ChartContainer config={chartConfig} className="h-56 w-full">
+                <ChartContainer
+                  config={chartConfig}
+                  className="h-56 w-full"
+                  ariaLabel="Bar chart showing acceptance rate over time"
+                >
                   <ResponsiveContainer>
                     <BarChart data={data.trend}>
                       <CartesianGrid vertical={false} stroke="var(--border)" />
