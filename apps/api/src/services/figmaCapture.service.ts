@@ -14,7 +14,7 @@ const NAVIGATION_TIMEOUT_MS = 45000;
 
 export type FigmaCapturedScreen = {
   name: string;
-  mimeType: "image/png";
+  mimeType: string;
   base64Data: string;
   sizeBytes: number;
   contentText: string;
@@ -42,6 +42,11 @@ type ScreenCandidate = {
   screen: FigmaCapturedScreen;
 };
 
+
+type FigmaOEmbedResponse = {
+  title?: string;
+  thumbnail_url?: string;
+};
 type HotspotCandidate = {
   key: string;
   x: number;
@@ -506,12 +511,64 @@ async function tryAdvance(page: Page, currentHash: string, seenHashes: Set<strin
   return null;
 }
 
+async function captureFromFigmaOEmbed(requestedUrl: string, launchFailureReason?: string): Promise<FigmaCaptureResult | null> {
+  try {
+    const oembedUrl = `https://www.figma.com/api/oembed?url=${encodeURIComponent(requestedUrl)}`;
+    const oembedResponse = await fetch(oembedUrl);
+    if (!oembedResponse.ok) return null;
+
+    const oembed = (await oembedResponse.json()) as FigmaOEmbedResponse;
+    const thumbnailUrl = oembed.thumbnail_url?.trim();
+    if (!thumbnailUrl) return null;
+
+    const thumbnailResponse = await fetch(thumbnailUrl);
+    if (!thumbnailResponse.ok) return null;
+
+    const mimeType = thumbnailResponse.headers.get("content-type")?.split(";")[0] ?? "image/png";
+    if (!mimeType.startsWith("image/")) return null;
+
+    const buffer = Buffer.from(await thumbnailResponse.arrayBuffer());
+    if (buffer.byteLength === 0) return null;
+
+    const title = normalizeWhitespace(oembed.title ?? "Figma Prototype Thumbnail");
+    const screenName = buildScreenName(1, title, requestedUrl);
+    const failureSuffix = launchFailureReason ? ` Browser launch fallback reason: ${launchFailureReason}` : "";
+
+    return {
+      requestedUrl,
+      finalUrl: requestedUrl,
+      screens: [
+        {
+          name: screenName,
+          mimeType,
+          base64Data: buffer.toString("base64"),
+          sizeBytes: buffer.byteLength,
+          contentText: [
+            "Source: Figma oEmbed thumbnail fallback",
+            `Captured URL: ${requestedUrl}`,
+            `Screen title: ${title}`,
+            "Visible text: Figma thumbnail fallback was used because browser automation was unavailable in deployment.",
+            failureSuffix,
+          ].filter(Boolean).join("\n"),
+          sourceUrl: requestedUrl,
+          title,
+        },
+      ],
+      visitedUrls: [requestedUrl],
+      titles: [title],
+      navigationSummary: "Captured 1 fallback screen from Figma oEmbed thumbnail because browser automation was unavailable.",
+    };
+  } catch {
+    return null;
+  }
+}
+
 export async function captureFigmaPrototype(input: { url: string; maxScreens?: number }): Promise<FigmaCaptureResult> {
   const requestedUrl = assertValidFigmaPrototypeUrl(input.url);
   const maxScreens = Math.min(MAX_SCREEN_LIMIT, Math.max(1, input.maxScreens ?? DEFAULT_MAX_SCREENS));
-  const browser = await launchBrowser();
-  const context = await createContext(browser);
-  const page = await context.newPage();
+  let browser: Browser | null = null;
+  let context: BrowserContext | null = null;
+  let page: Page | null = null;
   const seenHashes = new Set<string>();
   const attemptedActions = new Set<string>();
   const screens: ScreenCandidate[] = [];
@@ -519,6 +576,28 @@ export async function captureFigmaPrototype(input: { url: string; maxScreens?: n
   const titles = new Set<string>();
 
   try {
+    try {
+      browser = await launchBrowser();
+      context = await createContext(browser);
+      page = await context.newPage();
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      const fallback = await captureFromFigmaOEmbed(requestedUrl, reason);
+      if (fallback) {
+        return fallback;
+      }
+
+      if (error instanceof AppError) {
+        throw error;
+      }
+
+      throw new AppError(503, `Unable to launch a browser for Figma capture and fallback capture failed. ${reason}`);
+    }
+
+    if (!page) {
+      throw new AppError(503, "Failed to initialize browser page for Figma capture.");
+    }
+
     page.setDefaultNavigationTimeout(NAVIGATION_TIMEOUT_MS);
     page.setDefaultTimeout(12000);
 
@@ -561,8 +640,12 @@ export async function captureFigmaPrototype(input: { url: string; maxScreens?: n
       navigationSummary: `Captured ${screens.length} unique screen${screens.length === 1 ? "" : "s"} from the public Figma prototype.`,
     };
   } finally {
-    await context.close().catch(() => undefined);
-    await browser.close().catch(() => undefined);
+    if (context) {
+      await context.close().catch(() => undefined);
+    }
+    if (browser) {
+      await browser.close().catch(() => undefined);
+    }
   }
 }
 
