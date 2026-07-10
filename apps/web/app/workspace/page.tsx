@@ -584,6 +584,10 @@ function WorkspaceContent() {
     }
   }, [screens, selectedScreen]);
 
+  useEffect(() => {
+    toast.dismiss();
+  }, [clusterFindingIndex, open, openCluster, selectedScreen]);
+
   const screen = screens.find((s) => s.id === selectedScreen) ?? screens[0] ?? null;
   const idx = screen ? screens.findIndex((s) => s.id === screen.id) : -1;
 
@@ -1046,23 +1050,23 @@ function WorkspaceContent() {
                                 ) : i + 1}
                               </button>
                             </TooltipTrigger>
-                            <TooltipContent side="top" className="max-w-xs">
+                            <TooltipContent side="top" className="max-w-xs text-white">
                               {isCluster ? (
                                 <div className="space-y-1">
-                                  <p className="text-xs font-medium">{cluster.placements.length} findings here</p>
+                                  <p className="text-xs font-semibold text-white">{cluster.placements.length} findings here</p>
                                   {cluster.placements.slice(0, 3).map(({ finding }) => (
-                                    <p key={finding.id} className="truncate text-[10px] text-muted-foreground">
+                                    <p key={finding.id} className="truncate text-[10px] text-white/95">
                                       {finding.severity} · {finding.title}
                                     </p>
                                   ))}
                                   {cluster.placements.length > 3 && (
-                                    <p className="text-[10px] text-muted-foreground">+{cluster.placements.length - 3} more</p>
+                                    <p className="text-[10px] text-white/95">+{cluster.placements.length - 3} more</p>
                                   )}
                                 </div>
                               ) : primaryFinding ? (
                                 <>
-                                  <p className="text-xs font-medium">{primaryFinding.title}</p>
-                                  <p className="text-[10px] text-muted-foreground">{primaryFinding.severity} · {primaryFinding.area}</p>
+                                  <p className="text-xs font-semibold text-white">{primaryFinding.title}</p>
+                                  <p className="text-[10px] text-white/95">{primaryFinding.severity} · {primaryFinding.area}</p>
                                 </>
                               ) : null}
                             </TooltipContent>
@@ -1152,16 +1156,7 @@ function WorkspaceContent() {
               }}
             />
           ) : openCluster && clusterViewMode === "detail" && activeClusterFinding ? (
-            <div className="relative flex flex-col h-full">
-              <div className="flex-1 overflow-y-auto">
-                <FindingDetail
-                  finding={activeClusterFinding}
-                  screenImageUrl={screen?.imageUrl}
-                  findingMetadataOptions={findingMetadataOptions}
-                  onAction={(status) => handleFindingAction(activeClusterFinding.id, status)}
-                  onBasisChange={(basis) => handleBasisChange(activeClusterFinding.id, basis)}
-                />
-              </div>
+            <>
               <ClusterFindingNavigation
                 currentIndex={clusterFindingIndex}
                 total={openCluster.placements.length}
@@ -1173,7 +1168,15 @@ function WorkspaceContent() {
                   )
                 }
               />
-            </div>          ) : null}
+              <FindingDetail
+                finding={activeClusterFinding}
+                screenImageUrl={screen?.imageUrl}
+                findingMetadataOptions={findingMetadataOptions}
+                onAction={(status) => handleFindingAction(activeClusterFinding.id, status)}
+                onBasisChange={(basis) => handleBasisChange(activeClusterFinding.id, basis)}
+              />
+            </>
+          ) : null}
         </SheetContent>
       </Sheet>
     </>
@@ -1261,48 +1264,48 @@ function ClusterFindingNavigation({
   onNext,
 }: ClusterFindingNavigationProps) {
   return (
-    <div className="border-t border-border bg-background px-3 py-2 space-y-1">
+    <div className="mb-4 space-y-2">
       <Button
         type="button"
         variant="ghost"
         size="sm"
-        className="h-6 gap-0.5 px-1.5 w-auto text-xs"
+        className="h-8 gap-1 px-2"
         onClick={onBack}
         aria-label="Back to all findings at this location"
       >
-        <ChevronLeft className="h-3 w-3" aria-hidden="true" />
-        Back
+        <ChevronLeft className="h-4 w-4" aria-hidden="true" />
+        Back to all findings
       </Button>
       <div
-        className="flex items-center justify-center gap-1.5 rounded-md border border-border bg-secondary/30 px-2 py-1"
+        className="flex items-center justify-between gap-2 rounded-lg border border-border bg-secondary/40 px-2 py-2"
         aria-label="Findings at this location"
       >
         <Button
           type="button"
           variant="ghost"
           size="sm"
-          className="h-6 gap-0.5 px-1.5 text-[11px]"
+          className="h-8 gap-1 px-2"
           disabled={currentIndex <= 0}
           onClick={onPrevious}
           aria-label="Previous finding at this location"
         >
-          <ChevronLeft className="h-3 w-3" aria-hidden="true" />
-          Prev
+          <ChevronLeft className="h-4 w-4" aria-hidden="true" />
+          Previous
         </Button>
-        <span className="text-[11px] font-medium text-muted-foreground whitespace-nowrap">
+        <span className="text-xs font-medium text-muted-foreground">
           {currentIndex + 1} / {total}
         </span>
         <Button
           type="button"
           variant="ghost"
           size="sm"
-          className="h-6 gap-0.5 px-1.5 text-[11px]"
+          className="h-8 gap-1 px-2"
           disabled={currentIndex >= total - 1}
           onClick={onNext}
           aria-label="Next finding at this location"
         >
           Next
-          <ChevronRight className="h-3 w-3" aria-hidden="true" />
+          <ChevronRight className="h-4 w-4" aria-hidden="true" />
         </Button>
       </div>
     </div>
