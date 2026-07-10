@@ -1,12 +1,48 @@
 import path from "node:path";
 import fs from "node:fs";
 import { pathToFileURL } from "node:url";
+import { Prisma } from "@prisma/client";
 import OpenAI, { AzureOpenAI } from "openai";
 import { prisma } from "../../config/prisma";
 import { config } from "../../config";
 import { getSignedStorageReadUrl } from "../supabaseStorage";
 import { captureFigmaPrototype, persistCapturedFigmaScreens } from "../figmaCapture.service";
 import { captureWebsiteReference, persistCapturedWebsiteScreens } from "../websiteCapture.service";
+
+async function createReportWithRetry(data: {
+  reviewId: string;
+  name: string;
+  template: string;
+  executiveSummary: string;
+  contentMd: string;
+  status: string;
+  createdBy: string;
+}) {
+  const maxAttempts = 3;
+  let lastError: unknown;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      return await prisma.report.create({ data });
+    } catch (error) {
+      lastError = error;
+      const isConnectionReset =
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === "P1017";
+
+      if (!isConnectionReset || attempt === maxAttempts) {
+        throw error;
+      }
+
+      // Force reconnect before retrying a transient DB connection reset.
+      await prisma.$disconnect().catch(() => undefined);
+      await new Promise((resolve) => setTimeout(resolve, 200 * attempt));
+      await prisma.$connect().catch(() => undefined);
+    }
+  }
+
+  throw lastError;
+}
 
 // ── Subcategory → Agent mapping (mirrors principles.ts SUBCATEGORY_TO_AGENT_MAP)
 // Duplicated here to avoid a build-time dependency on the agentic-ai package.
@@ -1144,6 +1180,32 @@ function extractWebsiteUrlFromAssets(assets: ReviewAssetRecord[]): string | null
   return null;
 }
 
+function extractWebsiteAuthFromAssets(assets: ReviewAssetRecord[]): { identifier: string; password: string } | null {
+  let identifier = "";
+  let password = "";
+
+  for (const asset of assets) {
+    const contentText = asset.contentText?.trim();
+    if (!contentText) continue;
+
+    const identifierMatch = contentText.match(/(?:^|\n)Website Login Identifier:\s*(.+)/i);
+    const passwordMatch = contentText.match(/(?:^|\n)Website Login Password:\s*(.+)/i);
+
+    if (!identifier && identifierMatch?.[1]) {
+      identifier = identifierMatch[1].trim();
+    }
+    if (!password && passwordMatch?.[1]) {
+      password = passwordMatch[1].trim();
+    }
+  }
+
+  if (!identifier || !password) {
+    return null;
+  }
+
+  return { identifier, password };
+}
+
 // ── Main pipeline ─────────────────────────────────────────────────────────────
 
 export async function runReviewPipeline(reviewId: string, options?: RunReviewPipelineOptions): Promise<void> {
@@ -1178,6 +1240,7 @@ export async function runReviewPipeline(reviewId: string, options?: RunReviewPip
     if (imageAssets.length === 0) {
       const figmaUrl = extractFigmaUrlFromAssets(review.assets);
       const websiteUrl = extractWebsiteUrlFromAssets(review.assets);
+      const websiteAuth = extractWebsiteAuthFromAssets(review.assets);
 
       if (figmaUrl) {
         logPipeline("info", reviewId, "stage_updating", { stage: "capturing_figma_prototype", figmaUrl });
@@ -1213,7 +1276,7 @@ export async function runReviewPipeline(reviewId: string, options?: RunReviewPip
         logPipeline("info", reviewId, "stage_updating", { stage: "capturing_website_reference", websiteUrl });
         await prisma.review.update({ where: { id: reviewId }, data: { stage: "capturing_website_reference" } });
 
-        const captureResult = await captureWebsiteReference({ url: websiteUrl });
+        const captureResult = await captureWebsiteReference({ url: websiteUrl, auth: websiteAuth ?? undefined });
         await persistCapturedWebsiteScreens(reviewId, captureResult.screens);
 
         logPipeline("info", reviewId, "website_capture_completed", {
@@ -1424,16 +1487,14 @@ export async function runReviewPipeline(reviewId: string, options?: RunReviewPip
       deduplicationNote: dedupeNote,
     });
 
-    await prisma.report.create({
-      data: {
-        reviewId,
-        name: `${review.name} — UX Review Report`,
-        template: "full",
-        executiveSummary: report.executiveSummary,
-        contentMd: report.contentMd,
-        status: "ai_draft",
-        createdBy: review.owner || "System",
-      },
+    await createReportWithRetry({
+      reviewId,
+      name: `${review.name} — UX Review Report`,
+      template: "full",
+      executiveSummary: report.executiveSummary,
+      contentMd: report.contentMd,
+      status: "ai_draft",
+      createdBy: review.owner || "System",
     });
 
     logPipeline("info", reviewId, "report_created", {
