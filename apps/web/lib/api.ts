@@ -155,6 +155,10 @@ export function startReview(id: string) {
   return request<any>(`/api/reviews/${id}/start`, { method: "POST" });
 }
 
+export function runAgainReview(id: string) {
+  return request<any>(`/api/reviews/${id}/run-again`, { method: "POST" });
+}
+
 export function exportReviewReport(id: string) {
   return request<{ id: string; name: string; contentMd: string; executiveSummary: string; status: string }>(
     `/api/reviews/${id}/export`,

@@ -21,7 +21,7 @@ import {
 import { PriorityBadge } from "@/components/ui/PriorityBadge";
 import { FindingStatusBadge } from "@/components/ui/FindingStatusBadge";
 import { cn } from "@/lib/utils";
-import { exportReviewReport, getReview, updateFinding, triageFinding, addComment, regenerateFinding } from "@/lib/api";
+import { exportReviewReport, getReview, getReviewProgress, runAgainReview, updateFinding, triageFinding, addComment, regenerateFinding } from "@/lib/api";
 import { downloadReport } from "@/lib/reportExport";
 import { useAppDispatch } from "@/store/hooks";
 import { addNotification } from "@/store/slices/notificationsSlice";
@@ -426,9 +426,12 @@ function WorkspaceContent() {
   const [clusterFindingIndex, setClusterFindingIndex] = useState(0);
   const [clusterViewMode, setClusterViewMode] = useState<"list" | "detail">("list");
   const [imageLoadFailed, setImageLoadFailed] = useState(false);
+  const [runAgainPending, setRunAgainPending] = useState(false);
   const unplacedDiagToastShownRef = useRef<string | null>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
   const imageRef = useRef<HTMLImageElement>(null);
+  const runAgainPollRef = useRef<number | null>(null);
+  const runAgainAttemptRef = useRef(0);
   const [imageLayout, setImageLayout] = useState<ImageLayout | null>(null);
 
   const fetchReview = useCallback(() => {
@@ -450,6 +453,14 @@ function WorkspaceContent() {
       fetchReview();
     }
   }, [reviewId, fetchReview]);
+
+  useEffect(() => {
+    return () => {
+      if (runAgainPollRef.current !== null) {
+        window.clearTimeout(runAgainPollRef.current);
+      }
+    };
+  }, []);
 
   const allFindings: Finding[] = useMemo(() => {
     if (reviewData?.findings) {
@@ -775,6 +786,77 @@ function WorkspaceContent() {
     }
   }, [dispatch, handleDownload, reviewData?.name, reviewId]);
 
+  const handleRunAgain = useCallback(async () => {
+    if (!reviewId || runAgainPending) return;
+
+    runAgainAttemptRef.current += 1;
+    const attemptId = runAgainAttemptRef.current;
+
+    if (runAgainPollRef.current !== null) {
+      window.clearTimeout(runAgainPollRef.current);
+      runAgainPollRef.current = null;
+    }
+
+    setRunAgainPending(true);
+
+    try {
+      await runAgainReview(reviewId);
+      toast.success("Run again started");
+
+      const stopPolling = () => {
+        if (runAgainPollRef.current !== null) {
+          window.clearTimeout(runAgainPollRef.current);
+          runAgainPollRef.current = null;
+        }
+      };
+
+      const pollOnce = async () => {
+        if (runAgainAttemptRef.current !== attemptId) return;
+
+        try {
+          const progress = await getReviewProgress(reviewId);
+          if (runAgainAttemptRef.current !== attemptId) return;
+
+          if (progress.status === "completed") {
+            stopPolling();
+            setRunAgainPending(false);
+            await fetchReview();
+            toast.success(`Run again complete — ${progress.findingCount ?? 0} findings now in workspace.`);
+            return;
+          }
+
+          if (progress.status === "failed") {
+            stopPolling();
+            setRunAgainPending(false);
+            toast.error("Run again failed");
+            return;
+          }
+
+          runAgainPollRef.current = window.setTimeout(() => {
+            void pollOnce();
+          }, 2000);
+        } catch {
+          if (runAgainAttemptRef.current !== attemptId) return;
+
+          runAgainPollRef.current = window.setTimeout(() => {
+            void pollOnce();
+          }, 3000);
+        }
+      };
+
+      void pollOnce();
+    } catch (error: any) {
+      if (runAgainAttemptRef.current === attemptId) {
+        if (runAgainPollRef.current !== null) {
+          window.clearTimeout(runAgainPollRef.current);
+          runAgainPollRef.current = null;
+        }
+      }
+      setRunAgainPending(false);
+      toast.error(error?.message ?? "Failed to start run again");
+    }
+  }, [fetchReview, reviewId, runAgainPending]);
+
   const handleFindingAction = useCallback(
     (findingId: string, actionStatus: TriageStatus) => {
       updateFinding(findingId, { status: actionStatus })
@@ -906,8 +988,13 @@ function WorkspaceContent() {
                 : "Accept at least one finding to enable export."}
             </p>
           )}
-          <Button size="sm" className="min-h-11 flex-1 bg-accent text-accent-foreground hover:bg-accent/90 sm:flex-none">
-            <Sparkles className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />Run again
+          <Button
+            size="sm"
+            className="min-h-11 flex-1 bg-accent text-accent-foreground hover:bg-accent/90 sm:flex-none"
+            onClick={() => { void handleRunAgain(); }}
+            disabled={runAgainPending}
+          >
+            {runAgainPending ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : <Sparkles className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />}Run again
           </Button>
         </div>
       </div>
