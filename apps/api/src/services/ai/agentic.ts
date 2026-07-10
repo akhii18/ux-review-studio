@@ -3,6 +3,7 @@ import fs from "node:fs";
 import { pathToFileURL } from "node:url";
 import { prisma } from "../../config/prisma";
 import { getSignedStorageReadUrl } from "../supabaseStorage";
+import { captureFigmaPrototype, persistCapturedFigmaScreens } from "../figmaCapture.service";
 
 // ── Subcategory → Agent mapping (mirrors principles.ts SUBCATEGORY_TO_AGENT_MAP)
 // Duplicated here to avoid a build-time dependency on the agentic-ai package.
@@ -802,6 +803,20 @@ function buildReviewContext(review: NonNullable<ReviewRecord>): string {
   ].join("\n");
 }
 
+function extractFigmaUrlFromAssets(assets: ReviewAssetRecord[]): string | null {
+  for (const asset of assets) {
+    const contentText = asset.contentText?.trim();
+    if (!contentText) continue;
+
+    const match = contentText.match(/(?:^|\n)Figma URL:\s*(https?:\/\/\S+)/i);
+    if (match?.[1]) {
+      return match[1].trim();
+    }
+  }
+
+  return null;
+}
+
 // ── Main pipeline ─────────────────────────────────────────────────────────────
 
 export async function runReviewPipeline(reviewId: string): Promise<void> {
@@ -810,7 +825,7 @@ export async function runReviewPipeline(reviewId: string): Promise<void> {
     nodeEnv: process.env.NODE_ENV ?? "unknown",
   });
 
-  const review = await prisma.review.findUnique({
+  let review = await prisma.review.findUnique({
     where: { id: reviewId },
     include: { assets: true },
   });
@@ -821,19 +836,55 @@ export async function runReviewPipeline(reviewId: string): Promise<void> {
   }
 
   try {
-    logPipeline("info", reviewId, "stage_updating", { stage: "reading_inputs" });
-    await prisma.review.update({ where: { id: reviewId }, data: { stage: "reading_inputs" } });
-
-    // Collect image assets in order — the index maps to "screen{N}" in elementRefs
-    const sortedAssets = [...review.assets].sort((a, b) => {
+    let sortedAssets = [...review.assets].sort((a, b) => {
       const createdDiff = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
       if (createdDiff !== 0) return createdDiff;
       return a.id.localeCompare(b.id);
     });
 
-    const imageAssets = sortedAssets.filter(
+    let imageAssets = sortedAssets.filter(
       (asset: ReviewAssetRecord) => asset.mimeType.startsWith("image/")
     );
+
+    if (imageAssets.length === 0) {
+      const figmaUrl = extractFigmaUrlFromAssets(review.assets);
+
+      if (figmaUrl) {
+        logPipeline("info", reviewId, "stage_updating", { stage: "capturing_figma_prototype", figmaUrl });
+        await prisma.review.update({ where: { id: reviewId }, data: { stage: "capturing_figma_prototype" } });
+
+        const captureResult = await captureFigmaPrototype({ url: figmaUrl });
+        await persistCapturedFigmaScreens(reviewId, captureResult.screens);
+
+        logPipeline("info", reviewId, "figma_capture_completed", {
+          capturedScreens: captureResult.screens.length,
+          visitedUrls: captureResult.visitedUrls,
+          titles: captureResult.titles,
+        });
+
+        review = await prisma.review.findUnique({
+          where: { id: reviewId },
+          include: { assets: true },
+        });
+
+        if (!review) {
+          throw new Error(`Review ${reviewId} not found after Figma capture`);
+        }
+
+        sortedAssets = [...review.assets].sort((a, b) => {
+          const createdDiff = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+          if (createdDiff !== 0) return createdDiff;
+          return a.id.localeCompare(b.id);
+        });
+        imageAssets = sortedAssets.filter(
+          (asset: ReviewAssetRecord) => asset.mimeType.startsWith("image/")
+        );
+      }
+    }
+
+    logPipeline("info", reviewId, "stage_updating", { stage: "reading_inputs" });
+    await prisma.review.update({ where: { id: reviewId }, data: { stage: "reading_inputs" } });
+
     const imageAssetNames = imageAssets.map((asset: ReviewAssetRecord) => asset.name);
     const documentPages = imageAssetNames.map((assetName, index) => ({
       pageNumber: index + 1,

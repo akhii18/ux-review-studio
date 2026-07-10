@@ -1007,9 +1007,9 @@ function WorkspaceContent() {
                                   }
                                 }}
                                 className={cn(
-                                  "absolute z-10 flex h-7 w-7 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full text-[10px] font-bold text-white shadow-md ring-2 ring-card transition hover:scale-110",
-                                  isCluster ? "bg-[rgb(174, 55, 166)]" : pinTone[severity],
-                                  isCluster && "h-8 w-8 bg-[rgb(174, 55, 166)] ring-4 ring-[rgb(174, 55, 166)] before:absolute before:inset-[-5px] before:-z-10 before:rounded-full before:border-2 before:border-[rgb(174, 55, 166)] before:bg-transparent before:opacity-100 after:absolute after:inset-[-9px] after:-z-20 after:rounded-full after:border after:border-[rgb(174, 55, 166)] after:opacity-35"
+                                  "absolute z-10 flex h-7 w-7 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full text-[10px] font-bold text-white shadow-md transition hover:scale-110",
+                                  isCluster ? "bg-[rgb(107, 24, 101)]" : pinTone[severity],
+                                  isCluster && "h-8 w-8 bg-[rgb(107, 24, 101)] ring-4 ring-[rgb(107, 24, 101)] before:absolute before:inset-[-5px] before:-z-10 before:rounded-full before:border-2 before:border-[rgb(107, 24, 101)] before:bg-transparent before:opacity-100 after:absolute after:inset-[-9px] after:-z-20 after:rounded-full after:border after:border-[rgb(107, 24, 101)] after:opacity-35"
                                 )}
                                 style={style}
                                 aria-label={isCluster
