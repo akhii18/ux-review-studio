@@ -14,7 +14,7 @@ import { useGetSettingsQuery } from "@/store/api/settingsApi";
 import { useDispatch } from "react-redux";
 import { markSaved } from "@/store/slices/settingsSlice";
 import { toast } from "@/lib/toast";
-import { me as apiMe } from "@/lib/api";
+import { me as apiMe, updateMe as apiUpdateMe } from "@/lib/api";
 
 const integrations = [
   { name: "Figma", desc: "Pull frames and prototypes for review", connected: true },
@@ -33,8 +33,10 @@ export function SettingsForm() {
   const dispatch = useDispatch();
   const { data: settings, isLoading } = useGetSettingsQuery();
   const [profileName, setProfileName] = useState("");
+  const [savedProfileName, setSavedProfileName] = useState("");
   const [profileEmail, setProfileEmail] = useState("");
   const [profileLoading, setProfileLoading] = useState(true);
+  const [profileSaving, setProfileSaving] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -43,6 +45,7 @@ export function SettingsForm() {
       .then((user) => {
         if (!active) return;
         setProfileName(user.name ?? "");
+        setSavedProfileName(user.name ?? "");
         setProfileEmail(user.email ?? "");
       })
       .catch(() => {
@@ -66,6 +69,36 @@ export function SettingsForm() {
     .slice(0, 2)
     .map((part) => part.charAt(0).toUpperCase())
     .join("") || "US";
+
+  const normalizedProfileName = profileName.trim().replace(/\s+/g, " ");
+  const canSaveProfile =
+    normalizedProfileName.length > 0 &&
+    normalizedProfileName !== savedProfileName &&
+    !profileSaving;
+
+  const handleSaveProfile = async () => {
+    if (!canSaveProfile) return;
+
+    try {
+      setProfileSaving(true);
+      const result = await apiUpdateMe({ name: normalizedProfileName });
+      localStorage.setItem("token", result.token);
+      localStorage.setItem(
+        "current_user",
+        JSON.stringify({ name: result.user.name || "User", email: result.user.email })
+      );
+      document.cookie = `token=${result.token}; Path=/; Max-Age=${result.expiresInSeconds}; SameSite=Lax`;
+      setProfileName(result.user.name ?? "");
+      setSavedProfileName(result.user.name ?? "");
+      setProfileEmail(result.user.email ?? "");
+      window.dispatchEvent(new Event("uxm:user-updated"));
+      toast.success("Profile updated");
+    } catch (err: any) {
+      toast.error(err?.message ?? "Failed to update profile");
+    } finally {
+      setProfileSaving(false);
+    }
+  };
 
   if (isLoading) {
     return (
@@ -113,16 +146,29 @@ export function SettingsForm() {
               </div>
             ) : (
               <>
-                <Field label="Full name" readOnly>
-                  <p className="text-sm font-medium text-foreground px-0.5 -mt-2">
-                    {profileName || "User"}
-                  </p>
+                <Field label="Full name">
+                  <Input
+                    value={profileName}
+                    onChange={(event) => setProfileName(event.target.value.replace(/^\s+/, ""))}
+                    autoComplete="name"
+                    disabled={profileSaving}
+                  />
                 </Field>
                 <Field label="Email" readOnly>
                   <p className="text-sm font-medium text-foreground px-0.5 -mt-2">
                     {profileEmail || "—"}
                   </p>
                 </Field>
+                <div className="md:col-span-2 flex justify-end border-t border-border pt-4">
+                  <Button
+                    type="button"
+                    onClick={handleSaveProfile}
+                    disabled={!canSaveProfile}
+                    className="min-w-24"
+                  >
+                    {profileSaving ? "Saving..." : "Save"}
+                  </Button>
+                </div>
               </>
             )}
             <Field label="Role">
