@@ -2,10 +2,40 @@ import { marked } from "marked";
 import DOMPurify from "dompurify";
 import { jsPDF } from "jspdf";
 
+type ExportVisualAsset = {
+  id?: string;
+  name?: string | null;
+  mimeType?: string | null;
+  blobUrl?: string | null;
+  base64Data?: string | null;
+};
+
+type ExportVisualFinding = {
+  id: string;
+  title: string;
+  severity?: string | null;
+  area?: string | null;
+  screen?: string | null;
+  observation?: string | null;
+  description?: string | null;
+  why?: string | null;
+  recommendation?: string | null;
+  businessImpact?: string | null;
+  a11yImpact?: string | null;
+  status?: string | null;
+  bboxRefs?: unknown;
+};
+
+type ExportVisualContext = {
+  assets?: ExportVisualAsset[];
+  findings?: ExportVisualFinding[];
+};
+
 type ExportableReport = {
   name?: string | null;
   contentMd?: string | null;
   executiveSummary?: string | null;
+  visualContext?: ExportVisualContext | null;
 };
 
 type PdfTextOptions = {
@@ -16,11 +46,50 @@ type PdfTextOptions = {
   gapAfter?: number;
 };
 
+type BoundingBoxRef = {
+  screenIndex: number;
+  bbox: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  };
+};
+
+type GroupedScreenshotFinding = {
+  finding: ExportVisualFinding;
+  referenceNumber: number;
+  ref: BoundingBoxRef | null;
+};
+
+type GroupedScreenshotSection = {
+  assetLabel: string;
+  imageDataUrl?: string;
+  findings: GroupedScreenshotFinding[];
+};
+
+type InlineImageBlock = {
+  assetLabel: string;
+  imageDataUrl?: string;
+};
+
 function markdownToSafeHtml(markdown: string) {
   const parsedHtml = marked.parse(markdown || "", { gfm: true, breaks: true });
   return DOMPurify.sanitize(typeof parsedHtml === "string" ? parsedHtml : String(parsedHtml));
 }
 
+function buildInlineImageBlocks(report: ExportableReport): InlineImageBlock[] {
+  const context = report.visualContext;
+  const imageAssets = (context?.assets ?? []).filter((asset) => (asset.mimeType ?? "").toLowerCase().startsWith("image/"));
+  if (imageAssets.length === 0) return [];
+
+  return imageAssets.map((asset, index) => ({
+    assetLabel: stripExtension(String(asset.name ?? `Asset ${index + 1}`)),
+    imageDataUrl: asset.base64Data
+      ? `data:${asset.mimeType ?? "image/png"};base64,${asset.base64Data}`
+      : asset.blobUrl ?? undefined,
+  }));
+}
 function sanitizeFileName(value: string) {
   return value.replace(/[\\/:*?"<>|]/g, "-").replace(/\s+/g, " ").trim() || "report";
 }
@@ -49,13 +118,447 @@ function normalizeText(value: string | null | undefined) {
   return (value ?? "").replace(/\s+/g, " ").trim();
 }
 
+function stripExtension(name: string): string {
+  return name.replace(/\.[^.]+$/, "");
+}
+
+function normalizeScreenLabel(value: string): string {
+  return stripExtension(value).toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+function findingMatchesScreen(findingScreen?: string | null, screenName?: string): boolean {
+  if (!findingScreen || !screenName) return false;
+  const fs = normalizeScreenLabel(findingScreen);
+  const sn = normalizeScreenLabel(screenName);
+  if (!fs || fs === "unknown") return false;
+  if (fs === "multiple") return true;
+  return fs === sn || fs.includes(sn) || sn.includes(fs);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function clamp01(value: number): number {
+  return Math.min(1, Math.max(0, value));
+}
+
+function normalizeBBoxRefsInput(input: unknown): unknown[] {
+  if (Array.isArray(input)) return input;
+
+  if (typeof input === "string") {
+    try {
+      return normalizeBBoxRefsInput(JSON.parse(input));
+    } catch {
+      return [];
+    }
+  }
+
+  if (isRecord(input)) {
+    if (Array.isArray(input.bboxRefs)) return input.bboxRefs;
+    if (Array.isArray(input.refs)) return input.refs;
+    if (Array.isArray(input.items)) return input.items;
+  }
+
+  return [];
+}
+
+function normalizeHeadingTitle(value: string | null | undefined) {
+  return normalizeText(value)
+    .replace(/^\d+\.\s*/, "")
+    .replace(/^#+\s*/, "")
+    .toLowerCase();
+}
+
+function normalizeBBoxRef(ref: unknown): BoundingBoxRef | null {
+  if (!isRecord(ref)) return null;
+
+  const bboxValue = isRecord(ref.bbox)
+    ? ref.bbox
+    : isRecord(ref.box)
+      ? ref.box
+      : isRecord(ref.bboxRect)
+        ? ref.bboxRect
+        : isRecord(ref.coordinates)
+          ? ref.coordinates
+          : null;
+
+  const screenIndexValue = ref.screenIndex ?? ref.screen ?? ref.pageIndex ?? ref.page ?? ref.index;
+  const xValue = bboxValue?.x ?? bboxValue?.left ?? bboxValue?.x1;
+  const yValue = bboxValue?.y ?? bboxValue?.top ?? bboxValue?.y1;
+  const widthValue = bboxValue?.width ?? (typeof bboxValue?.x1 === "number" && typeof bboxValue?.x2 === "number" ? bboxValue.x2 - bboxValue.x1 : undefined);
+  const heightValue = bboxValue?.height ?? (typeof bboxValue?.y1 === "number" && typeof bboxValue?.y2 === "number" ? bboxValue.y2 - bboxValue.y1 : undefined);
+
+  const screenIndex = Number(screenIndexValue);
+  const x = Number(xValue);
+  const y = Number(yValue);
+  const width = Number(widthValue);
+  const height = Number(heightValue);
+
+  if (![screenIndex, x, y, width, height].every((entry) => Number.isFinite(entry))) return null;
+
+  return {
+    screenIndex,
+    bbox: {
+      x: clamp01(x),
+      y: clamp01(y),
+      width: clamp01(width),
+      height: clamp01(height),
+    },
+  };
+}
+
+function getValidBBoxRefs(finding: ExportVisualFinding): BoundingBoxRef[] {
+  return normalizeBBoxRefsInput(finding.bboxRefs)
+    .map(normalizeBBoxRef)
+    .filter((ref): ref is BoundingBoxRef => Boolean(ref));
+}
+
+function getBboxRefForScreen(finding: ExportVisualFinding, screenIndex?: number): BoundingBoxRef | null {
+  if (typeof screenIndex !== "number") return null;
+
+  const refs = getValidBBoxRefs(finding);
+  const exact = refs.find((ref) => ref.screenIndex === screenIndex);
+  if (exact) return exact;
+
+  if (refs.length === 0) return null;
+
+  const minIndex = Math.min(...refs.map((ref) => ref.screenIndex));
+  const maxIndex = Math.max(...refs.map((ref) => ref.screenIndex));
+
+  if (minIndex === 1) {
+    const oneBased = refs.find((ref) => ref.screenIndex === screenIndex + 1);
+    if (oneBased) return oneBased;
+  }
+
+  if (screenIndex === 0 && minIndex > 0 && maxIndex > 0) {
+    return refs.find((ref) => ref.screenIndex === minIndex) ?? null;
+  }
+
+  return null;
+}
+
+function findingMatchesScreenContext(finding: ExportVisualFinding, screenName?: string, screenIndex?: number): boolean {
+  const refs = getValidBBoxRefs(finding);
+  if (refs.length > 0 && typeof screenIndex === "number") {
+    return Boolean(getBboxRefForScreen(finding, screenIndex)) || findingMatchesScreen(finding.screen, screenName);
+  }
+  return findingMatchesScreen(finding.screen, screenName);
+}
+
+function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result ?? ""));
+    reader.onerror = () => reject(new Error("Failed to read blob as data URL"));
+    reader.readAsDataURL(blob);
+  });
+}
+
+async function resolveAssetDataUrl(asset: ExportVisualAsset): Promise<string | null> {
+  const mimeType = asset.mimeType ?? "image/png";
+
+  if (asset.base64Data) {
+    return `data:${mimeType};base64,${asset.base64Data}`;
+  }
+
+  if (typeof asset.blobUrl === "string" && asset.blobUrl.startsWith("data:image/")) {
+    return asset.blobUrl;
+  }
+
+  if (!asset.blobUrl) return null;
+
+  try {
+    const response = await fetch(asset.blobUrl);
+    if (!response.ok) return null;
+    const blob = await response.blob();
+    return await blobToDataUrl(blob);
+  } catch {
+    return null;
+  }
+}
+
+function loadImage(dataUrl: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("Failed to load image"));
+    image.src = dataUrl;
+  });
+}
+
+async function drawAnnotatedScreenshot(dataUrl: string, findings: GroupedScreenshotFinding[]): Promise<string> {
+  const drawableFindings = findings.filter((item) => Boolean(item.ref));
+  if (drawableFindings.length === 0) return dataUrl;
+
+  try {
+    const image = await loadImage(dataUrl);
+    const canvas = document.createElement("canvas");
+    canvas.width = image.naturalWidth;
+    canvas.height = image.naturalHeight;
+
+    const context = canvas.getContext("2d");
+    if (!context) return dataUrl;
+
+    context.drawImage(image, 0, 0, canvas.width, canvas.height);
+
+    const markerRadius = Math.max(14, Math.round(Math.min(canvas.width, canvas.height) * 0.018));
+    const fontSize = Math.max(11, Math.round(markerRadius * 0.9));
+    const severityColor: Record<string, string> = {
+      P0: "#2f2f2f",
+      P1: "#f59e0b",
+      P2: "#0a0838",
+    };
+
+    drawableFindings.forEach((item) => {
+      const ref = item.ref;
+      if (!ref) return;
+
+      const centerX = (ref.bbox.x + ref.bbox.width / 2) * canvas.width;
+      const centerY = (ref.bbox.y + ref.bbox.height / 2) * canvas.height;
+      const severityKey = String(item.finding.severity ?? "P2").toUpperCase();
+
+      context.beginPath();
+      context.fillStyle = severityColor[severityKey] ?? severityColor.P2;
+      context.strokeStyle = "#ffffff";
+      context.lineWidth = Math.max(2, Math.round(markerRadius * 0.16));
+      context.arc(centerX, centerY, markerRadius, 0, Math.PI * 2);
+      context.fill();
+      context.stroke();
+
+      context.fillStyle = "#ffffff";
+      context.font = `700 ${fontSize}px Arial, sans-serif`;
+      context.textAlign = "center";
+      context.textBaseline = "middle";
+      context.fillText(String(item.referenceNumber), centerX, centerY);
+    });
+
+    return canvas.toDataURL("image/png");
+  } catch {
+    return dataUrl;
+  }
+}
+
+async function buildGroupedScreenshotSections(report: ExportableReport): Promise<GroupedScreenshotSection[]> {
+  const context = report.visualContext;
+  const findings = (context?.findings ?? []).filter(
+    (finding) => finding.status === "ACCEPTED" || finding.status === "EDITED"
+  );
+  const imageAssets = (context?.assets ?? []).filter((asset) => (asset.mimeType ?? "").toLowerCase().startsWith("image/"));
+
+  if (findings.length === 0 || imageAssets.length === 0) return [];
+
+  const sections: GroupedScreenshotSection[] = [];
+  const matchedFindingIds = new Set<string>();
+
+  for (let index = 0; index < imageAssets.length; index += 1) {
+    const asset = imageAssets[index];
+    const screenName = stripExtension(String(asset.name ?? `Asset ${index + 1}`));
+
+    const matchingFindings = findings
+      .filter((finding) => findingMatchesScreenContext(finding, screenName, index))
+      .map((finding, findingIndex) => ({
+        finding,
+        referenceNumber: findingIndex + 1,
+        ref: getBboxRefForScreen(finding, index),
+      }));
+
+    if (matchingFindings.length === 0) continue;
+
+    const baseImageDataUrl = await resolveAssetDataUrl(asset);
+    if (!baseImageDataUrl) continue;
+
+    const imageDataUrl = await drawAnnotatedScreenshot(baseImageDataUrl, matchingFindings);
+
+    matchingFindings.forEach((item) => matchedFindingIds.add(item.finding.id));
+
+    sections.push({
+      assetLabel: screenName,
+      imageDataUrl,
+      findings: matchingFindings,
+    });
+  }
+
+  const unmatchedFindings = findings.filter((finding) => !matchedFindingIds.has(finding.id));
+  if (unmatchedFindings.length > 0) {
+    sections.push({
+      assetLabel: "Additional Findings",
+      findings: unmatchedFindings.map((finding, index) => ({
+        finding,
+        referenceNumber: index + 1,
+        ref: null,
+      })),
+    });
+  }
+
+  return sections;
+}
+
+function renderFindingSummaryHtml(item: GroupedScreenshotFinding): string {
+  const finding = item.finding;
+  const lines = [
+    `<div class="screenshot-finding-title"><strong>${escapeHtml(finding.title)}</strong></div>`,
+    finding.severity ? `<div class=\"screenshot-finding-meta\">Severity: ${escapeHtml(String(finding.severity))}</div>` : "",
+    finding.area ? `<div class=\"screenshot-finding-meta\">Area: ${escapeHtml(String(finding.area))}</div>` : "",
+    finding.observation ? `<div>${escapeHtml(String(finding.observation))}</div>` : "",
+    finding.description ? `<div>${escapeHtml(String(finding.description))}</div>` : "",
+    finding.why ? `<div><em>${escapeHtml(String(finding.why))}</em></div>` : "",
+    finding.recommendation ? `<div>Recommendation: ${escapeHtml(String(finding.recommendation))}</div>` : "",
+  ].filter(Boolean);
+
+  return `<li>${lines.join("")}</li>`;
+}
+
+function buildVisualSectionHtml(sections: GroupedScreenshotSection[]): string {
+  if (sections.length === 0) return "";
+
+  return [
+    "<h2>Assets and Pins</h2>",
+    ...sections.map((section) => {
+      return [
+        '<section class="screenshot-group">',
+        `<h3>${escapeHtml(section.assetLabel)}</h3>`,
+        section.imageDataUrl
+          ? `<img src="${section.imageDataUrl}" alt="Annotated asset for ${escapeHtml(section.assetLabel)}" class="screenshot-image" />`
+          : "",
+        '<ol class="screenshot-findings">',
+        ...section.findings.map((item) => renderFindingSummaryHtml(item)),
+        "</ol>",
+        "</section>",
+      ].join("\n");
+    }),
+  ].join("\n");
+}
+
+function buildVisualSectionWordHtml(sections: GroupedScreenshotSection[]): string {
+  if (sections.length === 0) return "";
+
+  return [
+    "<h2 style=\"margin-top:22px;\">Assets and Pins</h2>",
+    ...sections.map((section) => {
+      return [
+        '<div style="margin: 12px 0 18px; page-break-inside: avoid;">',
+        `<h3 style="margin: 6px 0 8px;">${escapeHtml(section.assetLabel)}</h3>`,
+        section.imageDataUrl
+          ? `<img src="${section.imageDataUrl}" alt="Annotated asset for ${escapeHtml(section.assetLabel)}" style="display:block; width:100%; max-width:640px; height:auto; border:1px solid #d1d5db; border-radius:6px; margin:0 0 10px 0;" />`
+          : "",
+        '<ol style="margin: 0; padding-left: 20px;">',
+        ...section.findings.map((item) => renderFindingSummaryHtml(item)),
+        "</ol>",
+        "</div>",
+      ].join("\n");
+    }),
+  ].join("\n");
+}
+
+function getJsPdfImageFormat(dataUrl: string): "PNG" | "JPEG" {
+  const normalized = dataUrl.toLowerCase();
+  if (normalized.startsWith("data:image/jpeg") || normalized.startsWith("data:image/jpg")) return "JPEG";
+  return "PNG";
+}
+
+async function getImageDimensions(dataUrl: string): Promise<{ width: number; height: number } | null> {
+  try {
+    const image = await loadImage(dataUrl);
+    return { width: image.naturalWidth, height: image.naturalHeight };
+  } catch {
+    return null;
+  }
+}
+
+function stripIncludedFindingsSection(safeHtml: string): string {
+  const doc = new DOMParser().parseFromString(safeHtml || "<p>No content</p>", "text/html");
+  const headings = Array.from(doc.body.querySelectorAll("h2"));
+  const includedHeading = headings.find((heading) => normalizeText(heading.textContent).toLowerCase() === "included findings");
+  if (!includedHeading) return safeHtml;
+
+  let cursor: Element | null = includedHeading;
+  while (cursor) {
+    const next: Element | null = cursor.nextElementSibling;
+    cursor.remove();
+    if (next && next.tagName.toLowerCase() === "h2") break;
+    cursor = next;
+  }
+
+  return doc.body.innerHTML;
+}
+
+function buildStandaloneHtmlDocument(params: {
+  reportName: string;
+  executiveSummary?: string | null;
+  reportHtml: string;
+}): string {
+  const { reportName, executiveSummary, reportHtml } = params;
+  return `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>${escapeHtml(reportName)}</title>
+  <style>
+    body { font-family: Inter, Segoe UI, Arial, sans-serif; margin: 20px auto; max-width: 980px; line-height: 1.6; color: #111827; padding: 0 16px; }
+    h1, h2, h3, h4 { color: #111827; margin-top: 1.1em; margin-bottom: 0.5em; }
+    p { margin: 0.6em 0; }
+    table { border-collapse: collapse; width: 100%; margin: 10px 0; }
+    th, td { border: 1px solid #d1d5db; padding: 6px; text-align: left; vertical-align: top; }
+    code { background: #f3f4f6; padding: 1px 4px; border-radius: 4px; }
+    pre { background: #f3f4f6; padding: 10px; border-radius: 6px; overflow: auto; }
+    .inline-image-block { margin: 18px 0 10px; page-break-inside: avoid; }
+    .inline-image-label { font-size: 0.9em; font-weight: 600; color: #374151; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.02em; }
+    .inline-image { display: block; width: 100%; max-width: 940px; height: auto; border: 1px solid #d1d5db; border-radius: 8px; margin: 0 0 8px; }
+  </style>
+</head>
+<body>
+  <h1>${escapeHtml(reportName)}</h1>
+  ${executiveSummary ? `<p><strong>Executive Summary:</strong> ${escapeHtml(String(executiveSummary))}</p>` : ""}
+  ${reportHtml}
+</body>
+</html>`;
+}
+
+async function buildReportBodyHtml(report: ExportableReport): Promise<string> {
+  const baseHtml = markdownToSafeHtml(String(report.contentMd ?? ""));
+  const doc = new DOMParser().parseFromString(baseHtml || "<p>No content</p>", "text/html");
+  const groupedSections = await buildGroupedScreenshotSections(report);
+
+  for (const section of groupedSections) {
+    if (!section.imageDataUrl || section.findings.length === 0) continue;
+
+    const firstHeadingTitle = normalizeHeadingTitle(section.findings[0].finding.title);
+    const targetHeading = Array.from(doc.body.querySelectorAll("h3")).find((heading) => {
+      const headingTitle = normalizeHeadingTitle(heading.textContent);
+      return headingTitle === firstHeadingTitle;
+    });
+
+    if (!targetHeading) continue;
+
+    const wrapper = doc.createElement("div");
+    wrapper.className = "inline-image-block";
+
+    const label = doc.createElement("div");
+    label.className = "inline-image-label";
+    label.textContent = section.assetLabel;
+
+    const image = doc.createElement("img");
+    image.className = "inline-image";
+    image.alt = `Reference image for ${section.assetLabel}`;
+    image.src = section.imageDataUrl;
+
+    wrapper.appendChild(label);
+    wrapper.appendChild(image);
+    targetHeading.parentElement?.insertBefore(wrapper, targetHeading);
+  }
+
+  return doc.body.innerHTML;
+}
+
 function getListItemText(element: Element) {
   const clone = element.cloneNode(true) as HTMLElement;
   clone.querySelectorAll("ul, ol").forEach((list) => list.remove());
   return normalizeText(clone.textContent);
 }
 
-function downloadPdfReport(report: ExportableReport) {
+async function downloadPdfReport(report: ExportableReport) {
   const pdf = new jsPDF({ unit: "pt", format: "a4" });
   const margin = 44;
   const pageWidth = pdf.internal.pageSize.getWidth();
@@ -122,37 +625,49 @@ function downloadPdfReport(report: ExportableReport) {
     y += 12;
   };
 
-  const renderChildren = (parent: Element, indent = 0) => {
-    Array.from(parent.children).forEach((child) => renderElement(child, indent));
+  const renderImage = async (src: string, indent: number) => {
+    const image = await loadImage(src);
+    const maxWidth = contentWidth - indent;
+    const drawWidth = Math.min(maxWidth, image.naturalWidth || maxWidth);
+    const drawHeight = drawWidth * (image.naturalHeight / Math.max(image.naturalWidth, Number.EPSILON));
+    ensureSpace(drawHeight + 8);
+    pdf.addImage(src, getJsPdfImageFormat(src), margin + indent, y, drawWidth, drawHeight, undefined, "FAST");
+    y += drawHeight + 8;
   };
 
-  const renderList = (list: Element, indent: number, ordered: boolean) => {
-    Array.from(list.children)
-      .filter((child) => child.tagName.toLowerCase() === "li")
-      .forEach((item, index) => {
-        writeBullet(ordered ? `${index + 1}.` : "•", getListItemText(item), indent);
-        item.querySelectorAll(":scope > ul, :scope > ol").forEach((nested) => {
-          renderList(nested, indent + 18, nested.tagName.toLowerCase() === "ol");
-        });
-      });
+  const renderChildren = async (parent: Element, indent = 0) => {
+    for (const child of Array.from(parent.children)) {
+      await renderElement(child, indent);
+    }
+  };
+
+  const renderList = async (list: Element, indent: number, ordered: boolean) => {
+    const items = Array.from(list.children).filter((child) => child.tagName.toLowerCase() === "li");
+    for (let index = 0; index < items.length; index += 1) {
+      const item = items[index];
+      writeBullet(ordered ? `${index + 1}.` : "•", getListItemText(item), indent);
+      for (const nested of Array.from(item.querySelectorAll(":scope > ul, :scope > ol"))) {
+        await renderList(nested, indent + 18, nested.tagName.toLowerCase() === "ol");
+      }
+    }
     addGap(4);
   };
 
-  const renderTable = (table: Element, indent: number) => {
-    Array.from(table.querySelectorAll("tr")).forEach((row) => {
+  const renderTable = async (table: Element, indent: number) => {
+    for (const row of Array.from(table.querySelectorAll("tr"))) {
       const cells = Array.from(row.querySelectorAll("th, td")).map((cell) => normalizeText(cell.textContent));
-      if (cells.length === 0) return;
+      if (cells.length === 0) continue;
       const hasHeader = row.querySelector("th") != null;
       writeText(cells.join(" | "), { fontSize: 9, fontStyle: hasHeader ? "bold" : "normal", indent, lineHeight: 13, gapAfter: 1 });
-    });
+    }
     addGap(6);
   };
 
-  const renderElement = (element: Element, indent = 0) => {
+  const renderElement = async (element: Element, indent = 0) => {
     const tag = element.tagName.toLowerCase();
     const text = normalizeText(element.textContent);
 
-    if (!text && tag !== "hr") return;
+    if (!text && tag !== "hr" && tag !== "img") return;
 
     if (tag === "h1") {
       addGap(y === margin ? 0 : 8);
@@ -174,8 +689,13 @@ function downloadPdfReport(report: ExportableReport) {
       writeText(text, { fontSize: 11, fontStyle: "bold", lineHeight: 16, gapAfter: 3 });
       return;
     }
+    if (tag === "img") {
+      const src = element.getAttribute("src") ?? "";
+      if (src) await renderImage(src, indent);
+      return;
+    }
     if (tag === "ul" || tag === "ol") {
-      renderList(element, indent, tag === "ol");
+      await renderList(element, indent, tag === "ol");
       return;
     }
     if (tag === "blockquote") {
@@ -187,7 +707,7 @@ function downloadPdfReport(report: ExportableReport) {
       return;
     }
     if (tag === "table") {
-      renderTable(element, indent);
+      await renderTable(element, indent);
       return;
     }
     if (tag === "hr") {
@@ -200,53 +720,34 @@ function downloadPdfReport(report: ExportableReport) {
     }
 
     if (element.children.length > 0) {
-      renderChildren(element, indent);
+      await renderChildren(element, indent);
     } else {
       writeText(text, { indent, lineHeight: 15, gapAfter: 5 });
     }
   };
 
-  const safeHtml = markdownToSafeHtml(String(report.contentMd ?? ""));
-  const doc = new DOMParser().parseFromString(safeHtml || "<p>No content</p>", "text/html");
+  const bodyHtml = await buildReportBodyHtml(report);
+  const doc = new DOMParser().parseFromString(bodyHtml || "<p>No content</p>", "text/html");
 
   writeText(String(report.name ?? "UX Report"), { fontSize: 16, fontStyle: "bold", lineHeight: 21, gapAfter: 12 });
   if (report.executiveSummary) {
     writeText(`Executive Summary: ${report.executiveSummary}`, { fontStyle: "bold", lineHeight: 15, gapAfter: 10 });
   }
-  renderChildren(doc.body);
+  await renderChildren(doc.body);
 
   const safeName = sanitizeFileName(String(report.name ?? "report"));
   triggerBlobDownload(pdf.output("blob"), `${safeName}.pdf`);
 }
 
-function downloadWordReport(report: ExportableReport) {
-  const reportHtml = markdownToSafeHtml(String(report.contentMd ?? ""));
+async function downloadWordReport(report: ExportableReport) {
   const reportName = String(report.name ?? "UX Report");
+  const reportHtml = await buildReportBodyHtml(report);
 
-  const wordHtml = `
-    <html xmlns:o="urn:schemas-microsoft-com:office:office"
-          xmlns:w="urn:schemas-microsoft-com:office:word"
-          xmlns="http://www.w3.org/TR/REC-html40">
-    <head>
-      <meta charset="utf-8" />
-      <title>${escapeHtml(reportName)}</title>
-      <style>
-        body { font-family: Calibri, Arial, sans-serif; font-size: 11pt; line-height: 1.5; color: #1f2937; }
-        h1, h2, h3, h4 { color: #111827; margin-top: 18px; margin-bottom: 8px; }
-        p { margin: 8px 0; }
-        table { border-collapse: collapse; width: 100%; margin: 10px 0; }
-        th, td { border: 1px solid #d1d5db; padding: 6px; text-align: left; vertical-align: top; }
-        code { background: #f3f4f6; padding: 1px 4px; border-radius: 4px; }
-        pre { background: #f3f4f6; padding: 10px; border-radius: 6px; }
-      </style>
-    </head>
-    <body>
-      <h1>${escapeHtml(reportName)}</h1>
-      ${report.executiveSummary ? `<p><strong>Executive Summary:</strong> ${escapeHtml(String(report.executiveSummary))}</p>` : ""}
-      ${reportHtml}
-    </body>
-    </html>
-  `;
+  const wordHtml = buildStandaloneHtmlDocument({
+    reportName,
+    executiveSummary: report.executiveSummary,
+    reportHtml,
+  });
 
   const wordBlob = new Blob([wordHtml], {
     type: "application/msword;charset=utf-8",
@@ -255,48 +756,55 @@ function downloadWordReport(report: ExportableReport) {
   triggerBlobDownload(wordBlob, `${safeName}.doc`);
 }
 
-function downloadHtmlReport(report: ExportableReport) {
-  const reportHtml = markdownToSafeHtml(String(report.contentMd ?? ""));
+async function downloadHtmlReport(report: ExportableReport) {
   const reportName = String(report.name ?? "UX Report");
+  const reportHtml = await buildReportBodyHtml(report);
 
-  const htmlDocument = `<!doctype html>
-<html>
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>${escapeHtml(reportName)}</title>
-  <style>
-    body { font-family: Inter, Segoe UI, Arial, sans-serif; margin: 20px auto; max-width: 980px; line-height: 1.6; color: #111827; padding: 0 16px; }
-    h1, h2, h3, h4 { color: #111827; margin-top: 1.1em; margin-bottom: 0.5em; }
-    p { margin: 0.6em 0; }
-    table { border-collapse: collapse; width: 100%; margin: 10px 0; }
-    th, td { border: 1px solid #d1d5db; padding: 6px; text-align: left; vertical-align: top; }
-    code { background: #f3f4f6; padding: 1px 4px; border-radius: 4px; }
-    pre { background: #f3f4f6; padding: 10px; border-radius: 6px; overflow: auto; }
-  </style>
-</head>
-<body>
-  <h1>${escapeHtml(reportName)}</h1>
-  ${report.executiveSummary ? `<p><strong>Executive Summary:</strong> ${escapeHtml(String(report.executiveSummary))}</p>` : ""}
-  ${reportHtml}
-</body>
-</html>`;
+  const htmlDocument = buildStandaloneHtmlDocument({
+    reportName,
+    executiveSummary: report.executiveSummary,
+    reportHtml,
+  });
 
   const htmlBlob = new Blob([htmlDocument], { type: "text/html;charset=utf-8" });
   const safeName = sanitizeFileName(reportName);
   triggerBlobDownload(htmlBlob, `${safeName}.html`);
 }
 
-export function downloadReport(report: ExportableReport, format: "pdf" | "word" | "html") {
+export async function buildReportPreviewHtml(report: ExportableReport): Promise<string> {
+  return buildStandaloneHtmlDocument({
+    reportName: String(report.name ?? "UX Report"),
+    executiveSummary: report.executiveSummary,
+    reportHtml: await buildReportBodyHtml(report),
+  });
+}
+
+async function downloadReportInternal(report: ExportableReport, format: "pdf" | "word" | "html") {
   if (format === "pdf") {
-    downloadPdfReport(report);
+    await downloadPdfReport(report);
     return;
   }
 
   if (format === "html") {
-    downloadHtmlReport(report);
+    await downloadHtmlReport(report);
     return;
   }
 
-  downloadWordReport(report);
+  await downloadWordReport(report);
+}
+
+export function downloadReport(report: ExportableReport, format: "pdf" | "word" | "html") {
+  void downloadReportInternal(report, format).catch(() => {
+    if (format === "pdf") {
+      void downloadPdfReport(report);
+      return;
+    }
+
+    if (format === "html") {
+      void downloadHtmlReport(report);
+      return;
+    }
+
+    void downloadWordReport(report);
+  });
 }

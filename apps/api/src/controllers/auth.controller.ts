@@ -18,6 +18,10 @@ const ForgotPasswordSchema = z.object({
   email: z.string().email(),
 });
 
+const ResendVerificationSchema = z.object({
+  email: z.string().email(),
+});
+
 const ResetPasswordSchema = z.object({
   token: z.string().min(1),
   password: z.string().min(10),
@@ -66,6 +70,12 @@ export const AuthController = {
   async forgotPassword(req: Request, res: Response) {
     const payload = ForgotPasswordSchema.parse(req.body);
     const result = await AuthService.forgotPassword(payload.email);
+    res.json({ success: true, data: result });
+  },
+
+  async resendVerification(req: Request, res: Response) {
+    const payload = ResendVerificationSchema.parse(req.body);
+    const result = await AuthService.resendVerification(payload.email);
     res.json({ success: true, data: result });
   },
 

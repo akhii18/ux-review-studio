@@ -32,7 +32,7 @@ import {
 import { PriorityBadge } from "@/components/ui/PriorityBadge";
 import { Search, MoreVertical, X, ExternalLink, FileBarChart, Trash2, Download, ChevronDown, Pencil, Upload, ImageIcon } from "lucide-react";
 import { deleteReview, exportReviewReport, getReview, listReviews, saveReviewDraft, startReview } from "@/lib/api";
-import { downloadReport } from "@/lib/reportExport";
+import { buildReportPreviewHtml, downloadReport } from "@/lib/reportExport";
 import { toast } from "@/lib/toast";
 
 const STATUS_OPTIONS = ["all", "draft", "in_progress", "completed", "failed", "archived"];
@@ -69,133 +69,6 @@ function formatReviewDate(value?: string | null) {
 
 function getReviewActionLabel(status?: string | null) {
   return status === "in_progress" ? "Continue review" : "Open workspace";
-}
-
-function escapeHtml(input: string) {
-  return input
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
-}
-
-function markdownToHtml(markdown: string) {
-  const escaped = escapeHtml(markdown ?? "").replaceAll("\r\n", "\n");
-  const lines = escaped.split("\n");
-  const html: string[] = [];
-
-  let inCodeBlock = false;
-  let inUl = false;
-  let inOl = false;
-
-  const closeLists = () => {
-    if (inUl) {
-      html.push("</ul>");
-      inUl = false;
-    }
-    if (inOl) {
-      html.push("</ol>");
-      inOl = false;
-    }
-  };
-
-  const inline = (value: string) =>
-    value
-      .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
-      .replace(/\*(.+?)\*/g, "<em>$1</em>")
-      .replace(/`([^`]+)`/g, "<code>$1</code>");
-
-  for (const line of lines) {
-    if (line.trim().startsWith("```")) {
-      closeLists();
-      if (!inCodeBlock) {
-        html.push("<pre><code>");
-      } else {
-        html.push("</code></pre>");
-      }
-      inCodeBlock = !inCodeBlock;
-      continue;
-    }
-
-    if (inCodeBlock) {
-      html.push(`${line}\n`);
-      continue;
-    }
-
-    if (!line.trim()) {
-      closeLists();
-      continue;
-    }
-
-    const hMatch = line.match(/^(#{1,6})\s+(.+)$/);
-    if (hMatch) {
-      closeLists();
-      const level = hMatch[1].length;
-      html.push(`<h${level}>${inline(hMatch[2].trim())}</h${level}>`);
-      continue;
-    }
-
-    const ulMatch = line.match(/^\s*[-*]\s+(.+)$/);
-    if (ulMatch) {
-      if (inOl) {
-        html.push("</ol>");
-        inOl = false;
-      }
-      if (!inUl) {
-        html.push("<ul>");
-        inUl = true;
-      }
-      html.push(`<li>${inline(ulMatch[1].trim())}</li>`);
-      continue;
-    }
-
-    const olMatch = line.match(/^\s*\d+\.\s+(.+)$/);
-    if (olMatch) {
-      if (inUl) {
-        html.push("</ul>");
-        inUl = false;
-      }
-      if (!inOl) {
-        html.push("<ol>");
-        inOl = true;
-      }
-      html.push(`<li>${inline(olMatch[1].trim())}</li>`);
-      continue;
-    }
-
-    closeLists();
-    html.push(`<p>${inline(line.trim())}</p>`);
-  }
-
-  closeLists();
-  if (inCodeBlock) html.push("</code></pre>");
-
-  return html.join("\n");
-}
-
-function buildReportHtmlDocument(title: string, markdown: string) {
-  const content = markdownToHtml(markdown);
-  return `<!doctype html>
-<html>
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>${escapeHtml(title)}</title>
-  <style>
-    :root { color-scheme: light; }
-    body { font-family: Inter, Segoe UI, Arial, sans-serif; margin: 0; padding: 20px; line-height: 1.6; background: #ffffff; color: #111827; }
-    h1, h2, h3, h4, h5, h6 { margin: 1.1em 0 0.5em; line-height: 1.25; }
-    p { margin: 0.5em 0; }
-    ul, ol { margin: 0.5em 0; padding-left: 1.25rem; }
-    pre { overflow: auto; padding: 12px; border-radius: 8px; background: rgba(127,127,127,0.12); }
-    code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
-  </style>
-</head>
-<body>
-  ${content}
-</body>
-</html>`;
 }
 
 export default function HistoryPage() {
@@ -285,10 +158,11 @@ export default function HistoryPage() {
     setLoadingReportReviewId(reviewId);
     try {
       const report = await exportReviewReport(reviewId);
+      const previewHtml = await buildReportPreviewHtml(report);
 
       setReportPreview({
         title: report.name || `${reviewName} report`,
-        html: buildReportHtmlDocument(report.name || reviewName || "UX Report", report.contentMd),
+        html: previewHtml,
         report,
       });
       setReportSheetOpen(true);
