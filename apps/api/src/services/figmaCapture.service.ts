@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import sharp from "sharp";
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
 import { AppError } from "../middleware/errorHandler";
 import { config } from "../config";
@@ -47,6 +48,7 @@ type FigmaOEmbedResponse = {
   title?: string;
   thumbnail_url?: string;
 };
+
 type HotspotCandidate = {
   key: string;
   x: number;
@@ -56,6 +58,59 @@ type HotspotCandidate = {
   label: string;
   href?: string;
 };
+
+async function createSyntheticFallbackScreen(requestedUrl: string, launchFailureReason?: string): Promise<FigmaCapturedScreen | null> {
+  try {
+    const title = "Figma Prototype (Fallback Capture)";
+    const screenName = buildScreenName(1, title, requestedUrl);
+    const failureText = normalizeWhitespace(launchFailureReason ?? "Browser automation unavailable in deployment.");
+    const safeUrl = requestedUrl.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const safeFailure = failureText.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+    const svg = `
+<svg width="1440" height="1024" viewBox="0 0 1440 1024" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0f172a" />
+      <stop offset="100%" stop-color="#1e293b" />
+    </linearGradient>
+  </defs>
+  <rect width="1440" height="1024" fill="url(#bg)" />
+  <rect x="80" y="80" width="1280" height="864" rx="24" fill="#111827" stroke="#334155" stroke-width="2" />
+  <text x="120" y="170" fill="#f8fafc" font-size="44" font-family="Arial, Helvetica, sans-serif" font-weight="700">Figma Review Fallback Screenshot</text>
+  <text x="120" y="228" fill="#cbd5e1" font-size="24" font-family="Arial, Helvetica, sans-serif">Browser launch was unavailable in deployment, so this synthetic screenshot keeps the review pipeline running.</text>
+  <text x="120" y="300" fill="#94a3b8" font-size="22" font-family="Arial, Helvetica, sans-serif">Requested URL:</text>
+  <foreignObject x="120" y="320" width="1200" height="110">
+    <div xmlns="http://www.w3.org/1999/xhtml" style="color:#e2e8f0;font-family:Arial, Helvetica, sans-serif;font-size:20px;line-height:1.4;word-break:break-all;">${safeUrl}</div>
+  </foreignObject>
+  <text x="120" y="500" fill="#94a3b8" font-size="22" font-family="Arial, Helvetica, sans-serif">Launch reason:</text>
+  <foreignObject x="120" y="520" width="1200" height="260">
+    <div xmlns="http://www.w3.org/1999/xhtml" style="color:#fda4af;font-family:Arial, Helvetica, sans-serif;font-size:20px;line-height:1.45;word-break:break-word;">${safeFailure}</div>
+  </foreignObject>
+  <text x="120" y="890" fill="#a3e635" font-size="24" font-family="Arial, Helvetica, sans-serif">Review pipeline fallback active: AI analysis will continue using this generated input.</text>
+</svg>`;
+
+    const buffer = await sharp(Buffer.from(svg)).png().toBuffer();
+
+    return {
+      name: screenName,
+      mimeType: "image/png",
+      base64Data: buffer.toString("base64"),
+      sizeBytes: buffer.byteLength,
+      contentText: [
+        "Source: Synthetic Figma fallback screenshot",
+        `Captured URL: ${requestedUrl}`,
+        `Screen title: ${title}`,
+        "Visible text: Browser automation and thumbnail capture were unavailable. Generated synthetic screenshot to keep review pipeline operational.",
+        launchFailureReason ? `Failure reason: ${launchFailureReason}` : "",
+      ].filter(Boolean).join("\n"),
+      sourceUrl: requestedUrl,
+      title,
+    };
+  } catch {
+    return null;
+  }
+}
 
 function normalizeWhitespace(value: string): string {
   return value.replace(/\s+/g, " ").trim();
@@ -585,6 +640,18 @@ export async function captureFigmaPrototype(input: { url: string; maxScreens?: n
       const fallback = await captureFromFigmaOEmbed(requestedUrl, reason);
       if (fallback) {
         return fallback;
+      }
+
+      const syntheticFallback = await createSyntheticFallbackScreen(requestedUrl, reason);
+      if (syntheticFallback) {
+        return {
+          requestedUrl,
+          finalUrl: requestedUrl,
+          screens: [syntheticFallback],
+          visitedUrls: [requestedUrl],
+          titles: [syntheticFallback.title],
+          navigationSummary: "Captured 1 synthetic fallback screen because browser and thumbnail capture were unavailable.",
+        };
       }
 
       if (error instanceof AppError) {
