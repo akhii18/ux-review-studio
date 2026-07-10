@@ -4,6 +4,7 @@ import { pathToFileURL } from "node:url";
 import { prisma } from "../../config/prisma";
 import { getSignedStorageReadUrl } from "../supabaseStorage";
 import { captureFigmaPrototype, persistCapturedFigmaScreens } from "../figmaCapture.service";
+import { captureWebsiteReference, persistCapturedWebsiteScreens } from "../websiteCapture.service";
 
 // ── Subcategory → Agent mapping (mirrors principles.ts SUBCATEGORY_TO_AGENT_MAP)
 // Duplicated here to avoid a build-time dependency on the agentic-ai package.
@@ -846,6 +847,20 @@ function extractFigmaUrlFromAssets(assets: ReviewAssetRecord[]): string | null {
   return null;
 }
 
+function extractWebsiteUrlFromAssets(assets: ReviewAssetRecord[]): string | null {
+  for (const asset of assets) {
+    const contentText = asset.contentText?.trim();
+    if (!contentText) continue;
+
+    const match = contentText.match(/(?:^|\n)Design System URL:\s*(https?:\/\/\S+)/i);
+    if (match?.[1]) {
+      return match[1].trim();
+    }
+  }
+
+  return null;
+}
+
 // ── Main pipeline ─────────────────────────────────────────────────────────────
 
 export async function runReviewPipeline(reviewId: string): Promise<void> {
@@ -877,6 +892,7 @@ export async function runReviewPipeline(reviewId: string): Promise<void> {
 
     if (imageAssets.length === 0) {
       const figmaUrl = extractFigmaUrlFromAssets(review.assets);
+      const websiteUrl = extractWebsiteUrlFromAssets(review.assets);
 
       if (figmaUrl) {
         logPipeline("info", reviewId, "stage_updating", { stage: "capturing_figma_prototype", figmaUrl });
@@ -898,6 +914,36 @@ export async function runReviewPipeline(reviewId: string): Promise<void> {
 
         if (!review) {
           throw new Error(`Review ${reviewId} not found after Figma capture`);
+        }
+
+        sortedAssets = [...review.assets].sort((a, b) => {
+          const createdDiff = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+          if (createdDiff !== 0) return createdDiff;
+          return a.id.localeCompare(b.id);
+        });
+        imageAssets = sortedAssets.filter(
+          (asset: ReviewAssetRecord) => asset.mimeType.startsWith("image/")
+        );
+      } else if (websiteUrl) {
+        logPipeline("info", reviewId, "stage_updating", { stage: "capturing_website_reference", websiteUrl });
+        await prisma.review.update({ where: { id: reviewId }, data: { stage: "capturing_website_reference" } });
+
+        const captureResult = await captureWebsiteReference({ url: websiteUrl });
+        await persistCapturedWebsiteScreens(reviewId, captureResult.screens);
+
+        logPipeline("info", reviewId, "website_capture_completed", {
+          capturedScreens: captureResult.screens.length,
+          visitedUrls: captureResult.visitedUrls,
+          titles: captureResult.titles,
+        });
+
+        review = await prisma.review.findUnique({
+          where: { id: reviewId },
+          include: { assets: true },
+        });
+
+        if (!review) {
+          throw new Error(`Review ${reviewId} not found after website capture`);
         }
 
         sortedAssets = [...review.assets].sort((a, b) => {
