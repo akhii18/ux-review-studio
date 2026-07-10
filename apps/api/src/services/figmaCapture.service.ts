@@ -8,13 +8,6 @@ import { uploadReviewAssetToStorage } from "./supabaseStorage";
 const DEFAULT_MAX_SCREENS = 10;
 const MAX_SCREEN_LIMIT = 16;
 const NAVIGATION_TIMEOUT_MS = 45000;
-const COMMON_BROWSER_PATHS = [
-  process.env.FIGMA_BROWSER_EXECUTABLE_PATH,
-  "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
-  "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
-  "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe",
-  "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
-].filter((value): value is string => Boolean(value));
 
 export type FigmaCapturedScreen = {
   name: string;
@@ -98,16 +91,61 @@ function sanitizeFileStem(value: string): string {
   return normalized || "screen";
 }
 
+function getCommonBrowserPaths(): string[] {
+  const configured = [
+    process.env.FIGMA_BROWSER_EXECUTABLE_PATH,
+    process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH,
+    process.env.CHROME_BIN,
+  ].filter((value): value is string => Boolean(value));
+
+  if (process.platform === "win32") {
+    return [
+      ...configured,
+      "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+      "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
+      "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe",
+      "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
+    ];
+  }
+
+  if (process.platform === "darwin") {
+    return [
+      ...configured,
+      "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+      "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+      "/Applications/Chromium.app/Contents/MacOS/Chromium",
+    ];
+  }
+
+  return [
+    ...configured,
+    "/usr/bin/chromium-browser",
+    "/usr/bin/chromium",
+    "/usr/bin/google-chrome",
+    "/usr/bin/google-chrome-stable",
+    "/usr/bin/microsoft-edge",
+    "/opt/google/chrome/chrome",
+  ];
+}
+
 function buildBrowserCandidates(): BrowserLaunchCandidate[] {
-  const pathCandidates = COMMON_BROWSER_PATHS.map((executablePath, index) => ({
+  const commonBrowserPaths = getCommonBrowserPaths();
+  const pathCandidates = commonBrowserPaths.map((executablePath, index) => ({
     label: index === 0 && process.env.FIGMA_BROWSER_EXECUTABLE_PATH ? "configured browser" : `system browser ${index + 1}`,
     executablePath,
   }));
 
+  const channelCandidates: BrowserLaunchCandidate[] =
+    process.platform === "linux"
+      ? []
+      : [
+          { label: "chrome channel", channel: "chrome" },
+          { label: "edge channel", channel: "msedge" },
+        ];
+
   return [
     ...pathCandidates,
-    { label: "chrome channel", channel: "chrome" },
-    { label: "edge channel", channel: "msedge" },
+    ...channelCandidates,
     { label: "bundled chromium" },
   ];
 }
@@ -165,7 +203,7 @@ async function launchBrowser(): Promise<Browser> {
 
   throw new AppError(
     503,
-    `Unable to launch a browser for Figma capture. Checked local Chrome/Edge and bundled Chromium. ${errors.join(" | ")}`
+    `Unable to launch a browser for Figma capture. Set FIGMA_BROWSER_EXECUTABLE_PATH (or CHROME_BIN) to a valid Chromium/Chrome path in deployment, or ensure Playwright Chromium is installed. ${errors.join(" | ")}`
   );
 }
 
