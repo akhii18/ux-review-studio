@@ -32,7 +32,8 @@ const VerifyEmailSchema = z.object({
 });
 
 const UpdateMeSchema = z.object({
-  name: z.string().min(1),
+  name: z.string().min(1).optional(),
+  avatarDataUrl: z.string().max(1_500_000).nullable().optional(),
 });
 
 const DeleteAccountSchema = z.object({
@@ -67,7 +68,7 @@ export const AuthController = {
     }
 
     const payload = UpdateMeSchema.parse(req.body);
-    const result = await AuthService.updateMe(req.user.sub, payload.name);
+    const result = await AuthService.updateMe(req.user.sub, payload);
     res.json({ success: true, data: result });
   },
 

@@ -44,7 +44,7 @@ export function signin(data: { email: string; password: string }) {
   return request<{
     token: string;
     expiresInSeconds: number;
-    user: { id: string; name: string; email: string };
+    user: { id: string; name: string; email: string; avatarDataUrl?: string | null };
   }>("/api/auth/signin", {
     method: "POST",
     body: JSON.stringify(data),
@@ -52,14 +52,14 @@ export function signin(data: { email: string; password: string }) {
 }
 
 export function me() {
-  return request<{ id: string; name: string; email: string; createdAt: string }>("/api/auth/me");
+  return request<{ id: string; name: string; email: string; avatarDataUrl?: string | null; createdAt: string }>("/api/auth/me");
 }
 
-export function updateMe(data: { name: string }) {
+export function updateMe(data: { name?: string; avatarDataUrl?: string | null }) {
   return request<{
     token: string;
     expiresInSeconds: number;
-    user: { id: string; name: string; email: string; createdAt: string };
+    user: { id: string; name: string; email: string; avatarDataUrl?: string | null; createdAt: string };
   }>("/api/auth/me", {
     method: "PATCH",
     body: JSON.stringify(data),

@@ -11,6 +11,8 @@ const EMAIL_VERIFICATION_TTL_MS = 60 * 60 * 1000;
 const PASSWORD_RESET_TTL_MS = 60 * 60 * 1000;
 const GENERIC_RESET_MESSAGE = "If an account exists for this email, password reset instructions have been sent.";
 const GENERIC_VERIFICATION_MESSAGE = "If an unverified account exists for this email, a verification email has been sent.";
+const PROFILE_AVATAR_SETTING_KEY = "profileAvatarDataUrl";
+const ALLOWED_AVATAR_DATA_URL = /^data:image\/(png|jpeg|jpg|webp|gif);base64,[A-Za-z0-9+/=]+$/;
 
 function normalizeEmail(email: string): string {
   return email.trim().toLowerCase();
@@ -22,6 +24,26 @@ function signUserToken(user: { id: string; email: string; name: string }): strin
     config.jwtSecret,
     { expiresIn: config.jwtExpiresInSeconds }
   );
+}
+
+function normalizeAvatarDataUrl(avatarDataUrl: string | null | undefined): string | null | undefined {
+  if (avatarDataUrl === undefined) return undefined;
+  if (avatarDataUrl === null || avatarDataUrl === "") return null;
+
+  if (!ALLOWED_AVATAR_DATA_URL.test(avatarDataUrl)) {
+    throw new AppError(400, "Profile photo must be a PNG, JPG, WEBP, or GIF image.");
+  }
+
+  return avatarDataUrl;
+}
+
+async function getProfileAvatarDataUrl(userId: string): Promise<string | null> {
+  const row = await prisma.setting.findUnique({
+    where: { userId_key: { userId, key: PROFILE_AVATAR_SETTING_KEY } },
+    select: { value: true },
+  });
+
+  return typeof row?.value === "string" ? row.value : null;
 }
 
 function generateRawToken(): string {
@@ -113,6 +135,7 @@ export const AuthService = {
       throw new AppError(403, "Email not verified. Please verify your email before signing in.");
     }
 
+    const avatarDataUrl = await getProfileAvatarDataUrl(user.id);
     const token = signUserToken(user);
     return {
       token,
@@ -121,6 +144,7 @@ export const AuthService = {
         id: user.id,
         email: user.email,
         name: user.name,
+        avatarDataUrl,
       },
     };
   },
@@ -164,21 +188,53 @@ export const AuthService = {
       throw new AppError(404, "User not found");
     }
 
-    return user;
+    return {
+      ...user,
+      avatarDataUrl: await getProfileAvatarDataUrl(user.id),
+    };
   },
 
-  async updateMe(userId: string, name: string) {
-    const user = await prisma.user.update({
-      where: { id: userId },
-      data: { name: name.trim() },
-      select: { id: true, email: true, name: true, createdAt: true },
-    });
+  async updateMe(userId: string, input: { name?: string; avatarDataUrl?: string | null }) {
+    const data: { name?: string } = {};
+
+    if (input.name !== undefined) {
+      data.name = input.name.trim();
+    }
+
+    const user = input.name === undefined
+      ? await prisma.user.findUnique({
+          where: { id: userId },
+          select: { id: true, email: true, name: true, createdAt: true },
+        })
+      : await prisma.user.update({
+          where: { id: userId },
+          data,
+          select: { id: true, email: true, name: true, createdAt: true },
+        });
+
+    if (!user) {
+      throw new AppError(404, "User not found");
+    }
+
+    const avatarDataUrl = normalizeAvatarDataUrl(input.avatarDataUrl);
+    let savedAvatarDataUrl = await getProfileAvatarDataUrl(userId);
+    if (avatarDataUrl !== undefined) {
+      savedAvatarDataUrl = avatarDataUrl;
+      await prisma.setting.upsert({
+        where: { userId_key: { userId, key: PROFILE_AVATAR_SETTING_KEY } },
+        update: { value: avatarDataUrl as never },
+        create: { userId, key: PROFILE_AVATAR_SETTING_KEY, value: avatarDataUrl as never },
+      });
+    }
 
     const token = signUserToken(user);
     return {
       token,
       expiresInSeconds: config.jwtExpiresInSeconds,
-      user,
+      user: {
+        ...user,
+        avatarDataUrl: savedAvatarDataUrl,
+      },
     };
   },
 
