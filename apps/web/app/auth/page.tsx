@@ -119,7 +119,7 @@ function AuthPageContent() {
       });
 
       localStorage.setItem("token", result.token);
-      const currentUser = { name: result.user.name || "User", email: result.user.email };
+      const currentUser = { name: result.user.name || "User", email: result.user.email, avatarDataUrl: result.user.avatarDataUrl };
       localStorage.setItem("current_user", JSON.stringify(currentUser));
       document.cookie = `token=${result.token}; Path=/; Max-Age=${result.expiresInSeconds}; SameSite=Lax`;
       router.replace("/dashboard");
