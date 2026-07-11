@@ -147,7 +147,9 @@ type ReviewExportRecord = {
   aiMetadata: unknown;
   bboxRefs?: unknown;
   status: string;
+  escalationReason?: string | null;
   reviewBasis: Array<{ type: string; name: string; explanation: string }>;
+  comments?: Array<{ text: string }>;
 };
 
 type FlowGroupFindingRecord = ReviewExportRecord & {
@@ -273,11 +275,14 @@ function buildFindingGroups(findings: FlowGroupFindingRecord[], flowDiscovery: u
 function isExportableFindings(findings: ReviewExportRecord[]): boolean {
   const proposedCount = findings.filter((finding) => finding.status === "PROPOSED").length;
   const approved = findings.filter((finding) => finding.status === "ACCEPTED" || finding.status === "EDITED");
-  return proposedCount === 0 && approved.length > 0 && approved.every((finding) => finding.reviewBasis.length > 0);
+  const escalated = findings.filter((finding) => finding.status === "ESCALATED");
+  return proposedCount === 0 && (approved.length + escalated.length) > 0 && approved.every((finding) => finding.reviewBasis.length > 0);
 }
 
 function buildExportMarkdown(review: { name: string; product: string; domain: string; reviewType: string; uxScore: number | null; stage: string | null; findingMetadataOptions?: unknown }, findings: ReviewExportRecord[]) {
-  const included = findings.filter((finding) => finding.status === "ACCEPTED" || finding.status === "EDITED");
+  const included = findings.filter(
+    (finding) => finding.status === "ACCEPTED" || finding.status === "EDITED" || finding.status === "ESCALATED"
+  );
   const dismissed = findings.filter((finding) => finding.status === "DISMISSED");
   const escalated = findings.filter((finding) => finding.status === "ESCALATED");
   const includeRecommendations = hasFindingMetadataOption(review, "recommendationsWithAcceptanceCriteria");
@@ -290,25 +295,43 @@ function buildExportMarkdown(review: { name: string; product: string; domain: st
       ? basis.map((item) => `- **${item.name}** (${item.type})${item.explanation ? `: ${item.explanation}` : ""}`).join("\n")
       : "- Basis not provided";
 
+  const renderComments = (comments: ReviewExportRecord["comments"]) => {
+    const notes = (comments ?? []).map((comment) => comment.text?.trim()).filter(Boolean);
+    return notes.length > 0 ? notes.map((note) => `  - ${note}`).join("\n") : null;
+  };
+
+  const renderEscalationRecipients = (finding: ReviewExportRecord) => {
+    const metadata = finding.aiMetadata && typeof finding.aiMetadata === "object" ? finding.aiMetadata as Record<string, unknown> : {};
+    const rawRecipients = metadata.escalationRecipients;
+    const recipients = Array.isArray(rawRecipients)
+      ? rawRecipients.map((recipient: any) => recipient?.label).filter(Boolean)
+      : [];
+    return recipients.length > 0 ? recipients.join(", ") : "Recipient details were not saved";
+  };
+
   const renderFinding = (finding: ReviewExportRecord, index: number) => {
     const metadata = readAiMetadata(finding);
+    const editNotes = renderComments(finding.comments);
 
     return [
       `### ${index + 1}. ${finding.title}`,
-      `- Severity: ${finding.severity}`,
-      `- Area: ${finding.area}`,
-      `- Screen: ${finding.screen ?? "Unknown"}`,
-      finding.observation ? `- Observation: ${finding.observation}` : null,
-      finding.why ? `- Why it matters: ${finding.why}` : null,
-      includeRecommendations && finding.recommendation ? `- Recommendation: ${finding.recommendation}` : null,
+      `- **Severity:** ${finding.severity}`,
+      `- **Area:** ${finding.area}`,
+      `- **Screen:** ${finding.screen ?? "Unknown"}`,
+      finding.observation ? `- **Observation:** ${finding.observation}` : null,
+      finding.why ? `- **Why it matters:** ${finding.why}` : null,
+      includeRecommendations && finding.recommendation ? `- **Recommendation:** ${finding.recommendation}` : null,
       includeRecommendations && metadata.acceptanceCriteria.length > 0
-        ? `- Acceptance criteria:\n${metadata.acceptanceCriteria.map((item) => `  - ${item}`).join("\n")}`
+        ? `- **Acceptance criteria:**\n${metadata.acceptanceCriteria.map((item) => `  - ${item}`).join("\n")}`
         : null,
-      includeRequirements && metadata.requirementTraceability ? `- Requirement traceability: ${metadata.requirementTraceability}` : null,
-      includeBusinessImpact && finding.businessImpact ? `- Business impact: ${finding.businessImpact}` : null,
-      includeAccessibility && finding.a11yImpact ? `- Accessibility impact: ${finding.a11yImpact}` : null,
-      includeAccessibility && metadata.wcagCriteria ? `- WCAG: ${metadata.wcagCriteria}` : null,
-      `- Review basis:\n${renderBasis(finding.reviewBasis)}`,
+      includeRequirements && metadata.requirementTraceability ? `- **Requirement traceability:** ${metadata.requirementTraceability}` : null,
+      includeBusinessImpact && finding.businessImpact ? `- **Business impact:** ${finding.businessImpact}` : null,
+      includeAccessibility && finding.a11yImpact ? `- **Accessibility impact:** ${finding.a11yImpact}` : null,
+      includeAccessibility && metadata.wcagCriteria ? `- **WCAG:** ${metadata.wcagCriteria}` : null,
+      editNotes ? `- **Comments:**\n${editNotes}` : null,
+      finding.status === "ESCALATED" ? `- **Escalated to:** ${renderEscalationRecipients(finding)}` : null,
+      finding.status === "ESCALATED" && finding.escalationReason ? `- **Escalation note:** ${finding.escalationReason}` : null,
+      finding.status !== "ESCALATED" ? `- **Review basis:**\n${renderBasis(finding.reviewBasis)}` : null,
     ].filter(Boolean).join("\n");
   };
 
@@ -569,7 +592,11 @@ export const ReviewsService = {
   async exportReport(reviewId: string, userId: string) {
     const review = await prisma.review.findFirst({
       where: { id: reviewId, userId },
-      include: { findings: { include: { reviewBasis: true } }, assets: true, reports: { orderBy: { createdAt: "desc" } } },
+      include: {
+        findings: { include: { reviewBasis: true, comments: { orderBy: { createdAt: "asc" } } } },
+        assets: true,
+        reports: { orderBy: { createdAt: "desc" } },
+      },
     });
 
     if (!review) {
@@ -594,7 +621,7 @@ export const ReviewsService = {
         reviewId,
         name: `${review.name} — Final UX Report`,
         template: review.reviewType,
-        executiveSummary: `Accepted ${findings.filter((finding) => finding.status === "ACCEPTED" || finding.status === "EDITED").length} findings for export.`,
+        executiveSummary: `Included ${findings.filter((finding) => finding.status === "ACCEPTED" || finding.status === "EDITED" || finding.status === "ESCALATED").length} findings for export.`,
         contentMd,
         status: "finalized",
         createdBy: currentUser?.name ?? review.owner,
@@ -602,7 +629,7 @@ export const ReviewsService = {
     });
 
     const visualFindings = findings
-      .filter((finding) => finding.status === "ACCEPTED" || finding.status === "EDITED")
+      .filter((finding) => finding.status === "ACCEPTED" || finding.status === "EDITED" || finding.status === "ESCALATED")
       .map((finding) => ({
         id: finding.id,
         title: finding.title,

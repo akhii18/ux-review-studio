@@ -26,7 +26,7 @@ export const ReviewsRepository = {
     return prisma.review.findFirst({
       where: { id, userId },
       include: {
-        findings: { include: { reviewBasis: true } },
+        findings: { include: { reviewBasis: true, comments: { orderBy: { createdAt: "asc" } } } },
         assets: true,
         reports: { orderBy: { createdAt: "desc" } },
       },

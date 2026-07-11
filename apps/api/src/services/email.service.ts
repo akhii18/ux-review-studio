@@ -24,15 +24,18 @@ function getSenderAddress() {
 
 async function sendEmail(input: {
   to: string[];
+  cc?: string[];
   subject: string;
   text: string;
   html: string;
   attachments?: EmailAttachment[];
 }) {
+  const cc = Array.from(new Set(input.cc ?? [])).filter((address) => !input.to.includes(address));
   const message: EmailMessage = {
     senderAddress: getSenderAddress(),
     recipients: {
       to: input.to.map((address) => ({ address })),
+      ...(cc.length > 0 && { cc: cc.map((address) => ({ address })) }),
     },
     content: {
       subject: input.subject,
@@ -130,6 +133,7 @@ export const EmailService = {
 
   async sendEscalationEmail(input: {
     to: string[];
+    cc?: string[];
     escalatorName: string;
     escalatorEmail: string;
     finding: {
@@ -307,6 +311,7 @@ export const EmailService = {
 
     await sendEmail({
       to: input.to,
+      cc: input.cc,
       subject: `[Escalation Required] UX Finding: "${input.finding.title}" in "${input.reviewName}"`,
       text: [
         `UX Finding Escalation Notice`,

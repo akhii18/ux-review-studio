@@ -10,7 +10,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Skeleton } from "@/components/ui/skeleton";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { FileText, Download, Eye, ChevronDown } from "lucide-react";
+import { FileText, Download, Eye, ChevronDown, Loader2 } from "lucide-react";
 import { exportReviewReport, listReviews } from "@/lib/api";
 import { buildReportPreviewHtml, downloadReport } from "@/lib/reportExport";
 import { toast } from "@/lib/toast";
@@ -23,6 +23,7 @@ function ReportsPageContent() {
   const [selected, setSelected] = useState<any | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [selectedReportHtml, setSelectedReportHtml] = useState<string>("<p>No content</p>");
+  const [openingReportId, setOpeningReportId] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -68,12 +69,16 @@ function ReportsPageContent() {
   }
 
   async function openReport(reviewId: string) {
+    if (openingReportId) return;
+    setOpeningReportId(reviewId);
     try {
       const report = await exportReviewReport(reviewId);
       setSelected(report);
       setSheetOpen(true);
     } catch (error: any) {
       toast.error(error?.message ?? "Failed to load report");
+    } finally {
+      setOpeningReportId(null);
     }
   }
 
@@ -110,8 +115,13 @@ function ReportsPageContent() {
                     <p className="text-xs">UX Score: <span className="font-semibold">{r.uxScore}</span></p>
                   )}
                   <div className="mt-auto flex gap-2">
-                    <Button size="sm" variant="outline" className="flex-1" onClick={() => openReport(r.id)}>
-                      <Eye className="mr-1.5 h-3.5 w-3.5" /> View
+                    <Button size="sm" variant="outline" className="flex-1" onClick={() => openReport(r.id)} disabled={openingReportId !== null}>
+                      {openingReportId === r.id ? (
+                        <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Eye className="mr-1.5 h-3.5 w-3.5" />
+                      )}
+                      {openingReportId === r.id ? "Opening" : "View"}
                     </Button>
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>

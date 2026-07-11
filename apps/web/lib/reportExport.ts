@@ -46,6 +46,11 @@ type PdfTextOptions = {
   gapAfter?: number;
 };
 
+type PdfInlineSegment = {
+  text: string;
+  fontStyle: NonNullable<PdfTextOptions["fontStyle"]>;
+};
+
 type BoundingBoxRef = {
   screenIndex: number;
   bbox: {
@@ -168,6 +173,13 @@ function normalizeHeadingTitle(value: string | null | undefined) {
     .replace(/^\d+\.\s*/, "")
     .replace(/^#+\s*/, "")
     .toLowerCase();
+}
+
+function readHeadingReferenceNumber(value: string | null | undefined): number | null {
+  const match = normalizeText(value).match(/^(\d+)\./);
+  if (!match) return null;
+  const referenceNumber = Number(match[1]);
+  return Number.isFinite(referenceNumber) ? referenceNumber : null;
 }
 
 function normalizeBBoxRef(ref: unknown): BoundingBoxRef | null {
@@ -324,10 +336,26 @@ async function drawAnnotatedScreenshot(dataUrl: string, findings: GroupedScreens
   }
 }
 
-async function buildGroupedScreenshotSections(report: ExportableReport): Promise<GroupedScreenshotSection[]> {
+function takeRenderedReferenceNumber(referenceNumbers: Map<string, number[]>, finding: ExportVisualFinding): number | null {
+  const title = normalizeHeadingTitle(finding.title);
+  const queue = referenceNumbers.get(title);
+  if (!queue || queue.length === 0) return null;
+  const referenceNumber = queue.shift() ?? null;
+  if (queue.length === 0) {
+    referenceNumbers.delete(title);
+  } else {
+    referenceNumbers.set(title, queue);
+  }
+  return referenceNumber;
+}
+
+async function buildGroupedScreenshotSections(
+  report: ExportableReport,
+  renderedReferenceNumbers = new Map<string, number[]>()
+): Promise<GroupedScreenshotSection[]> {
   const context = report.visualContext;
   const findings = (context?.findings ?? []).filter(
-    (finding) => finding.status === "ACCEPTED" || finding.status === "EDITED"
+    (finding) => finding.status === "ACCEPTED" || finding.status === "EDITED" || finding.status === "ESCALATED"
   );
   const imageAssets = (context?.assets ?? []).filter((asset) => (asset.mimeType ?? "").toLowerCase().startsWith("image/"));
 
@@ -344,7 +372,7 @@ async function buildGroupedScreenshotSections(report: ExportableReport): Promise
       .filter((finding) => findingMatchesScreenContext(finding, screenName, index))
       .map((finding, findingIndex) => ({
         finding,
-        referenceNumber: findingIndex + 1,
+        referenceNumber: takeRenderedReferenceNumber(renderedReferenceNumbers, finding) ?? findingIndex + 1,
         ref: getBboxRefForScreen(finding, index),
       }));
 
@@ -370,7 +398,7 @@ async function buildGroupedScreenshotSections(report: ExportableReport): Promise
       assetLabel: "Additional Findings",
       findings: unmatchedFindings.map((finding, index) => ({
         finding,
-        referenceNumber: index + 1,
+        referenceNumber: takeRenderedReferenceNumber(renderedReferenceNumbers, finding) ?? index + 1,
         ref: null,
       })),
     });
@@ -394,21 +422,95 @@ function renderFindingSummaryHtml(item: GroupedScreenshotFinding): string {
   return `<li>${lines.join("")}</li>`;
 }
 
-function buildVisualSectionHtml(sections: GroupedScreenshotSection[]): string {
+function collectRenderedFindingBlocks(doc: Document): Map<string, string[]> {
+  const blocks = new Map<string, string[]>();
+  const headings = Array.from(doc.body.querySelectorAll("h2"));
+  const includedHeading = headings.find((heading) => normalizeText(heading.textContent).toLowerCase() === "included findings");
+  if (!includedHeading) return blocks;
+
+  let cursor = includedHeading.nextElementSibling;
+  while (cursor && cursor.tagName.toLowerCase() !== "h2") {
+    if (cursor.tagName.toLowerCase() !== "h3") {
+      cursor = cursor.nextElementSibling;
+      continue;
+    }
+
+    const title = normalizeHeadingTitle(cursor.textContent);
+    const htmlParts: string[] = [];
+    let blockCursor: Element | null = cursor;
+
+    while (blockCursor && blockCursor.tagName.toLowerCase() !== "h2") {
+      if (blockCursor !== cursor && blockCursor.tagName.toLowerCase() === "h3") break;
+      htmlParts.push(blockCursor.outerHTML);
+      blockCursor = blockCursor.nextElementSibling;
+    }
+
+    const existing = blocks.get(title) ?? [];
+    existing.push(htmlParts.join("\n"));
+    blocks.set(title, existing);
+    cursor = blockCursor;
+  }
+
+  return blocks;
+}
+
+function collectRenderedReferenceNumbers(doc: Document): Map<string, number[]> {
+  const referenceNumbers = new Map<string, number[]>();
+  const headings = Array.from(doc.body.querySelectorAll("h2"));
+  const includedHeading = headings.find((heading) => normalizeText(heading.textContent).toLowerCase() === "included findings");
+  if (!includedHeading) return referenceNumbers;
+
+  let cursor = includedHeading.nextElementSibling;
+  while (cursor && cursor.tagName.toLowerCase() !== "h2") {
+    if (cursor.tagName.toLowerCase() === "h3") {
+      const title = normalizeHeadingTitle(cursor.textContent);
+      const referenceNumber = readHeadingReferenceNumber(cursor.textContent);
+      if (referenceNumber !== null) {
+        const existing = referenceNumbers.get(title) ?? [];
+        existing.push(referenceNumber);
+        referenceNumbers.set(title, existing);
+      }
+    }
+    cursor = cursor.nextElementSibling;
+  }
+
+  return referenceNumbers;
+}
+
+function takeRenderedFindingBlock(blocks: Map<string, string[]>, finding: ExportVisualFinding): string | null {
+  const title = normalizeHeadingTitle(finding.title);
+  const queue = blocks.get(title);
+  if (!queue || queue.length === 0) return null;
+  const block = queue.shift() ?? null;
+  if (queue.length === 0) {
+    blocks.delete(title);
+  } else {
+    blocks.set(title, queue);
+  }
+  return block;
+}
+
+function buildVisualSectionHtml(sections: GroupedScreenshotSection[], renderedFindingBlocks?: Map<string, string[]>): string {
   if (sections.length === 0) return "";
 
   return [
     "<h2>Assets and Pins</h2>",
     ...sections.map((section) => {
+      const renderedFindings = section.findings.map((item) => {
+        return renderedFindingBlocks
+          ? takeRenderedFindingBlock(renderedFindingBlocks, item.finding) ?? renderFindingSummaryHtml(item)
+          : renderFindingSummaryHtml(item);
+      });
+
       return [
         '<section class="screenshot-group">',
         `<h3>${escapeHtml(section.assetLabel)}</h3>`,
         section.imageDataUrl
           ? `<img src="${section.imageDataUrl}" alt="Annotated asset for ${escapeHtml(section.assetLabel)}" class="screenshot-image" />`
           : "",
-        '<ol class="screenshot-findings">',
-        ...section.findings.map((item) => renderFindingSummaryHtml(item)),
-        "</ol>",
+        '<div class="screenshot-findings">',
+        ...renderedFindings,
+        "</div>",
         "</section>",
       ].join("\n");
     }),
@@ -493,8 +595,9 @@ function buildStandaloneHtmlDocument(params: {
     .inline-image { display: block; width: 100%; max-width: 940px; height: auto; border: 1px solid #d1d5db; border-radius: 8px; margin: 0 0 8px; }
     .screenshot-group { margin: 18px 0 24px; page-break-inside: avoid; }
     .screenshot-image { display: block; width: 100%; max-width: 940px; height: auto; border: 1px solid #d1d5db; border-radius: 8px; margin: 0 0 12px; }
-    .screenshot-findings { margin-top: 8px; padding-left: 22px; }
-    .screenshot-findings li { margin: 0 0 10px; }
+    .screenshot-findings { margin-top: 8px; }
+    .screenshot-findings > h3:first-child { margin-top: 0.4em; }
+    .screenshot-findings li { margin: 0 0 4px; }
     .screenshot-finding-title { margin-bottom: 3px; }
     .screenshot-finding-meta { color: #4b5563; font-size: 0.92em; }
   </style>
@@ -510,11 +613,12 @@ function buildStandaloneHtmlDocument(params: {
 async function buildReportBodyHtml(report: ExportableReport): Promise<string> {
   const baseHtml = markdownToSafeHtml(String(report.contentMd ?? ""));
   const doc = new DOMParser().parseFromString(baseHtml || "<p>No content</p>", "text/html");
-  const groupedSections = await buildGroupedScreenshotSections(report);
+  const groupedSections = await buildGroupedScreenshotSections(report, collectRenderedReferenceNumbers(doc));
 
   if (groupedSections.length > 0) {
+    const renderedFindingBlocks = collectRenderedFindingBlocks(doc);
     const narrativeHtml = stripIncludedFindingsSection(doc.body.innerHTML);
-    return [narrativeHtml, buildVisualSectionHtml(groupedSections)].filter(Boolean).join("\n");
+    return [narrativeHtml, buildVisualSectionHtml(groupedSections, renderedFindingBlocks)].filter(Boolean).join("\n");
   }
 
   for (const section of groupedSections) {
@@ -552,6 +656,35 @@ function getListItemText(element: Element) {
   const clone = element.cloneNode(true) as HTMLElement;
   clone.querySelectorAll("ul, ol").forEach((list) => list.remove());
   return normalizeText(clone.textContent);
+}
+
+function getInlineSegments(element: Element, inheritedStyle: NonNullable<PdfTextOptions["fontStyle"]> = "normal"): PdfInlineSegment[] {
+  const segments: PdfInlineSegment[] = [];
+
+  const walk = (node: Node, fontStyle: NonNullable<PdfTextOptions["fontStyle"]>) => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      const text = node.textContent ?? "";
+      if (text) segments.push({ text, fontStyle });
+      return;
+    }
+
+    if (node.nodeType !== Node.ELEMENT_NODE) return;
+
+    const childElement = node as Element;
+    const tag = childElement.tagName.toLowerCase();
+    if (tag === "ul" || tag === "ol") return;
+
+    const nextStyle = tag === "strong" || tag === "b"
+      ? fontStyle === "italic" || fontStyle === "bolditalic" ? "bolditalic" : "bold"
+      : tag === "em" || tag === "i"
+        ? fontStyle === "bold" || fontStyle === "bolditalic" ? "bolditalic" : "italic"
+        : fontStyle;
+
+    childElement.childNodes.forEach((child) => walk(child, nextStyle));
+  };
+
+  element.childNodes.forEach((child) => walk(child, inheritedStyle));
+  return segments;
 }
 
 async function downloadPdfReport(report: ExportableReport) {
@@ -594,6 +727,47 @@ async function downloadPdfReport(report: ExportableReport) {
     addGap(gapAfter);
   };
 
+  const writeInlineSegments = (segments: PdfInlineSegment[], options: PdfTextOptions = {}) => {
+    const compactSegments = segments
+      .map((segment) => ({ ...segment, text: segment.text.replace(/\s+/g, " ") }))
+      .filter((segment) => segment.text.trim().length > 0);
+    if (compactSegments.length === 0) return;
+
+    const fontSize = options.fontSize ?? 10;
+    const indent = options.indent ?? 0;
+    const lineHeight = options.lineHeight ?? Math.max(fontSize + 4, 14);
+    const gapAfter = options.gapAfter ?? 4;
+    const availableWidth = contentWidth - indent;
+    let cursorX = margin + indent;
+
+    const newLine = () => {
+      y += lineHeight;
+      cursorX = margin + indent;
+    };
+
+    pdf.setFontSize(fontSize);
+    ensureSpace(lineHeight);
+
+    compactSegments.forEach((segment) => {
+      pdf.setFont("helvetica", segment.fontStyle);
+      const words = segment.text.trim().split(/\s+/);
+      words.forEach((word, index) => {
+        const token = index === 0 && cursorX === margin + indent ? word : ` ${word}`;
+        const tokenWidth = pdf.getTextWidth(token);
+        if (cursorX > margin + indent && cursorX + tokenWidth > margin + indent + availableWidth) {
+          newLine();
+        }
+        ensureSpace(lineHeight);
+        pdf.setFont("helvetica", segment.fontStyle);
+        pdf.text(token, cursorX, y);
+        cursorX += tokenWidth;
+      });
+    });
+
+    y += lineHeight;
+    addGap(gapAfter);
+  };
+
   const writeBullet = (marker: string, text: string, indent: number) => {
     const value = normalizeText(text);
     if (!value) return;
@@ -612,6 +786,16 @@ async function downloadPdfReport(report: ExportableReport) {
       y += lineHeight;
     });
     addGap(2);
+  };
+
+  const writeBulletSegments = (marker: string, segments: PdfInlineSegment[], indent: number) => {
+    const value = normalizeText(segments.map((segment) => segment.text).join(""));
+    if (!value) return;
+    pdf.setFont("helvetica", "normal");
+    pdf.setFontSize(10);
+    ensureSpace(15);
+    pdf.text(marker, margin + indent, y);
+    writeInlineSegments(segments, { indent: indent + 18, lineHeight: 15, gapAfter: 2 });
   };
 
   const drawRule = () => {
@@ -641,7 +825,12 @@ async function downloadPdfReport(report: ExportableReport) {
     const items = Array.from(list.children).filter((child) => child.tagName.toLowerCase() === "li");
     for (let index = 0; index < items.length; index += 1) {
       const item = items[index];
-      writeBullet(ordered ? `${index + 1}.` : "•", getListItemText(item), indent);
+      const segments = getInlineSegments(item);
+      if (segments.length > 0) {
+        writeBulletSegments(ordered ? `${index + 1}.` : "•", segments, indent);
+      } else {
+        writeBullet(ordered ? `${index + 1}.` : "•", getListItemText(item), indent);
+      }
       for (const nested of Array.from(item.querySelectorAll(":scope > ul, :scope > ol"))) {
         await renderList(nested, indent + 18, nested.tagName.toLowerCase() === "ol");
       }
@@ -711,7 +900,7 @@ async function downloadPdfReport(report: ExportableReport) {
       return;
     }
     if (tag === "p") {
-      writeText(text, { indent, lineHeight: 15, gapAfter: 5 });
+      writeInlineSegments(getInlineSegments(element), { indent, lineHeight: 15, gapAfter: 5 });
       return;
     }
 

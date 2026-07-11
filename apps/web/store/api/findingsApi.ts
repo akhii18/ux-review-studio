@@ -68,8 +68,9 @@ export const findingsApi = createApi({
         body: payload,
       }),
       transformResponse: (res: { data: FindingWithBasis }) => res.data,
-      invalidatesTags: (_result, _err, { id }) => [
+      invalidatesTags: (result, _err, { id }) => [
         { type: "Finding", id },
+        ...(result?.reviewId ? [{ type: "Finding" as const, id: result.reviewId }] : []),
         "RecurringFindings",
       ],
     }),
@@ -81,7 +82,10 @@ export const findingsApi = createApi({
         body: payload,
       }),
       transformResponse: (res: { data: FindingWithBasis }) => res.data,
-      invalidatesTags: (_result, _err, { id }) => [{ type: "Finding", id }],
+      invalidatesTags: (result, _err, { id }) => [
+        { type: "Finding", id },
+        ...(result?.reviewId ? [{ type: "Finding" as const, id: result.reviewId }] : []),
+      ],
     }),
 
     escalateFinding: builder.mutation<
@@ -94,7 +98,10 @@ export const findingsApi = createApi({
         body: payload,
       }),
       transformResponse: (res: { data: FindingWithBasis }) => res.data,
-      invalidatesTags: (_result, _err, { id }) => [{ type: "Finding", id }],
+      invalidatesTags: (result, _err, { id }) => [
+        { type: "Finding", id },
+        ...(result?.reviewId ? [{ type: "Finding" as const, id: result.reviewId }] : []),
+      ],
     }),
 
     getRecurringFindings: builder.query<RecurringTrend[], void>({
@@ -128,8 +135,9 @@ export const findingsApi = createApi({
         body: payload,
       }),
       transformResponse: (res: { data: FindingWithBasis }) => res.data,
-      invalidatesTags: (_result, _err, { id }) => [
+      invalidatesTags: (result, _err, { id }) => [
         { type: "Finding", id },
+        ...(result?.reviewId ? [{ type: "Finding" as const, id: result.reviewId }] : []),
         "RecurringFindings",
       ],
     }),
