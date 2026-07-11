@@ -5,6 +5,7 @@ import { config } from "../config";
 import { prisma } from "../config/prisma";
 import crypto from "crypto";
 import { convertLegacyDoc } from "./docConversion.service";
+import { calculateCurrentUxScore, refreshReviewUxScore } from "./uxScore.service";
 
 type ReviewDepth = "quick" | "standard" | "deep";
 type AnalysisScope = "all" | "key";
@@ -354,8 +355,17 @@ export const ReviewsService = {
   },
 
   async getById(id: string, userId: string) {
-    const review = await ReviewsRepository.findById(id, userId);
+    let review = await ReviewsRepository.findById(id, userId);
     if (!review) throw new AppError(404, "Review not found");
+
+    if (review.uxScore !== null || review.findings.length > 0) {
+      const currentUxScore = await calculateCurrentUxScore(review.id);
+      if (review.uxScore !== currentUxScore) {
+        await refreshReviewUxScore(review.id);
+        review = await ReviewsRepository.findById(id, userId);
+        if (!review) throw new AppError(404, "Review not found");
+      }
+    }
 
     const findings = review.findings as FlowGroupFindingRecord[];
     const sortedAssets = [...review.assets].sort((a, b) => {
