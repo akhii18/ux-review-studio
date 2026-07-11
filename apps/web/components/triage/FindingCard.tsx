@@ -2,8 +2,8 @@
 
 import { useState } from "react";
 import {
-  Check, Edit3, X, ArrowUpRight, MessageSquare, Sparkles,
-  BookOpen, Plus, AlertTriangle, RefreshCw, AlertCircle, Send, Loader2,
+  Check, Edit3, X, ArrowUpRight, Sparkles,
+  BookOpen, Plus, AlertTriangle, RefreshCw, AlertCircle, Loader2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -63,11 +63,11 @@ export function FindingCard({ finding, open, onClose }: FindingCardProps) {
     if (!commentText.trim()) { toast.error("Please enter a comment"); return; }
     try {
       await addComment({ id: finding.id, payload: { text: commentText.trim() } }).unwrap();
-      toast.success("Comment added");
       setCommentText("");
       setShowComment(false);
+      toast.success("Comment saved. This finding is edited and accepted.");
     } catch {
-      toast.error("Failed to add comment");
+      toast.error("Failed to edit and accept");
     }
   };
 
@@ -102,6 +102,15 @@ export function FindingCard({ finding, open, onClose }: FindingCardProps) {
   const needsBasis =
     (finding.status === "ACCEPTED" || finding.status === "EDITED") &&
     finding.reviewBasis.length === 0;
+  const isFinalLockedStatus = finding.status !== "PROPOSED" && finding.status !== "EDITED";
+  const isEditableAccepted = finding.status === "EDITED";
+  const hasComments = Boolean(finding.comments?.length);
+  const statusLockMessage: Partial<Record<string, string>> = {
+    ACCEPTED: "This finding is already accepted and will be included in the report.",
+    DISMISSED: "This finding is dismissed and will not be included in the report.",
+    ESCALATED: "This finding is escalated and will be included in the report with escalation details.",
+    FALSE_POSITIVE: "This finding is marked false positive and will not be included in the report.",
+  };
 
   return (
     <Sheet open={open} onOpenChange={(o) => !o && onClose()}>
@@ -213,18 +222,18 @@ export function FindingCard({ finding, open, onClose }: FindingCardProps) {
           {/* Comment Input */}
           {showComment && (
             <div className="rounded-lg border border-border bg-secondary/40 p-3 space-y-2">
-              <p className="text-xs font-medium text-foreground">Add a comment</p>
+              <p className="text-xs font-medium text-foreground">Edit and accept</p>
               <Textarea
                 value={commentText}
                 onChange={(e) => setCommentText(e.target.value)}
-                placeholder="Type your comment…"
+                placeholder="Describe what changed before accepting…"
                 className="text-sm"
                 rows={3}
               />
               <div className="flex gap-2">
-                <Button size="sm" onClick={handleAddComment} disabled={commentLoading}>
-                  {commentLoading ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Send className="mr-1.5 h-3.5 w-3.5" />}
-                  Save comment
+                <Button size="sm" onClick={handleAddComment} disabled={commentLoading || triageLoading}>
+                  {commentLoading || triageLoading ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Edit3 className="mr-1.5 h-3.5 w-3.5" />}
+                  Edit and accept
                 </Button>
                 <Button size="sm" variant="ghost" onClick={() => { setShowComment(false); setCommentText(""); }}>Cancel</Button>
               </div>
@@ -255,6 +264,12 @@ export function FindingCard({ finding, open, onClose }: FindingCardProps) {
 
           <Separator />
 
+          {isFinalLockedStatus && statusLockMessage[finding.status] && (
+            <div className="rounded-lg border border-border bg-secondary/30 p-3 text-xs text-muted-foreground">
+              {statusLockMessage[finding.status]}
+            </div>
+          )}
+
           {finding.status === "ESCALATED" && (
             <div className="rounded-lg border border-border bg-secondary/30 p-3">
               <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Escalated to</p>
@@ -273,20 +288,20 @@ export function FindingCard({ finding, open, onClose }: FindingCardProps) {
           )}
 
           <div className="flex flex-wrap gap-2">
-            <Button size="sm" onClick={() => handleTriage("ACCEPT")} disabled={triageLoading || finding.status === "ACCEPTED"}>
+            <Button size="sm" onClick={() => handleTriage("ACCEPT")} disabled={triageLoading || isFinalLockedStatus || isEditableAccepted}>
               <Check className="mr-1.5 h-3.5 w-3.5" />Accept
             </Button>
-            <Button size="sm" variant="outline" onClick={() => handleTriage("EDIT")} disabled={triageLoading}>
-              <Edit3 className="mr-1.5 h-3.5 w-3.5" />Edit & accept
+            <Button size="sm" variant="ghost" onClick={() => setShowComment(true)} disabled={showComment || isFinalLockedStatus}>
+              <Edit3 className="mr-1.5 h-3.5 w-3.5" />Edit and accept
             </Button>
-            <Button size="sm" variant="outline" onClick={() => handleTriage("DISMISS")} disabled={triageLoading || finding.status === "DISMISSED"}>
+            <Button size="sm" variant="outline" onClick={() => handleTriage("DISMISS")} disabled={triageLoading || isFinalLockedStatus || isEditableAccepted}>
               <X className="mr-1.5 h-3.5 w-3.5" />Dismiss
             </Button>
             <TooltipProvider delayDuration={100}>
               <Tooltip>
                 <TooltipTrigger asChild>
                   <span className="inline-flex">
-                    <Button size="sm" variant="outline" onClick={() => handleTriage("ESCALATE")} disabled={triageLoading || finding.status === "ESCALATED"}>
+                    <Button size="sm" variant="outline" onClick={() => handleTriage("ESCALATE")} disabled={triageLoading || isFinalLockedStatus || isEditableAccepted}>
                       <ArrowUpRight className="mr-1.5 h-3.5 w-3.5" />Escalate
                     </Button>
                   </span>
@@ -302,17 +317,14 @@ export function FindingCard({ finding, open, onClose }: FindingCardProps) {
             </TooltipProvider>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Button size="sm" variant="ghost" onClick={() => setShowComment(true)} disabled={showComment}>
-              <MessageSquare className="mr-1.5 h-3.5 w-3.5" />Comment
-            </Button>
-            <Button size="sm" variant="ghost" onClick={handleRegenerate} disabled={regenerateLoading}>
+            <Button size="sm" variant="ghost" onClick={handleRegenerate} disabled={regenerateLoading || !isEditableAccepted || !hasComments}>
               <RefreshCw className={cn("mr-1.5 h-3.5 w-3.5", regenerateLoading && "animate-spin")} />Regenerate
             </Button>
             <Button
               size="sm"
               variant="ghost"
               onClick={() => handleTriage("FALSE_POSITIVE")}
-              disabled={triageLoading || finding.status === "FALSE_POSITIVE"}
+              disabled={triageLoading || isFinalLockedStatus || isEditableAccepted}
             >
               <AlertCircle className="mr-1.5 h-3.5 w-3.5" />False positive
             </Button>

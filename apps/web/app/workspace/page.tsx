@@ -16,7 +16,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import {
   Download, Check, RefreshCw, Sparkles, Image as ImageIcon,
   AlertCircle, ChevronLeft, ChevronRight, X, ArrowUpRight, Edit3, Plus,
-  BookOpen, AlertTriangle, MessageSquare, MonitorPlay, ChevronDown, Loader2,
+  BookOpen, AlertTriangle, MonitorPlay, ChevronDown, Loader2,
 } from "lucide-react";
 import { PriorityBadge } from "@/components/ui/PriorityBadge";
 import { FindingStatusBadge } from "@/components/ui/FindingStatusBadge";
@@ -139,6 +139,14 @@ const severityRank: Record<"P0" | "P1" | "P2", number> = {
   P0: 0,
   P1: 1,
   P2: 2,
+};
+
+const findingActionMessages: Partial<Record<TriageStatus, string>> = {
+  ACCEPTED: "Great, this finding will be included in the final report.",
+  EDITED: "Updated and accepted, this finding will be included in the final report.",
+  DISMISSED: "Finding dismissed, it won't be included in the final report.",
+  ESCALATED: "Finding escalated for follow-up.",
+  FALSE_POSITIVE: "Thanks, it will help us improve future reviews.",
 };
 
 const PIN_CLUSTER_CENTER_DISTANCE = 0.035;
@@ -270,24 +278,9 @@ function getBboxRefForScreen(finding: Finding, screenIndex?: number): BoundingBo
   if (typeof screenIndex !== "number") return null;
 
   const refs = getValidBBoxRefs(finding);
-  const exact = refs.find((ref) => ref.screenIndex === screenIndex);
-  if (exact) return exact;
-
   if (refs.length === 0) return null;
 
-  const minIndex = Math.min(...refs.map((ref) => ref.screenIndex));
-  const maxIndex = Math.max(...refs.map((ref) => ref.screenIndex));
-
-  if (minIndex === 1) {
-    const oneBased = refs.find((ref) => ref.screenIndex === screenIndex + 1);
-    if (oneBased) return oneBased;
-  }
-
-  if (screenIndex === 0 && minIndex > 0 && maxIndex > 0) {
-    return refs.find((ref) => ref.screenIndex === minIndex) ?? null;
-  }
-
-  return null;
+  return refs.find((ref) => ref.screenIndex === screenIndex) ?? null;
 }
 
 function getBboxCenter(ref: BoundingBoxRef): { x: number; y: number } {
@@ -386,7 +379,7 @@ function getClusterSeverity(cluster: PinCluster): "P0" | "P1" | "P2" {
 function findingMatchesScreenContext(finding: Finding, screenName?: string, screenIndex?: number): boolean {
   const hasCoordinateRefs = getValidBBoxRefs(finding).length > 0;
   if (hasCoordinateRefs && typeof screenIndex === "number") {
-    return Boolean(getBboxRefForScreen(finding, screenIndex)) || findingMatchesScreen(finding.screen, screenName);
+    return Boolean(getBboxRefForScreen(finding, screenIndex));
   }
   return findingMatchesScreen(finding.screen, screenName);
 }
@@ -644,7 +637,6 @@ function WorkspaceContent() {
     if (typeof screen?.screenIndex !== "number") return [];
 
     return screenFindings
-      .filter((finding) => finding.status !== "DISMISSED")
       .map((finding) => ({ finding, ref: getBboxRefForScreen(finding, screen.screenIndex) }))
       .filter((placement): placement is PinPlacement => Boolean(placement.ref));
   }, [screenFindings, screen, imageLoadFailed]);
@@ -655,16 +647,14 @@ function WorkspaceContent() {
 
   const unplacedFindings = useMemo(() => {
     if (imageLoadFailed) {
-      return screenFindings.filter((finding) => finding.status !== "DISMISSED");
+      return screenFindings;
     }
 
     if (typeof screen?.screenIndex !== "number") {
-      return screenFindings.filter((finding) => finding.status !== "DISMISSED");
+      return screenFindings;
     }
 
-    return screenFindings
-      .filter((finding) => finding.status !== "DISMISSED")
-      .filter((finding) => !getBboxRefForScreen(finding, screen.screenIndex));
+    return screenFindings.filter((finding) => !getBboxRefForScreen(finding, screen.screenIndex));
   }, [screenFindings, screen, imageLoadFailed]);
 
   const unplacedFindingGroups = useMemo(() => {
@@ -681,7 +671,7 @@ function WorkspaceContent() {
   }, [unplacedFindings, screen?.flowName]);
 
   const visibleScreenFindingCount = useMemo(
-    () => screenFindings.filter((finding) => finding.status !== "DISMISSED").length,
+    () => screenFindings.length,
     [screenFindings],
   );
 
@@ -774,11 +764,12 @@ function WorkspaceContent() {
       edited: allFindings.filter((f) => f.status === "EDITED").length,
       dismissed: allFindings.filter((f) => f.status === "DISMISSED").length,
       escalated: allFindings.filter((f) => f.status === "ESCALATED").length,
+      falsePositive: allFindings.filter((f) => f.status === "FALSE_POSITIVE").length,
       proposed: allFindings.filter((f) => f.status === "PROPOSED").length,
     };
   }, [allFindings]);
 
-  const triagedCount = triage.accepted + triage.edited + triage.dismissed + triage.escalated;
+  const triagedCount = triage.accepted + triage.edited + triage.dismissed + triage.escalated + triage.falsePositive;
   const allAcceptedHaveBasis = useMemo(() => {
     return allFindings
       .filter((f) => f.status === "ACCEPTED" || f.status === "EDITED")
@@ -786,6 +777,18 @@ function WorkspaceContent() {
   }, [allFindings]);
 
   const exportable = triage.proposed === 0 && allAcceptedHaveBasis && (triage.accepted + triage.edited > 0);
+  const exportBlockedMessage = useMemo(() => {
+    if (!allAcceptedHaveBasis) {
+      return "Add review basis to every accepted or edited finding before exporting.";
+    }
+    if (triage.proposed > 0) {
+      return `Triage all findings across all pages to enable export. ${triage.proposed} still need a decision.`;
+    }
+    if (triage.accepted + triage.edited === 0) {
+      return "Accept or edit at least one finding to create the final report.";
+    }
+    return "";
+  }, [allAcceptedHaveBasis, triage.accepted, triage.edited, triage.proposed]);
 
   const handleDownload = useCallback((report: any, format: "pdf" | "word" | "html") => {
     downloadReport(report, format);
@@ -881,22 +884,49 @@ function WorkspaceContent() {
     }
   }, [fetchReview, reviewId, runAgainPending]);
 
+  const closeFindingSheet = useCallback(() => {
+    setOpen(null);
+    setOpenCluster(null);
+    setClusterViewMode("list");
+  }, []);
+
+  const patchFindingInReviewData = useCallback((findingId: string, patch: Partial<Finding>) => {
+    setReviewData((prev: any) => {
+      if (!prev?.findings) return prev;
+      return {
+        ...prev,
+        findings: prev.findings.map((finding: any) =>
+          finding.id === findingId ? { ...finding, ...patch } : finding
+        ),
+      };
+    });
+  }, []);
+
   const handleFindingAction = useCallback(
-    (findingId: string, actionStatus: TriageStatus) => {
+    (findingId: string, actionStatus: TriageStatus, options?: { returnToCluster: boolean }) => {
       updateFinding(findingId, { status: actionStatus })
         .then(() => {
-          toast.success(`Finding status set to ${actionStatus.toLowerCase()}`);
+          toast.success(findingActionMessages[actionStatus] ?? `Finding status set to ${actionStatus.toLowerCase()}`);
+          patchFindingInReviewData(findingId, { status: actionStatus });
+          if (options?.returnToCluster) {
+            setClusterViewMode("list");
+          } else {
+            closeFindingSheet();
+          }
           fetchReview();
-          // Update details sheet finding if open
-          setOpen((prev) => prev && prev.id === findingId ? { ...prev, status: actionStatus } : prev);
         })
         .catch((err) => {
           toast.error("Failed to update finding");
           console.error(err);
         });
     },
-    [fetchReview]
+    [closeFindingSheet, fetchReview, patchFindingInReviewData]
   );
+
+  const handleEditAccepted = useCallback((updatedFinding: Finding) => {
+    setOpen((current) => current?.id === updatedFinding.id ? updatedFinding : current);
+    patchFindingInReviewData(updatedFinding.id, updatedFinding);
+  }, [patchFindingInReviewData]);
 
   const handleBasisChange = useCallback(
     (findingId: string, basis: ReviewBasisItem[]) => {
@@ -929,11 +959,15 @@ function WorkspaceContent() {
 
   const escalationFinding = open ?? activeClusterFinding;
 
-  const closeFindingSheet = useCallback(() => {
-    setOpen(null);
-    setOpenCluster(null);
-    setClusterViewMode("list");
-  }, []);
+  const getFindingScreenImageUrl = useCallback((finding: Finding) => {
+    const coordinateScreen = screens.find((candidate) =>
+      typeof candidate.screenIndex === "number" && Boolean(getBboxRefForScreen(finding, candidate.screenIndex))
+    );
+
+    return coordinateScreen?.imageUrl
+      ?? screens.find((candidate) => findingMatchesScreen(finding.screen, candidate.name))?.imageUrl
+      ?? screen?.imageUrl;
+  }, [screen?.imageUrl, screens]);
 
   if (!reviewId) {
     return (
@@ -978,40 +1012,50 @@ function WorkspaceContent() {
           <Badge variant="outline" className="gap-1 text-[10px]"><Edit3 className="h-3 w-3 text-blue-600" />Edited {triage.edited}</Badge>
           <Badge variant="outline" className="gap-1 text-[10px]"><X className="h-3 w-3" />Dismissed {triage.dismissed}</Badge>
           <Badge variant="outline" className="gap-1 text-[10px]"><ArrowUpRight className="h-3 w-3 text-destructive" />Escalated {triage.escalated}</Badge>
+          <Badge variant="outline" className="gap-1 text-[10px]"><AlertCircle className="h-3 w-3 text-muted-foreground" />False positive {triage.falsePositive}</Badge>
         </div>
         <div className="flex w-full items-center gap-2 sm:ml-auto sm:w-auto">
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                variant="outline"
-                size="sm"
-                className="min-h-11 w-full sm:w-auto"
-                disabled={!exportable}
-                aria-describedby={!exportable ? "export-help" : undefined}
-              >
-                <Download className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />Export
-                <ChevronDown className="ml-1.5 h-3.5 w-3.5" aria-hidden="true" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onSelect={() => { void handleExport("pdf"); }}>
-                Export as PDF
-              </DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => { void handleExport("word"); }}>
-                Export as Word
-              </DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => { void handleExport("html"); }}>
-                Export as HTML
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <TooltipProvider delayDuration={100}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="inline-flex w-full sm:w-auto">
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="min-h-11 w-full sm:w-auto"
+                        disabled={!exportable}
+                        aria-describedby={!exportable ? "export-help" : undefined}
+                      >
+                        <Download className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />Export
+                        <ChevronDown className="ml-1.5 h-3.5 w-3.5" aria-hidden="true" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem onSelect={() => { void handleExport("pdf"); }}>
+                        Export as PDF
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onSelect={() => { void handleExport("word"); }}>
+                        Export as Word
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onSelect={() => { void handleExport("html"); }}>
+                        Export as HTML
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </span>
+              </TooltipTrigger>
+              {!exportable && (
+                <TooltipContent className="max-w-xs text-left">
+                  {exportBlockedMessage}
+                </TooltipContent>
+              )}
+            </Tooltip>
+          </TooltipProvider>
           {!exportable && (
             <p id="export-help" className="sr-only">
-              {!allAcceptedHaveBasis
-                ? "Ensure all accepted or edited findings have at least one review basis item."
-                : triage.proposed > 0
-                ? `Triage the remaining ${triage.proposed} findings to enable export.`
-                : "Accept at least one finding to enable export."}
+              {exportBlockedMessage}
             </p>
           )}
           <Button
@@ -1215,7 +1259,7 @@ function WorkspaceContent() {
                         </div>
                         <Badge variant="outline" className="shrink-0 text-[10px]">{unplacedFindings.length}</Badge>
                       </div>
-                      <ScrollArea className="mt-2 max-h-36">
+                      <ScrollArea className="mt-2 h-36">
                         <div className="space-y-2 pr-2">
                           {unplacedFindingGroups.map((group) => (
                             <div key={group.flowName} className="space-y-1">
@@ -1262,12 +1306,16 @@ function WorkspaceContent() {
           {open ? (
             <FindingDetail
               finding={open}
-              screenImageUrl={screen?.imageUrl}
+              screenImageUrl={getFindingScreenImageUrl(open)}
               findingMetadataOptions={findingMetadataOptions}
               onAction={(status) => handleFindingAction(open.id, status)}
+              onEditAccepted={handleEditAccepted}
               onBasisChange={(basis) => handleBasisChange(open.id, basis)}
               onEscalate={() => setShowEscalate(true)}
-              onFindingUpdate={(updated) => setOpen(updated)}
+              onFindingUpdate={(updated) => {
+                setOpen(updated);
+                patchFindingInReviewData(updated.id, updated);
+              }}
             />
           ) : openCluster && clusterViewMode === "list" ? (
             <FindingClusterDetail
@@ -1283,11 +1331,13 @@ function WorkspaceContent() {
               <div className="flex-1 overflow-y-auto">
                 <FindingDetail
                   finding={activeClusterFinding}
-                  screenImageUrl={screen?.imageUrl}
+                  screenImageUrl={getFindingScreenImageUrl(activeClusterFinding)}
                   findingMetadataOptions={findingMetadataOptions}
-                  onAction={(status) => handleFindingAction(activeClusterFinding.id, status)}
+                  onAction={(status) => handleFindingAction(activeClusterFinding.id, status, { returnToCluster: true })}
+                  onEditAccepted={handleEditAccepted}
                   onBasisChange={(basis) => handleBasisChange(activeClusterFinding.id, basis)}
                   onEscalate={() => setShowEscalate(true)}
+                  onFindingUpdate={(updated) => patchFindingInReviewData(updated.id, updated)}
                 />
               </div>
               <ClusterFindingNavigation
@@ -1312,9 +1362,11 @@ function WorkspaceContent() {
           onOpenChange={setShowEscalate}
           findingId={escalationFinding.id}
           findingTitle={escalationFinding.title}
-          onEscalated={() => {
+          onEscalated={(updatedFinding) => {
+            const nextFinding = { ...escalationFinding, ...updatedFinding, status: "ESCALATED" as TriageStatus };
+            patchFindingInReviewData(escalationFinding.id, nextFinding);
+            setOpen((prev) => prev && prev.id === escalationFinding.id ? nextFinding : prev);
             fetchReview();
-            setOpen((prev) => prev ? { ...prev, status: "ESCALATED" } : prev);
           }}
         />
       )}
@@ -1331,6 +1383,7 @@ interface FindingDetailProps {
   screenImageUrl?: string;
   findingMetadataOptions: FindingOutputOptionKey[];
   onAction: (status: TriageStatus) => void;
+  onEditAccepted: (finding: Finding) => void;
   onBasisChange: (basis: ReviewBasisItem[]) => void;
   onEscalate: () => void;
   onFindingUpdate?: (finding: Finding) => void;
@@ -1453,7 +1506,7 @@ function ClusterFindingNavigation({
   );
 }
 
-function FindingDetail({ finding, screenImageUrl, findingMetadataOptions, onAction, onBasisChange, onEscalate, onFindingUpdate }: FindingDetailProps) {
+function FindingDetail({ finding, screenImageUrl, findingMetadataOptions, onAction, onEditAccepted, onBasisChange, onEscalate, onFindingUpdate }: FindingDetailProps) {
   const [basisSearch, setBasisSearch] = useState("");
   const [showComment, setShowComment] = useState(false);
   const [commentText, setCommentText] = useState("");
@@ -1465,17 +1518,16 @@ function FindingDetail({ finding, screenImageUrl, findingMetadataOptions, onActi
     setIsCommenting(true);
     try {
       const comment = await addComment(finding.id, { text: commentText.trim() });
-      toast.success("Comment added");
       setCommentText("");
       setShowComment(false);
-      if (onFindingUpdate) {
-        onFindingUpdate({
-          ...finding,
-          comments: [...(finding.comments || []), comment],
-        });
-      }
+      onEditAccepted({
+        ...finding,
+        status: "EDITED",
+        comments: [...(finding.comments || []), comment],
+      });
+      toast.success("Comment saved. This finding is edited and accepted.");
     } catch {
-      toast.error("Failed to add comment");
+      toast.error("Failed to edit and accept");
     } finally {
       setIsCommenting(false);
     }
@@ -1528,6 +1580,15 @@ function FindingDetail({ finding, screenImageUrl, findingMetadataOptions, onActi
   const needsBasis =
     (finding.status === "ACCEPTED" || finding.status === "EDITED") &&
     finding.reviewBasis.length === 0;
+  const isFinalLockedStatus = finding.status !== "PROPOSED" && finding.status !== "EDITED";
+  const isEditableAccepted = finding.status === "EDITED";
+  const hasComments = Boolean(finding.comments?.length);
+  const statusLockMessage: Partial<Record<TriageStatus, string>> = {
+    ACCEPTED: "This finding is already accepted and will be included in the report.",
+    DISMISSED: "This finding is dismissed and will not be included in the report.",
+    ESCALATED: "This finding is escalated and will be included in the report with escalation details.",
+    FALSE_POSITIVE: "This finding is marked false positive and will not be included in the report.",
+  };
 
   return (
     <>
@@ -1689,18 +1750,18 @@ function FindingDetail({ finding, screenImageUrl, findingMetadataOptions, onActi
         {/* Comment Input */}
         {showComment && (
           <div className="rounded-lg border border-border bg-secondary/40 p-3 space-y-2">
-            <p className="text-xs font-medium text-foreground">Add a comment</p>
+            <p className="text-xs font-medium text-foreground">Edit and accept</p>
             <Textarea
               value={commentText}
               onChange={(e) => setCommentText(e.target.value)}
-              placeholder="Type your comment…"
+              placeholder="Describe what changed before accepting…"
               className="text-sm"
               rows={3}
             />
             <div className="flex gap-2">
               <Button size="sm" onClick={handleAddComment} disabled={isCommenting}>
-                {isCommenting ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : <MessageSquare className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />}
-                Save comment
+                {isCommenting ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : <Edit3 className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />}
+                Edit and accept
               </Button>
               <Button size="sm" variant="ghost" onClick={() => { setShowComment(false); setCommentText(""); }}>Cancel</Button>
             </div>
@@ -1724,6 +1785,12 @@ function FindingDetail({ finding, screenImageUrl, findingMetadataOptions, onActi
 
         <Separator />
 
+        {isFinalLockedStatus && statusLockMessage[finding.status as TriageStatus] && (
+          <div className="rounded-lg border border-border bg-secondary/30 p-3 text-xs text-muted-foreground">
+            {statusLockMessage[finding.status as TriageStatus]}
+          </div>
+        )}
+
         {finding.status === "ESCALATED" && (
           <div className="rounded-lg border border-border bg-secondary/30 p-3">
             <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Escalated to</p>
@@ -1745,21 +1812,17 @@ function FindingDetail({ finding, screenImageUrl, findingMetadataOptions, onActi
           <Button
             size="sm" className="min-h-9"
             onClick={() => onAction("ACCEPTED")}
-            disabled={finding.status === "ACCEPTED"}
+            disabled={isFinalLockedStatus || isEditableAccepted}
           >
             <Check className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />Accept
           </Button>
-          <Button
-            size="sm" variant="outline" className="min-h-9"
-            onClick={() => onAction("EDITED")}
-            disabled={finding.status === "EDITED"}
-          >
-            <Edit3 className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />Edit & accept
+          <Button size="sm" variant="outline" className="min-h-9" onClick={() => setShowComment(true)} disabled={showComment || isFinalLockedStatus}>
+            <Edit3 className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />Edit and accept
           </Button>
           <Button
             size="sm" variant="outline" className="min-h-9"
             onClick={() => onAction("DISMISSED")}
-            disabled={finding.status === "DISMISSED"}
+            disabled={isFinalLockedStatus || isEditableAccepted}
           >
             <X className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />Dismiss
           </Button>
@@ -1770,7 +1833,7 @@ function FindingDetail({ finding, screenImageUrl, findingMetadataOptions, onActi
                   <Button
                     size="sm" variant="outline" className="min-h-9"
                     onClick={onEscalate}
-                    disabled={finding.status === "ESCALATED"}
+                    disabled={isFinalLockedStatus || isEditableAccepted}
                   >
                     <ArrowUpRight className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />Escalate
                   </Button>
@@ -1785,17 +1848,14 @@ function FindingDetail({ finding, screenImageUrl, findingMetadataOptions, onActi
               )}
             </Tooltip>
           </TooltipProvider>
-          <Button size="sm" variant="outline" className="min-h-9" onClick={() => setShowComment(true)} disabled={showComment}>
-            <MessageSquare className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />Comment
-          </Button>
           <Button size="sm" variant="outline" className="min-h-9">Create Jira ticket</Button>
-          <Button size="sm" variant="ghost" className="min-h-9" onClick={handleRegenerate} disabled={isRegenerating}>
+          <Button size="sm" variant="ghost" className="min-h-9" onClick={handleRegenerate} disabled={isRegenerating || !isEditableAccepted || !hasComments}>
             <RefreshCw className={cn("mr-1.5 h-3.5 w-3.5", isRegenerating && "animate-spin")} aria-hidden="true" />Regenerate
           </Button>
           <Button
             size="sm" variant="ghost" className="min-h-9"
             onClick={() => onAction("FALSE_POSITIVE" as TriageStatus)}
-            disabled={finding.status === "FALSE_POSITIVE"}
+            disabled={isFinalLockedStatus || isEditableAccepted}
           >
             <AlertCircle className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />False positive
           </Button>

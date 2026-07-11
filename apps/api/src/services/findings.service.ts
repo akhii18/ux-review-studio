@@ -100,6 +100,8 @@ export const FindingsService = {
     });
     if (!review) throw new AppError(404, "Review not found");
 
+    const escalationCc = user.email ? [user.email] : [];
+
     let screenshotUrl: string | undefined;
     let screenshotBase64: string | undefined;
     let screenshotMimeType: string | undefined;
@@ -135,6 +137,7 @@ export const FindingsService = {
 
     await EmailService.sendEscalationEmail({
       to: emails,
+      cc: escalationCc,
       escalatorName: user.name,
       escalatorEmail: user.email,
       finding: {
@@ -176,6 +179,10 @@ export const FindingsService = {
     const finding = await FindingsRepository.findById(findingId, userId);
     if (!finding) throw new AppError(404, "Finding not found");
     const comment = await FindingsRepository.createComment(findingId, text, authorName);
+    if (finding.status === "PROPOSED" || finding.status === "EDITED") {
+      await FindingsRepository.update(findingId, { status: "EDITED" });
+      await refreshReviewUxScore(finding.reviewId);
+    }
     return comment;
   },
 
@@ -276,6 +283,7 @@ export const FindingsService = {
         status: "PROPOSED" as const,
       };
 
+      await prisma.comment.deleteMany({ where: { findingId } });
       const updatedFinding = await FindingsRepository.update(findingId, updateData);
       await refreshReviewUxScore(finding.reviewId);
       return updatedFinding;

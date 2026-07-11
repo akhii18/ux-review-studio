@@ -39,6 +39,13 @@ function toTitleCase(value: string) {
     .replace(/\bPrd\b/g, "PRD");
 }
 
+function formatReviewType(value?: string | null) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (!normalized) return "Unknown";
+  if (normalized === "partial") return "Custom";
+  return toTitleCase(normalized);
+}
+
 export default function DashboardPage() {
   const [analytics, setAnalytics] = useState<any>(null);
   const [reviews, setReviews] = useState<any[]>([]);
@@ -191,7 +198,7 @@ export default function DashboardPage() {
         ownerName: review.owner || "Unassigned",
         status: String(review.status || "unknown"),
         reviewDateTime: review.updatedAt || review.createdAt || new Date().toISOString(),
-        summary: `${review.reviewType || "ux"} review for ${review.domain || "general"} domain`,
+        summary: `${formatReviewType(review.reviewType)} review for ${review.domain || "general"} domain`,
         uxScore: typeof review.uxScore === "number" ? review.uxScore : null,
         findingCount: review?._count?.findings,
       };
@@ -379,7 +386,7 @@ export default function DashboardPage() {
                             <p className="text-[11px] text-muted-foreground">{r.createdAt?.slice(0, 10)}</p>
                           </TableCell>
                           <TableCell className="hidden text-sm md:table-cell">{r.product}</TableCell>
-                          <TableCell className="hidden text-xs text-muted-foreground lg:table-cell">{toTitleCase(String(r.reviewType || "unknown"))}</TableCell>
+                          <TableCell className="hidden text-xs text-muted-foreground lg:table-cell">{formatReviewType(r.reviewType)}</TableCell>
                           <TableCell className="text-right font-medium tabular-nums">{r.uxScore ?? "—"}</TableCell>
                           <TableCell className="text-right">
                             <Badge variant="secondary" className="whitespace-nowrap capitalize">{String(r.status || "unknown").replaceAll("_", " ")}</Badge>
