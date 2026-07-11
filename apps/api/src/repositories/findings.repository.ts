@@ -1,4 +1,5 @@
 import { prisma } from "../config/prisma";
+import type { Prisma } from "@prisma/client";
 import type { FindingStatus, FindingsQuery, ReviewArea, Severity, UpdateFinding } from "@uxm/shared";
 
 export const FindingsRepository = {
@@ -93,12 +94,13 @@ export const FindingsRepository = {
   },
 
 
-  async escalate(id: string, reason: string) {
+  async escalate(id: string, reason: string, aiMetadata?: Prisma.InputJsonValue) {
     return prisma.finding.update({
       where: { id },
       data: {
         status: "ESCALATED",
         escalationReason: reason,
+        aiMetadata: aiMetadata ?? undefined,
         updatedAt: new Date(),
       },
       include: { reviewBasis: true, comments: { orderBy: { createdAt: "asc" } } },

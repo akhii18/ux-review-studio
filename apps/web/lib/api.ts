@@ -44,7 +44,7 @@ export function signin(data: { email: string; password: string }) {
   return request<{
     token: string;
     expiresInSeconds: number;
-    user: { id: string; name: string; email: string };
+    user: { id: string; name: string; email: string; avatarDataUrl?: string | null };
   }>("/api/auth/signin", {
     method: "POST",
     body: JSON.stringify(data),
@@ -52,16 +52,23 @@ export function signin(data: { email: string; password: string }) {
 }
 
 export function me() {
-  return request<{ id: string; name: string; email: string; createdAt: string }>("/api/auth/me");
+  return request<{ id: string; name: string; email: string; avatarDataUrl?: string | null; createdAt: string }>("/api/auth/me");
 }
 
-export function updateMe(data: { name: string }) {
+export function updateMe(data: { name?: string; avatarDataUrl?: string | null }) {
   return request<{
     token: string;
     expiresInSeconds: number;
-    user: { id: string; name: string; email: string; createdAt: string };
+    user: { id: string; name: string; email: string; avatarDataUrl?: string | null; createdAt: string };
   }>("/api/auth/me", {
     method: "PATCH",
+    body: JSON.stringify(data),
+  });
+}
+
+export function deleteAccount(data: { password: string }) {
+  return request<{ message: string }>("/api/auth/me", {
+    method: "DELETE",
     body: JSON.stringify(data),
   });
 }
@@ -70,6 +77,20 @@ export function resetPassword(token: string, password: string) {
   return request<{ message: string }>("/api/auth/reset-password", {
     method: "POST",
     body: JSON.stringify({ token, password }),
+  });
+}
+
+export function forgotPassword(email: string) {
+  return request<{ message: string }>("/api/auth/forgot-password", {
+    method: "POST",
+    body: JSON.stringify({ email }),
+  });
+}
+
+export function resendVerification(email: string) {
+  return request<{ message: string }>("/api/auth/resend-verification", {
+    method: "POST",
+    body: JSON.stringify({ email }),
   });
 }
 
@@ -160,7 +181,37 @@ export function runAgainReview(id: string) {
 }
 
 export function exportReviewReport(id: string) {
-  return request<{ id: string; name: string; contentMd: string; executiveSummary: string; status: string }>(
+  return request<{
+    id: string;
+    name: string;
+    contentMd: string;
+    executiveSummary: string;
+    status: string;
+    visualContext?: {
+      assets?: Array<{
+        id?: string;
+        name?: string | null;
+        mimeType?: string | null;
+        blobUrl?: string | null;
+        base64Data?: string | null;
+      }>;
+      findings?: Array<{
+        id: string;
+        title: string;
+        description?: string | null;
+        severity?: string | null;
+        area?: string | null;
+        screen?: string | null;
+        observation?: string | null;
+        why?: string | null;
+        recommendation?: string | null;
+        businessImpact?: string | null;
+        a11yImpact?: string | null;
+        status?: string | null;
+        bboxRefs?: unknown;
+      }>;
+    };
+  }>(
     `/api/reviews/${id}/export`,
     { method: "POST" }
   );

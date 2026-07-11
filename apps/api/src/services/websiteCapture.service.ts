@@ -13,6 +13,7 @@ const MAX_SCREEN_LIMIT = 16;
 const NAVIGATION_TIMEOUT_MS = 30000;
 const MAX_VISIBLE_TEXT_CHARS = 6000;
 const MAX_LINKS_PER_PAGE = 12;
+const MAX_SECTIONS_PER_PAGE = 4;
 
 export type WebsiteCapturedScreen = {
   name: string;
@@ -47,6 +48,18 @@ type ScreenCandidate = {
 type CrawlQueueItem = {
   url: string;
   depth: number;
+};
+
+type WebsiteAuthCredentials = {
+  identifier: string;
+  password: string;
+};
+
+type ClickableNavCandidate = {
+  key: string;
+  label: string;
+  x: number;
+  y: number;
 };
 
 function normalizeWhitespace(value: string): string {
@@ -430,7 +443,46 @@ async function extractPageSignals(page: Page, origin: string): Promise<PageSigna
   }, origin);
 }
 
-function buildScreenName(order: number, title: string, url: string): string {
+async function getViewportPlan(page: Page, maxSections: number): Promise<Array<{ scrollY: number; label: string; sectionCount: number }>> {
+  const metrics = await page.evaluate(() => {
+    const doc = document.documentElement;
+    const body = document.body;
+    const viewportHeight = window.innerHeight || doc.clientHeight || 1024;
+    const scrollHeight = Math.max(
+      doc.scrollHeight,
+      doc.offsetHeight,
+      body?.scrollHeight ?? 0,
+      body?.offsetHeight ?? 0,
+      viewportHeight,
+    );
+
+    return { viewportHeight, scrollHeight };
+  }).catch(() => ({ viewportHeight: 1024, scrollHeight: 1024 }));
+
+  const viewportHeight = Math.max(1, metrics.viewportHeight);
+  const scrollHeight = Math.max(viewportHeight, metrics.scrollHeight);
+  const maxScroll = Math.max(0, scrollHeight - viewportHeight);
+
+  const estimatedSections = Math.max(1, Math.ceil(scrollHeight / Math.max(1, viewportHeight * 0.85)));
+  const sectionCount = Math.min(maxSections, MAX_SECTIONS_PER_PAGE, estimatedSections);
+
+  if (sectionCount === 1) {
+    return [{ scrollY: 0, label: "viewport 1/1", sectionCount }];
+  }
+
+  const positions = Array.from({ length: sectionCount }, (_, index) => {
+    const ratio = sectionCount === 1 ? 0 : index / (sectionCount - 1);
+    return Math.round(maxScroll * ratio);
+  });
+
+  return positions.map((scrollY, index) => ({
+    scrollY,
+    label: `viewport ${index + 1}/${sectionCount}`,
+    sectionCount,
+  }));
+}
+
+function buildScreenName(order: number, title: string, url: string, sectionLabel?: string): string {
   const derived = title || (() => {
     try {
       const parsed = new URL(url);
@@ -440,52 +492,66 @@ function buildScreenName(order: number, title: string, url: string): string {
     }
   })();
 
-  return `website-screen-${String(order).padStart(2, "0")}-${sanitizeFileStem(derived)}.png`;
+  const suffix = sectionLabel ? `-${sanitizeFileStem(sectionLabel)}` : "";
+  return `website-screen-${String(order).padStart(2, "0")}-${sanitizeFileStem(derived)}${suffix}.png`;
 }
 
-async function captureScreen(page: Page, order: number, seenHashes: Set<string>, depth: number): Promise<ScreenCandidate | null> {
+async function captureViewportScreens(page: Page, orderStart: number, seenHashes: Set<string>, depth: number, remainingSlots: number): Promise<ScreenCandidate[]> {
   const title = normalizeWhitespace(await page.title().catch(() => ""));
   const sourceUrl = normalizeCrawlUrl(page.url());
   const origin = new URL(sourceUrl).origin;
-  const pageSignals = await extractPageSignals(page, origin).catch((): PageSignalSummary => ({
-    visibleText: "",
-    componentSummary: "component_summary_unavailable",
-    accessibilitySummary: "a11y_summary_unavailable",
-    performanceSummary: "performance_summary_unavailable",
-    internalLinks: [],
-  }));
+  const viewportPlan = await getViewportPlan(page, remainingSlots);
+  const candidates: ScreenCandidate[] = [];
 
-  const buffer = await page.screenshot({ type: "png", fullPage: true, animations: "disabled" });
-  const hash = crypto.createHash("sha1").update(buffer).digest("hex");
+  for (const [index, plan] of viewportPlan.entries()) {
+    await page.evaluate((scrollY) => window.scrollTo(0, scrollY), plan.scrollY).catch(() => undefined);
+    await settlePage(page, 350);
 
-  if (seenHashes.has(hash)) {
-    return null;
+    const pageSignals = await extractPageSignals(page, origin).catch((): PageSignalSummary => ({
+      visibleText: "",
+      componentSummary: "component_summary_unavailable",
+      accessibilitySummary: "a11y_summary_unavailable",
+      performanceSummary: "performance_summary_unavailable",
+      internalLinks: [],
+    }));
+
+    const buffer = await page.screenshot({ type: "png", fullPage: false, animations: "disabled" });
+    const hash = crypto.createHash("sha1").update(buffer).digest("hex");
+
+    if (seenHashes.has(hash)) {
+      continue;
+    }
+
+    seenHashes.add(hash);
+    const contentTextParts = [
+      "Source: Website design system reference",
+      `Captured URL: ${sourceUrl}`,
+      title ? `Screen title: ${title}` : "",
+      `Crawl depth: ${depth}`,
+      `Viewport section: ${plan.label}`,
+      `Scroll offset: ${plan.scrollY}px`,
+      `DOM component summary: ${pageSignals.componentSummary}`,
+      `Accessibility heuristic summary: ${pageSignals.accessibilitySummary}`,
+      `Performance summary: ${pageSignals.performanceSummary}`,
+      pageSignals.visibleText ? `Visible text: ${pageSignals.visibleText.slice(0, MAX_VISIBLE_TEXT_CHARS)}` : "Visible text: No meaningful DOM text extracted.",
+    ].filter(Boolean);
+
+    candidates.push({
+      hash,
+      screen: {
+        name: buildScreenName(orderStart + index, title, sourceUrl, plan.label),
+        mimeType: "image/png",
+        base64Data: buffer.toString("base64"),
+        sizeBytes: buffer.byteLength,
+        contentText: contentTextParts.join("\n"),
+        sourceUrl,
+        title: plan.sectionCount > 1 ? `${title || sourceUrl} (${plan.label})` : title,
+      },
+    });
   }
 
-  seenHashes.add(hash);
-  const contentTextParts = [
-    "Source: Website design system reference",
-    `Captured URL: ${sourceUrl}`,
-    title ? `Screen title: ${title}` : "",
-    `Crawl depth: ${depth}`,
-    `DOM component summary: ${pageSignals.componentSummary}`,
-    `Accessibility heuristic summary: ${pageSignals.accessibilitySummary}`,
-    `Performance summary: ${pageSignals.performanceSummary}`,
-    pageSignals.visibleText ? `Visible text: ${pageSignals.visibleText.slice(0, MAX_VISIBLE_TEXT_CHARS)}` : "Visible text: No meaningful DOM text extracted.",
-  ].filter(Boolean);
-
-  return {
-    hash,
-    screen: {
-      name: buildScreenName(order, title, sourceUrl),
-      mimeType: "image/png",
-      base64Data: buffer.toString("base64"),
-      sizeBytes: buffer.byteLength,
-      contentText: contentTextParts.join("\n"),
-      sourceUrl,
-      title,
-    },
-  };
+  await page.evaluate(() => window.scrollTo(0, 0)).catch(() => undefined);
+  return candidates;
 }
 
 function enqueueLinks(queue: CrawlQueueItem[], seenUrls: Set<string>, currentDepth: number, maxDepth: number, links: string[]) {
@@ -505,7 +571,211 @@ function enqueueLinks(queue: CrawlQueueItem[], seenUrls: Set<string>, currentDep
   }
 }
 
-export async function captureWebsiteReference(input: { url: string; maxScreens?: number }): Promise<WebsiteCaptureResult> {
+async function discoverInternalRoutesByClick(page: Page, currentUrl: string): Promise<string[]> {
+  const origin = new URL(currentUrl).origin;
+
+  const candidates = await page.evaluate(() => {
+    const isVisible = (element: Element) => {
+      const rect = element.getBoundingClientRect();
+      if (rect.width < 12 || rect.height < 12) return false;
+      if (rect.bottom < 0 || rect.right < 0) return false;
+
+      const style = window.getComputedStyle(element as HTMLElement);
+      if (style.display === "none" || style.visibility === "hidden" || style.pointerEvents === "none" || Number(style.opacity) < 0.05) {
+        return false;
+      }
+
+      return true;
+    };
+
+    const rootSelectors = [
+      "nav",
+      "aside",
+      "[role='navigation']",
+      "[class*='sidebar' i]",
+      "[class*='menu' i]",
+      "[class*='nav' i]",
+    ];
+
+    const roots = rootSelectors
+      .flatMap((selector) => Array.from(document.querySelectorAll(selector)))
+      .filter((node, index, array) => array.indexOf(node) === index);
+
+    const clickables: ClickableNavCandidate[] = [];
+    const seen = new Set<string>();
+
+    for (const root of roots) {
+      const interactiveNodes = Array.from(root.querySelectorAll("a, button, [role='link'], [role='menuitem'], [tabindex='0']"));
+
+      for (const node of interactiveNodes) {
+        if (!isVisible(node)) continue;
+
+        const rect = node.getBoundingClientRect();
+        const label = [
+          (node.textContent ?? "").trim(),
+          node.getAttribute("aria-label")?.trim() ?? "",
+          node.getAttribute("title")?.trim() ?? "",
+        ].filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
+
+        if (!label || label.length < 2) continue;
+
+        const key = `${Math.round(rect.x)}:${Math.round(rect.y)}:${Math.round(rect.width)}:${Math.round(rect.height)}:${label.toLowerCase()}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+
+        clickables.push({
+          key,
+          label,
+          x: Math.round(rect.x + rect.width / 2),
+          y: Math.round(rect.y + rect.height / 2),
+        });
+      }
+    }
+
+    // Prefer likely route/menu labels first.
+    const score = (candidate: ClickableNavCandidate) => {
+      const label = candidate.label.toLowerCase();
+      let value = 0;
+
+      if (/(all deals|deals|dashboard|overview|home|report|analytics|settings|users|accounts)/i.test(label)) value += 300;
+      if (/(logout|sign out|delete|remove|close)/i.test(label)) value -= 250;
+      value += Math.min(80, candidate.label.length);
+
+      return value;
+    };
+
+    return clickables
+      .sort((a, b) => score(b) - score(a))
+      .slice(0, 12);
+  }).catch(() => [] as ClickableNavCandidate[]);
+
+  const discovered = new Set<string>();
+
+  for (const candidate of candidates) {
+    await page.mouse.click(candidate.x, candidate.y).catch(() => undefined);
+    await settlePage(page, 450);
+
+    const afterClickUrl = normalizeCrawlUrl(page.url());
+    if (afterClickUrl !== currentUrl) {
+      try {
+        const parsed = new URL(afterClickUrl);
+        if (parsed.origin === origin && !isDisallowedHost(parsed.hostname)) {
+          discovered.add(afterClickUrl);
+        }
+      } catch {
+        // Ignore malformed route URLs.
+      }
+
+      await gotoWithRetry(page, currentUrl).catch(() => undefined);
+      await settlePage(page, 500);
+      await dismissCommonOverlays(page);
+      await settlePage(page, 250);
+    }
+  }
+
+  return Array.from(discovered);
+}
+
+async function clickIfVisible(page: Page, selectors: string[], timeout = 800): Promise<boolean> {
+  for (const selector of selectors) {
+    const locator = page.locator(selector).first();
+    const visible = await locator.isVisible().catch(() => false);
+    if (!visible) continue;
+
+    const disabled = await locator.isDisabled().catch(() => false);
+    if (disabled) continue;
+
+    const clicked = await locator.click({ timeout }).then(() => true).catch(() => false);
+    if (clicked) return true;
+  }
+
+  return false;
+}
+
+async function fillFirstVisibleInput(page: Page, selectors: string[], value: string): Promise<boolean> {
+  for (const selector of selectors) {
+    const locator = page.locator(selector).first();
+    const visible = await locator.isVisible().catch(() => false);
+    if (!visible) continue;
+
+    const filled = await locator.fill(value).then(() => true).catch(() => false);
+    if (filled) return true;
+  }
+
+  return false;
+}
+
+async function attemptWebsiteAuthentication(page: Page, credentials?: WebsiteAuthCredentials): Promise<void> {
+  // If app provides a guest path, try it first when no credentials are supplied.
+  if (!credentials) {
+    const guestEntered = await clickIfVisible(page, [
+      'button:has-text("Continue as Guest")',
+      'a:has-text("Continue as Guest")',
+      '[role="button"]:has-text("Continue as Guest")',
+    ]);
+
+    if (guestEntered) {
+      await settlePage(page, 900);
+    }
+
+    return;
+  }
+
+  const identifier = credentials.identifier.trim();
+  const password = credentials.password.trim();
+  if (!identifier || !password) return;
+
+  // Step 1: reach credential form if behind an intermediate CTA.
+  const openedCredentialForm = await clickIfVisible(page, [
+    'button:has-text("Login with TechM ID")',
+    'button:has-text("Sign in")',
+    'a:has-text("Login with TechM ID")',
+    'a:has-text("Sign in")',
+  ]);
+
+  if (openedCredentialForm) {
+    await settlePage(page, 700);
+  }
+
+  // Step 2: fill auth fields (LAN ID or email + password).
+  const identifierFilled = await fillFirstVisibleInput(page, [
+    'input[type="email"]',
+    'input[name*="email" i]',
+    'input[id*="email" i]',
+    'input[name*="lan" i]',
+    'input[id*="lan" i]',
+    'input[placeholder*="lan" i]',
+    'input[placeholder*="email" i]',
+    'input[placeholder*="user" i]',
+    'input[type="text"]',
+  ], identifier);
+
+  const passwordFilled = await fillFirstVisibleInput(page, [
+    'input[type="password"]',
+    'input[name*="password" i]',
+    'input[id*="password" i]',
+    'input[placeholder*="password" i]',
+  ], password);
+
+  if (!identifierFilled || !passwordFilled) {
+    return;
+  }
+
+  // Step 3: submit and let SPA route transition complete.
+  const submitted = await clickIfVisible(page, [
+    'button:has-text("Sign In")',
+    'button:has-text("Login")',
+    'button[type="submit"]',
+    '[role="button"]:has-text("Sign In")',
+    '[role="button"]:has-text("Login")',
+  ], 1200);
+
+  if (submitted) {
+    await settlePage(page, 1400);
+  }
+}
+
+export async function captureWebsiteReference(input: { url: string; maxScreens?: number; auth?: WebsiteAuthCredentials }): Promise<WebsiteCaptureResult> {
   const requestedUrl = assertValidWebsiteReferenceUrl(input.url);
   const maxScreens = Math.min(MAX_SCREEN_LIMIT, Math.max(1, input.maxScreens ?? DEFAULT_MAX_SCREENS));
   const maxDepth = Math.max(1, Math.ceil(maxScreens / 2));
@@ -538,6 +808,10 @@ export async function captureWebsiteReference(input: { url: string; maxScreens?:
       await dismissCommonOverlays(page);
       await settlePage(page, 500);
 
+      if (next.depth === 0) {
+        await attemptWebsiteAuthentication(page, input.auth);
+      }
+
       const normalizedUrl = normalizeCrawlUrl(page.url());
       const parsed = new URL(normalizedUrl);
       if (isDisallowedHost(parsed.hostname)) {
@@ -547,10 +821,12 @@ export async function captureWebsiteReference(input: { url: string; maxScreens?:
       visitedUrls.add(normalizedUrl);
       lastNavigatedUrl = normalizedUrl;
 
-      const candidate = await captureScreen(page, screens.length + 1, seenHashes, next.depth);
-      if (candidate) {
-        screens.push(candidate);
-        if (candidate.screen.title) titles.add(candidate.screen.title);
+      const sectionCandidates = await captureViewportScreens(page, screens.length + 1, seenHashes, next.depth, maxScreens - screens.length);
+      if (sectionCandidates.length > 0) {
+        screens.push(...sectionCandidates);
+        for (const candidate of sectionCandidates) {
+          if (candidate.screen.title) titles.add(candidate.screen.title);
+        }
       }
 
       const links = await extractPageSignals(page, parsed.origin)
@@ -558,6 +834,9 @@ export async function captureWebsiteReference(input: { url: string; maxScreens?:
         .catch(() => [] as string[]);
 
       enqueueLinks(queue, queuedOrVisitedUrls, next.depth, maxDepth, links);
+
+      const clickDiscoveredRoutes = await discoverInternalRoutesByClick(page, normalizedUrl);
+      enqueueLinks(queue, queuedOrVisitedUrls, next.depth, maxDepth, clickDiscoveredRoutes);
     }
 
     if (screens.length === 0) {
@@ -570,7 +849,7 @@ export async function captureWebsiteReference(input: { url: string; maxScreens?:
       screens: screens.map((item) => item.screen),
       visitedUrls: Array.from(visitedUrls),
       titles: Array.from(titles),
-      navigationSummary: `Captured ${screens.length} unique page${screens.length === 1 ? "" : "s"} from website crawl (${visitedUrls.size} URL${visitedUrls.size === 1 ? "" : "s"} visited).`,
+      navigationSummary: `Captured ${screens.length} viewport section${screens.length === 1 ? "" : "s"} across ${visitedUrls.size} page${visitedUrls.size === 1 ? "" : "s"} visited during website crawl.`,
     };
   } finally {
     if (context) {

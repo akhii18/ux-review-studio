@@ -34,6 +34,7 @@ import {
 } from "@uxm/shared";
 import { toast } from "@/lib/toast";
 import Link from "next/link";
+import { EscalateDialog } from "@/components/triage/EscalateDialog";
 
 type TriageStatus = "PROPOSED" | "ACCEPTED" | "EDITED" | "DISMISSED" | "ESCALATED" | "FALSE_POSITIVE";
 
@@ -434,6 +435,10 @@ function WorkspaceContent() {
   const runAgainAttemptRef = useRef(0);
   const [imageLayout, setImageLayout] = useState<ImageLayout | null>(null);
 
+  const findingId = params.get("findingId");
+  const [showEscalate, setShowEscalate] = useState(false);
+
+
   const fetchReview = useCallback(() => {
     if (!reviewId) return;
     setReviewLoading(true);
@@ -478,6 +483,25 @@ function WorkspaceContent() {
     }
     return [];
   }, [reviewData]);
+
+  // Deep-link: auto-open finding when ?findingId= is in URL
+  useEffect(() => {
+    if (findingId && allFindings.length > 0) {
+      const found = allFindings.find((f) => f.id === findingId);
+      if (found) {
+        setOpen(found);
+        if (found.screen) {
+          const cleanFindingScreen = stripExtension(found.screen).toLowerCase().replace(/\s+/g, " ").trim();
+          const screenAsset = screens.find((s) => {
+            const cleanScreenName = s.name.toLowerCase().replace(/\s+/g, " ").trim();
+            return cleanFindingScreen === cleanScreenName || cleanFindingScreen.includes(cleanScreenName) || cleanScreenName.includes(cleanFindingScreen);
+          });
+          if (screenAsset) setSelectedScreen(screenAsset.id);
+        }
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [findingId, allFindings.length]);
 
   const findingMetadataOptions = useMemo<FindingOutputOptionKey[]>(() => {
     const options = reviewData?.findingMetadataOptions;
@@ -903,6 +927,8 @@ function WorkspaceContent() {
     return allFindings.find((finding) => finding.id === placement.finding.id) ?? placement.finding;
   }, [openCluster, clusterFindingIndex, allFindings]);
 
+  const escalationFinding = open ?? activeClusterFinding;
+
   const closeFindingSheet = useCallback(() => {
     setOpen(null);
     setOpenCluster(null);
@@ -1240,6 +1266,7 @@ function WorkspaceContent() {
               findingMetadataOptions={findingMetadataOptions}
               onAction={(status) => handleFindingAction(open.id, status)}
               onBasisChange={(basis) => handleBasisChange(open.id, basis)}
+              onEscalate={() => setShowEscalate(true)}
               onFindingUpdate={(updated) => setOpen(updated)}
             />
           ) : openCluster && clusterViewMode === "list" ? (
@@ -1260,6 +1287,7 @@ function WorkspaceContent() {
                   findingMetadataOptions={findingMetadataOptions}
                   onAction={(status) => handleFindingAction(activeClusterFinding.id, status)}
                   onBasisChange={(basis) => handleBasisChange(activeClusterFinding.id, basis)}
+                  onEscalate={() => setShowEscalate(true)}
                 />
               </div>
               <ClusterFindingNavigation
@@ -1277,6 +1305,19 @@ function WorkspaceContent() {
           ) : null}
         </SheetContent>
       </Sheet>
+
+      {escalationFinding && (
+        <EscalateDialog
+          open={showEscalate}
+          onOpenChange={setShowEscalate}
+          findingId={escalationFinding.id}
+          findingTitle={escalationFinding.title}
+          onEscalated={() => {
+            fetchReview();
+            setOpen((prev) => prev ? { ...prev, status: "ESCALATED" } : prev);
+          }}
+        />
+      )}
     </>
   );
 }
@@ -1291,6 +1332,7 @@ interface FindingDetailProps {
   findingMetadataOptions: FindingOutputOptionKey[];
   onAction: (status: TriageStatus) => void;
   onBasisChange: (basis: ReviewBasisItem[]) => void;
+  onEscalate: () => void;
   onFindingUpdate?: (finding: Finding) => void;
 }
 
@@ -1411,7 +1453,7 @@ function ClusterFindingNavigation({
   );
 }
 
-function FindingDetail({ finding, screenImageUrl, findingMetadataOptions, onAction, onBasisChange, onFindingUpdate }: FindingDetailProps) {
+function FindingDetail({ finding, screenImageUrl, findingMetadataOptions, onAction, onBasisChange, onEscalate, onFindingUpdate }: FindingDetailProps) {
   const [basisSearch, setBasisSearch] = useState("");
   const [showComment, setShowComment] = useState(false);
   const [commentText, setCommentText] = useState("");
@@ -1456,6 +1498,9 @@ function FindingDetail({ finding, screenImageUrl, findingMetadataOptions, onActi
   };
 
   const hasOutputOption = (option: FindingOutputOptionKey) => findingMetadataOptions.includes(option);
+  const escalationRecipientLabels = Array.isArray(finding.aiMetadata?.escalationRecipients)
+    ? finding.aiMetadata.escalationRecipients.map((recipient) => recipient.label).filter(Boolean)
+    : [];
 
   const filteredLibrary = useMemo(() => {
     const search = basisSearch.trim().toLowerCase();
@@ -1679,6 +1724,23 @@ function FindingDetail({ finding, screenImageUrl, findingMetadataOptions, onActi
 
         <Separator />
 
+        {finding.status === "ESCALATED" && (
+          <div className="rounded-lg border border-border bg-secondary/30 p-3">
+            <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Escalated to</p>
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {escalationRecipientLabels.length > 0 ? (
+                escalationRecipientLabels.map((label) => (
+                  <Badge key={label} variant="secondary" className="text-xs font-normal">
+                    {label}
+                  </Badge>
+                ))
+              ) : (
+                <span className="text-xs text-muted-foreground">Recipient details were not saved for this escalation.</span>
+              )}
+            </div>
+          </div>
+        )}
+
         <div className="flex flex-wrap gap-2">
           <Button
             size="sm" className="min-h-9"
@@ -1701,13 +1763,28 @@ function FindingDetail({ finding, screenImageUrl, findingMetadataOptions, onActi
           >
             <X className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />Dismiss
           </Button>
-          <Button
-            size="sm" variant="outline" className="min-h-9"
-            onClick={() => onAction("ESCALATED")}
-            disabled={finding.status === "ESCALATED"}
-          >
-            <ArrowUpRight className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />Escalate
-          </Button>
+          <TooltipProvider delayDuration={100}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="inline-flex">
+                  <Button
+                    size="sm" variant="outline" className="min-h-9"
+                    onClick={onEscalate}
+                    disabled={finding.status === "ESCALATED"}
+                  >
+                    <ArrowUpRight className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />Escalate
+                  </Button>
+                </span>
+              </TooltipTrigger>
+              {finding.status === "ESCALATED" && (
+                <TooltipContent className="max-w-xs text-left">
+                  {escalationRecipientLabels.length > 0
+                    ? `Escalated to: ${escalationRecipientLabels.join(", ")}`
+                    : "This finding has already been escalated."}
+                </TooltipContent>
+              )}
+            </Tooltip>
+          </TooltipProvider>
           <Button size="sm" variant="outline" className="min-h-9" onClick={() => setShowComment(true)} disabled={showComment}>
             <MessageSquare className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />Comment
           </Button>

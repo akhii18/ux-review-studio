@@ -1,6 +1,7 @@
 "use client";
 
-import { cloneElement, isValidElement, useEffect, useId, useState, type ReactElement, type ReactNode } from "react";
+import { cloneElement, isValidElement, useEffect, useId, useRef, useState, type ChangeEvent, type ReactElement, type ReactNode } from "react";
+import { AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -8,13 +9,23 @@ import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { useGetSettingsQuery } from "@/store/api/settingsApi";
 import { useDispatch } from "react-redux";
 import { markSaved } from "@/store/slices/settingsSlice";
 import { toast } from "@/lib/toast";
-import { me as apiMe } from "@/lib/api";
+import { deleteAccount as apiDeleteAccount, me as apiMe, updateMe as apiUpdateMe } from "@/lib/api";
 
 const integrations = [
   { name: "Figma", desc: "Pull frames and prototypes for review", connected: true },
@@ -28,13 +39,25 @@ const integrations = [
 ] as const;
 
 const roles = ["Admin", "UX Lead", "UX Reviewer", "Designer", "Product Owner", "Viewer"] as const;
+const MAX_AVATAR_BYTES = 1_000_000;
+const ALLOWED_AVATAR_TYPES = ["image/png", "image/jpeg", "image/webp", "image/gif"];
 
 export function SettingsForm() {
   const dispatch = useDispatch();
   const { data: settings, isLoading } = useGetSettingsQuery();
   const [profileName, setProfileName] = useState("");
+  const [savedProfileName, setSavedProfileName] = useState("");
   const [profileEmail, setProfileEmail] = useState("");
+  const [profileAvatarDataUrl, setProfileAvatarDataUrl] = useState<string | null>(null);
   const [profileLoading, setProfileLoading] = useState(true);
+  const [profileSaving, setProfileSaving] = useState(false);
+  const [profilePhotoSaving, setProfilePhotoSaving] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deleteConfirmation, setDeleteConfirmation] = useState("");
+  const [deletePassword, setDeletePassword] = useState("");
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [deleteSubmitting, setDeleteSubmitting] = useState(false);
+  const photoInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -43,7 +66,9 @@ export function SettingsForm() {
       .then((user) => {
         if (!active) return;
         setProfileName(user.name ?? "");
+        setSavedProfileName(user.name ?? "");
         setProfileEmail(user.email ?? "");
+        setProfileAvatarDataUrl(user.avatarDataUrl ?? null);
       })
       .catch(() => {
         if (active) {
@@ -67,7 +92,102 @@ export function SettingsForm() {
     .map((part) => part.charAt(0).toUpperCase())
     .join("") || "US";
 
-  if (isLoading) {
+  const normalizedProfileName = profileName.trim().replace(/\s+/g, " ");
+  const canSaveProfile =
+    normalizedProfileName.length > 0 &&
+    normalizedProfileName !== savedProfileName &&
+    !profileSaving;
+  const isDeleteConfirmed = deleteConfirmation.trim().toLowerCase() === "delete";
+
+  const syncCurrentUser = (user: { name?: string | null; email?: string | null; avatarDataUrl?: string | null }) => {
+    localStorage.setItem(
+      "current_user",
+      JSON.stringify({ name: user.name || "User", email: user.email, avatarDataUrl: user.avatarDataUrl ?? null })
+    );
+    window.dispatchEvent(new Event("uxm:user-updated"));
+  };
+
+  const handleSaveProfile = async () => {
+    if (!canSaveProfile) return;
+
+    try {
+      setProfileSaving(true);
+      const result = await apiUpdateMe({ name: normalizedProfileName });
+      localStorage.setItem("token", result.token);
+      syncCurrentUser(result.user);
+      document.cookie = `token=${result.token}; Path=/; Max-Age=${result.expiresInSeconds}; SameSite=Lax`;
+      setProfileName(result.user.name ?? "");
+      setSavedProfileName(result.user.name ?? "");
+      setProfileEmail(result.user.email ?? "");
+      toast.success("Profile updated");
+    } catch (err: any) {
+      toast.error(err?.message ?? "Failed to update profile");
+    } finally {
+      setProfileSaving(false);
+    }
+  };
+
+  const handleProfilePhotoChange = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file || profilePhotoSaving) return;
+
+    if (!ALLOWED_AVATAR_TYPES.includes(file.type)) {
+      toast.error("Use a PNG, JPG, WEBP, or GIF image.");
+      return;
+    }
+
+    if (file.size > MAX_AVATAR_BYTES) {
+      toast.error("Profile photo must be 1 MB or smaller.");
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = async () => {
+      const avatarDataUrl = typeof reader.result === "string" ? reader.result : null;
+      if (!avatarDataUrl) {
+        toast.error("Unable to read profile photo.");
+        return;
+      }
+
+      try {
+        setProfilePhotoSaving(true);
+        const result = await apiUpdateMe({ avatarDataUrl });
+        localStorage.setItem("token", result.token);
+        syncCurrentUser(result.user);
+        document.cookie = `token=${result.token}; Path=/; Max-Age=${result.expiresInSeconds}; SameSite=Lax`;
+        setProfileAvatarDataUrl(result.user.avatarDataUrl ?? null);
+        toast.success("Profile photo updated");
+      } catch (err: any) {
+        toast.error(err?.message ?? "Failed to update profile photo");
+      } finally {
+        setProfilePhotoSaving(false);
+      }
+    };
+    reader.onerror = () => toast.error("Unable to read profile photo.");
+    reader.readAsDataURL(file);
+  };
+
+  const handleDeleteAccount = async () => {
+    if (!isDeleteConfirmed || !deletePassword || deleteSubmitting) return;
+
+    try {
+      setDeleteSubmitting(true);
+      setDeleteError(null);
+      await apiDeleteAccount({ password: deletePassword });
+      localStorage.removeItem("token");
+      localStorage.removeItem("current_user");
+      document.cookie = "token=; Path=/; Max-Age=0; SameSite=Lax";
+      toast.success("Account deleted permanently");
+      window.location.replace("/auth");
+    } catch (err: any) {
+      setDeleteError(err?.message ?? "Unable to delete account.");
+    } finally {
+      setDeleteSubmitting(false);
+    }
+  };
+
+  if (isLoading || profileLoading) {
     return (
       <div className="space-y-4">
         {Array.from({ length: 3 }).map((_, i) => (
@@ -97,11 +217,25 @@ export function SettingsForm() {
           <CardContent className="grid gap-4 md:grid-cols-2">
             <div className="md:col-span-2 flex items-center gap-4">
               <Avatar className="h-14 w-14">
+                {profileAvatarDataUrl && <AvatarImage src={profileAvatarDataUrl} alt="" />}
                 <AvatarFallback className="bg-primary text-primary-foreground">{profileInitials}</AvatarFallback>
               </Avatar>
               <div className="flex items-center gap-2">
-                <Button type="button" variant="outline" size="sm" disabled>
-                  Change photo
+                <input
+                  ref={photoInputRef}
+                  type="file"
+                  accept={ALLOWED_AVATAR_TYPES.join(",")}
+                  className="hidden"
+                  onChange={handleProfilePhotoChange}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => photoInputRef.current?.click()}
+                  disabled={profileLoading || profilePhotoSaving}
+                >
+                  {profilePhotoSaving ? "Uploading..." : "Change photo"}
                 </Button>
               </div>
             </div>
@@ -113,16 +247,29 @@ export function SettingsForm() {
               </div>
             ) : (
               <>
-                <Field label="Full name" readOnly>
-                  <p className="text-sm font-medium text-foreground px-0.5 -mt-2">
-                    {profileName || "User"}
-                  </p>
+                <Field label="Full name">
+                  <Input
+                    value={profileName}
+                    onChange={(event) => setProfileName(event.target.value.replace(/^\s+/, ""))}
+                    autoComplete="name"
+                    disabled={profileSaving}
+                  />
                 </Field>
                 <Field label="Email" readOnly>
                   <p className="text-sm font-medium text-foreground px-0.5 -mt-2">
                     {profileEmail || "—"}
                   </p>
                 </Field>
+                <div className="md:col-span-2 flex justify-end border-t border-border pt-4">
+                  <Button
+                    type="button"
+                    onClick={handleSaveProfile}
+                    disabled={!canSaveProfile}
+                    className="min-w-24"
+                  >
+                    {profileSaving ? "Saving..." : "Save"}
+                  </Button>
+                </div>
               </>
             )}
             <Field label="Role">
@@ -131,6 +278,94 @@ export function SettingsForm() {
             <Field label="Team">
               <Input defaultValue="Enterprise UX" className="border-transparent bg-transparent shadow-none px-0.5 -mt-3 h-auto focus-visible:ring-0 focus-visible:outline-none" />
             </Field>
+          </CardContent>
+        </Card>
+        <Card className="mt-4 border border-red-200 border-l-4 border-l-destructive bg-red-50/50 shadow-card">
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-base text-destructive">
+              <span className="flex h-8 w-8 items-center justify-center rounded-full bg-red-100 text-destructive ring-1 ring-red-200">
+                <AlertTriangle className="h-4 w-4" aria-hidden />
+              </span>
+              Danger zone
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="space-y-1">
+              <p className="text-sm font-semibold text-red-950">Delete account</p>
+              <p className="max-w-2xl text-sm text-red-700">
+                This will delete all of your data permanently and cannot be undone.
+              </p>
+            </div>
+            <AlertDialog open={deleteDialogOpen} onOpenChange={(open) => {
+              setDeleteDialogOpen(open);
+              if (!open) {
+                setDeleteConfirmation("");
+                setDeletePassword("");
+                setDeleteError(null);
+              }
+            }}>
+              <AlertDialogTrigger asChild>
+                <Button type="button" variant="destructive" className="shrink-0">
+                  Delete account
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent className="border-red-200 bg-red-50 sm:max-w-md">
+                <AlertDialogHeader>
+                  <AlertDialogTitle className="flex items-center gap-2 text-destructive">
+                    <AlertTriangle className="h-5 w-5" aria-hidden />
+                    Delete your account permanently?
+                  </AlertDialogTitle>
+                  <AlertDialogDescription className="text-red-800">
+                    This will delete all of your data permanently and cannot be undone.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <div className="space-y-4">
+                  <div className="space-y-2 rounded-lg border border-red-200 bg-white p-3">
+                    <Label htmlFor="delete-account-confirmation" className="text-red-950">Type delete to continue</Label>
+                    <Input
+                      id="delete-account-confirmation"
+                      value={deleteConfirmation}
+                      onChange={(event) => {
+                        setDeleteConfirmation(event.target.value);
+                        setDeleteError(null);
+                      }}
+                      autoComplete="off"
+                      disabled={deleteSubmitting}
+                      className="border-red-200 bg-white focus-visible:ring-red-300"
+                    />
+                  </div>
+                  {isDeleteConfirmed && (
+                    <div className="space-y-2 rounded-lg border border-red-200 bg-white p-3">
+                      <Label htmlFor="delete-account-password" className="text-red-950">Enter your password</Label>
+                      <Input
+                        id="delete-account-password"
+                        type="password"
+                        value={deletePassword}
+                        onChange={(event) => {
+                          setDeletePassword(event.target.value);
+                          setDeleteError(null);
+                        }}
+                        autoComplete="current-password"
+                        disabled={deleteSubmitting}
+                        className="border-red-200 bg-white focus-visible:ring-red-300"
+                      />
+                    </div>
+                  )}
+                  {deleteError && <p className="text-sm text-destructive">{deleteError}</p>}
+                </div>
+                <AlertDialogFooter>
+                  <AlertDialogCancel disabled={deleteSubmitting}>Cancel</AlertDialogCancel>
+                  <Button
+                    type="button"
+                    variant="destructive"
+                    onClick={handleDeleteAccount}
+                    disabled={!isDeleteConfirmed || !deletePassword || deleteSubmitting}
+                  >
+                    {deleteSubmitting ? "Deleting..." : "Delete permanently"}
+                  </Button>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
           </CardContent>
         </Card>
       </TabsContent>

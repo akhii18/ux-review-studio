@@ -92,3 +92,27 @@ export async function getSignedStorageReadUrl(storageRef: string, expiresInSecon
 
   return data.signedUrl;
 }
+
+export async function deleteStorageRefs(storageRefs: string[]): Promise<void> {
+  const refsByBucket = new Map<string, string[]>();
+
+  for (const storageRef of storageRefs) {
+    if (!storageRef || /^data:/i.test(storageRef)) continue;
+    if (/^https?:\/\//i.test(storageRef) && !storageRef.includes("supabase.co/storage/v1/object")) continue;
+
+    const { bucket, path } = parseStorageRef(storageRef);
+    const refs = refsByBucket.get(bucket) ?? [];
+    refs.push(path);
+    refsByBucket.set(bucket, refs);
+  }
+
+  if (refsByBucket.size === 0) return;
+
+  const supabase = getSupabaseClient();
+  for (const [bucket, paths] of refsByBucket) {
+    const { error } = await supabase.storage.from(bucket).remove(paths);
+    if (error) {
+      throw new Error(`Failed to delete Supabase Storage assets: ${error.message}`);
+    }
+  }
+}

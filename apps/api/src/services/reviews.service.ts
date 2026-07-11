@@ -135,6 +135,7 @@ type DraftReviewInput = {
 type ReviewExportRecord = {
   id: string;
   title: string;
+  description: string;
   severity: string;
   area: string;
   screen: string | null;
@@ -144,6 +145,7 @@ type ReviewExportRecord = {
   businessImpact: string | null;
   a11yImpact: string | null;
   aiMetadata: unknown;
+  bboxRefs?: unknown;
   status: string;
   reviewBasis: Array<{ type: string; name: string; explanation: string }>;
 };
@@ -567,7 +569,7 @@ export const ReviewsService = {
   async exportReport(reviewId: string, userId: string) {
     const review = await prisma.review.findFirst({
       where: { id: reviewId, userId },
-      include: { findings: { include: { reviewBasis: true } }, reports: { orderBy: { createdAt: "desc" } } },
+      include: { findings: { include: { reviewBasis: true } }, assets: true, reports: { orderBy: { createdAt: "desc" } } },
     });
 
     if (!review) {
@@ -586,7 +588,7 @@ export const ReviewsService = {
       where: { reviewId, status: "finalized" },
     });
 
-    return prisma.report.create({
+    const finalizedReport = await prisma.report.create({
       data: {
         id: `rep-${crypto.randomUUID().slice(0, 8)}`,
         reviewId,
@@ -598,6 +600,44 @@ export const ReviewsService = {
         createdBy: currentUser?.name ?? review.owner,
       },
     });
+
+    const visualFindings = findings
+      .filter((finding) => finding.status === "ACCEPTED" || finding.status === "EDITED")
+      .map((finding) => ({
+        id: finding.id,
+        title: finding.title,
+        description: finding.description,
+        severity: finding.severity,
+        area: finding.area,
+        screen: finding.screen,
+        observation: finding.observation,
+        why: finding.why,
+        recommendation: finding.recommendation,
+        businessImpact: finding.businessImpact,
+        a11yImpact: finding.a11yImpact,
+        status: finding.status,
+        bboxRefs: finding.bboxRefs,
+      }));
+
+    const visualAssets = await Promise.all(
+      review.assets
+        .filter((asset) => String(asset.mimeType || "").toLowerCase().startsWith("image/"))
+        .map(async (asset) => ({
+          id: asset.id,
+          name: asset.name,
+          mimeType: asset.mimeType,
+          blobUrl: asset.blobUrl ? await getSignedStorageReadUrl(asset.blobUrl) : asset.blobUrl,
+          sizeBytes: asset.sizeBytes,
+        }))
+    );
+
+    return {
+      ...finalizedReport,
+      visualContext: {
+        assets: visualAssets,
+        findings: visualFindings,
+      },
+    };
   },
 
   async getAnalytics(userId: string, options?: AnalyticsQueryOptions) {

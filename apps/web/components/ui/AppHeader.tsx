@@ -2,9 +2,9 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Search } from "lucide-react";
+import { LogOut, Search } from "lucide-react";
 import { Input } from "@/components/ui/input";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Separator } from "@/components/ui/separator";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import {
@@ -15,7 +15,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { NotificationBellMenu } from "@/components/ui/NotificationBellMenu";
 
-type HeaderUser = { initials: string; name: string; email?: string };
+type HeaderUser = { initials: string; name: string; email?: string; avatarDataUrl?: string | null };
 
 function getInitialsFromName(fullName: string): string {
   const parts = fullName
@@ -51,11 +51,12 @@ export function AppHeader({
     }
 
     try {
-      const parsed = JSON.parse(raw) as { name?: string; email?: string };
+      const parsed = JSON.parse(raw) as { name?: string; email?: string; avatarDataUrl?: string | null };
       const name = (parsed.name ?? "User").trim() || "User";
       setStoredUser({
         name,
         email: parsed.email,
+        avatarDataUrl: parsed.avatarDataUrl,
         initials: getInitialsFromName(name),
       });
     } catch {
@@ -134,6 +135,7 @@ export function AppHeader({
               aria-label={`Signed in as ${activeUser.name}`}
             >
               <Avatar className="h-9 w-9 ring-2 ring-border sm:h-10 sm:w-10">
+                {activeUser.avatarDataUrl && <AvatarImage src={activeUser.avatarDataUrl} alt="" />}
                 <AvatarFallback className="bg-primary text-[12px] font-semibold text-primary-foreground">
                   {activeUser.initials}
                 </AvatarFallback>
@@ -142,6 +144,10 @@ export function AppHeader({
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-40">
             <DropdownMenuItem onClick={handleProfile}>Profile</DropdownMenuItem>
+            <DropdownMenuItem onClick={handleLogout} className="text-destructive focus:text-destructive">
+              <LogOut className="mr-2 h-4 w-4" aria-hidden />
+              Logout
+            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </div>

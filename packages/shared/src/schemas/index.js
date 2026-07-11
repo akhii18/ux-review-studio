@@ -56,6 +56,11 @@ exports.TriageFindingSchema = zod_1.z.object({
     reviewBasis: zod_1.z.array(exports.ReviewBasisItemSchema).optional(),
 });
 exports.EscalateFindingSchema = zod_1.z.object({
+    emails: zod_1.z.array(zod_1.z.string().email("Invalid email address")).min(1, "At least one email is required"),
+    recipients: zod_1.z.array(zod_1.z.object({
+        label: zod_1.z.string().min(1),
+        email: zod_1.z.string().email("Invalid email address").optional(),
+    })).optional(),
     reason: zod_1.z.string().min(1, "Escalation reason is required"),
 });
 exports.CreateCommentSchema = zod_1.z.object({

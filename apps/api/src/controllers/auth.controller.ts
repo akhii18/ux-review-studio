@@ -18,6 +18,10 @@ const ForgotPasswordSchema = z.object({
   email: z.string().email(),
 });
 
+const ResendVerificationSchema = z.object({
+  email: z.string().email(),
+});
+
 const ResetPasswordSchema = z.object({
   token: z.string().min(1),
   password: z.string().min(10),
@@ -28,7 +32,12 @@ const VerifyEmailSchema = z.object({
 });
 
 const UpdateMeSchema = z.object({
-  name: z.string().min(1),
+  name: z.string().min(1).optional(),
+  avatarDataUrl: z.string().max(1_500_000).nullable().optional(),
+});
+
+const DeleteAccountSchema = z.object({
+  password: z.string().min(1),
 });
 
 export const AuthController = {
@@ -59,13 +68,29 @@ export const AuthController = {
     }
 
     const payload = UpdateMeSchema.parse(req.body);
-    const result = await AuthService.updateMe(req.user.sub, payload.name);
+    const result = await AuthService.updateMe(req.user.sub, payload);
+    res.json({ success: true, data: result });
+  },
+
+  async deleteAccount(req: Request, res: Response) {
+    if (!req.user?.sub) {
+      throw new AppError(401, "Authentication required");
+    }
+
+    const payload = DeleteAccountSchema.parse(req.body);
+    const result = await AuthService.deleteAccount(req.user.sub, payload.password);
     res.json({ success: true, data: result });
   },
 
   async forgotPassword(req: Request, res: Response) {
     const payload = ForgotPasswordSchema.parse(req.body);
     const result = await AuthService.forgotPassword(payload.email);
+    res.json({ success: true, data: result });
+  },
+
+  async resendVerification(req: Request, res: Response) {
+    const payload = ResendVerificationSchema.parse(req.body);
+    const result = await AuthService.resendVerification(payload.email);
     res.json({ success: true, data: result });
   },
 

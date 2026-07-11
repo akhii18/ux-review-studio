@@ -16,7 +16,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Switch } from "@/components/ui/switch";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Badge } from "@/components/ui/badge";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Progress } from "@/components/ui/progress";
 import { Slider } from "@/components/ui/slider";
 import { useAppDispatch } from "@/store/hooks";
@@ -263,6 +263,8 @@ function isValidWebsiteReferenceUrl(value: string): boolean {
 function parseStoredContextNotes(noteBlocks: string[]) {
   let storedFigmaUrl = "";
   let storedDesignSystemUrl = "";
+  let storedWebsiteLoginIdentifier = "";
+  let storedWebsiteLoginPassword = "";
   const remainingBlocks: string[] = [];
 
   for (const block of noteBlocks) {
@@ -281,6 +283,16 @@ function parseStoredContextNotes(noteBlocks: string[]) {
         continue;
       }
 
+      if (!storedWebsiteLoginIdentifier && /^Website Login Identifier:\s*/i.test(trimmedLine)) {
+        storedWebsiteLoginIdentifier = trimmedLine.replace(/^Website Login Identifier:\s*/i, "").trim();
+        continue;
+      }
+
+      if (!storedWebsiteLoginPassword && /^Website Login Password:\s*/i.test(trimmedLine)) {
+        storedWebsiteLoginPassword = trimmedLine.replace(/^Website Login Password:\s*/i, "").trim();
+        continue;
+      }
+
       retainedLines.push(line);
     }
 
@@ -293,6 +305,8 @@ function parseStoredContextNotes(noteBlocks: string[]) {
   return {
     figmaUrl: storedFigmaUrl,
     designSystemUrl: storedDesignSystemUrl,
+    websiteLoginIdentifier: storedWebsiteLoginIdentifier,
+    websiteLoginPassword: storedWebsiteLoginPassword,
     contextText: remainingBlocks.join("\n\n"),
   };
 }
@@ -412,6 +426,9 @@ export default function NewReviewPage() {
   const [owner, setOwner] = useState("");
   const [figmaUrl, setFigmaUrl] = useState("");
   const [designSystemUrl, setDesignSystemUrl] = useState("");
+  const [websiteLoginIdentifier, setWebsiteLoginIdentifier] = useState("");
+  const [websiteLoginPassword, setWebsiteLoginPassword] = useState("");
+  const [isWebsiteAuthModalOpen, setIsWebsiteAuthModalOpen] = useState(false);
   const [criteria, setCriteria] = useState<string[]>(REVIEW_TYPE_REQUIRED_CRITERIA.full);
   const [findingMetadataOptions, setFindingMetadataOptions] = useState<FindingOutputOptionKey[]>([
     ...DEFAULT_FINDING_OUTPUT_OPTIONS,
@@ -585,6 +602,8 @@ export default function NewReviewPage() {
         setContextText(parsedNotes.contextText);
         setFigmaUrl(parsedNotes.figmaUrl);
         setDesignSystemUrl(parsedNotes.designSystemUrl);
+        setWebsiteLoginIdentifier(parsedNotes.websiteLoginIdentifier);
+        setWebsiteLoginPassword(parsedNotes.websiteLoginPassword);
 
         const stepMatch = typeof review.stage === "string" ? review.stage.match(/^step-(\d+)$/) : null;
         if (stepMatch) {
@@ -1031,6 +1050,8 @@ export default function NewReviewPage() {
     if (contextText.trim()) notes.push(contextText.trim());
     if (figmaUrl.trim()) notes.push(`Figma URL: ${figmaUrl.trim()}`);
     if (designSystemUrl.trim()) notes.push(`Design System URL: ${designSystemUrl.trim()}`);
+    if (websiteLoginIdentifier.trim()) notes.push(`Website Login Identifier: ${websiteLoginIdentifier.trim()}`);
+    if (websiteLoginPassword.trim()) notes.push(`Website Login Password: ${websiteLoginPassword.trim()}`);
 
     if (notes.length > 0) {
       assets.push({
@@ -1089,13 +1110,7 @@ export default function NewReviewPage() {
     }
   };
 
-  const runReview = async () => {
-    if (!validStep1) {
-      toast.error("Add at least one screenshot image, a valid public Figma prototype URL, or a valid public Design System URL before starting the review.");
-      setStep(1);
-      return;
-    }
-
+  const startReviewPipeline = async () => {
     setRunning(true);
     setStageIdx(0);
     setCurrentStageLabel("Saving review…");
@@ -1175,11 +1190,25 @@ export default function NewReviewPage() {
 
       pollRef.current = setInterval(pollProgress, 2000);
       void pollProgress();
-
     } catch (err: any) {
       toast.error(err.message || "Failed to start review");
       setRunning(false);
     }
+  };
+
+  const runReview = async () => {
+    if (!validStep1) {
+      toast.error("Add at least one screenshot image, a valid public Figma prototype URL, or a valid public Design System URL before starting the review.");
+      setStep(1);
+      return;
+    }
+
+    if (hasValidDesignSystemUrl) {
+      setIsWebsiteAuthModalOpen(true);
+      return;
+    }
+
+    await startReviewPipeline();
   };
 
   if (isLoadingDraft) {
@@ -1649,6 +1678,65 @@ export default function NewReviewPage() {
             )}
           </aside>
         </div>
+
+        <Dialog open={isWebsiteAuthModalOpen} onOpenChange={setIsWebsiteAuthModalOpen}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Website Login Credentials</DialogTitle>
+              <DialogDescription>
+                Enter LAN ID or email and password if the Design System URL requires login. Credentials are used only for this analysis run.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-4">
+              <Field label="LAN ID or Email">
+                <Input
+                  value={websiteLoginIdentifier}
+                  onChange={(event) => setWebsiteLoginIdentifier(event.target.value)}
+                  placeholder="lanid or email@example.com"
+                />
+              </Field>
+
+              <Field label="Password">
+                <Input
+                  type="password"
+                  value={websiteLoginPassword}
+                  onChange={(event) => setWebsiteLoginPassword(event.target.value)}
+                  placeholder="Enter password"
+                />
+              </Field>
+
+              <p className="text-xs text-muted-foreground">
+                Leave fields blank to continue with guest/public mode.
+              </p>
+            </div>
+
+            <DialogFooter>
+              <Button
+                variant="outline"
+                onClick={async () => {
+                  setIsWebsiteAuthModalOpen(false);
+                  await startReviewPipeline();
+                }}
+              >
+                Continue Without Login
+              </Button>
+              <Button
+                onClick={async () => {
+                  if (websiteLoginIdentifier.trim().length === 0 || websiteLoginPassword.trim().length === 0) {
+                    toast.error("Enter both identifier and password, or continue without login.");
+                    return;
+                  }
+
+                  setIsWebsiteAuthModalOpen(false);
+                  await startReviewPipeline();
+                }}
+              >
+                Save and Run
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         {/* Navigation */}
         {!running && step < steps.length - 1 && (

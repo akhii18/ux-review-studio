@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { AppHeader } from "@/components/ui/AppHeader";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -12,10 +12,8 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sh
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { FileText, Download, Eye, ChevronDown } from "lucide-react";
 import { exportReviewReport, listReviews } from "@/lib/api";
-import { downloadReport } from "@/lib/reportExport";
+import { buildReportPreviewHtml, downloadReport } from "@/lib/reportExport";
 import { toast } from "@/lib/toast";
-import { marked } from "marked";
-import DOMPurify from "dompurify";
 
 function ReportsPageContent() {
   const searchParams = useSearchParams();
@@ -24,11 +22,29 @@ function ReportsPageContent() {
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<any | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
+  const [selectedReportHtml, setSelectedReportHtml] = useState<string>("<p>No content</p>");
 
-  const selectedReportHtml = useMemo(() => {
-    if (!selected?.contentMd) return "<p>No content</p>";
-    const parsedHtml = marked.parse(selected.contentMd, { gfm: true, breaks: true });
-    return DOMPurify.sanitize(typeof parsedHtml === "string" ? parsedHtml : String(parsedHtml));
+  useEffect(() => {
+    let cancelled = false;
+
+    async function renderSelectedReport() {
+      if (!selected) {
+        setSelectedReportHtml("<p>No content</p>");
+        return;
+      }
+
+      try {
+        const html = await buildReportPreviewHtml(selected);
+        if (!cancelled) setSelectedReportHtml(html);
+      } catch {
+        if (!cancelled) setSelectedReportHtml("<p>No content</p>");
+      }
+    }
+
+    void renderSelectedReport();
+    return () => {
+      cancelled = true;
+    };
   }, [selected]);
 
   useEffect(() => {
@@ -152,7 +168,7 @@ function ReportsPageContent() {
             <SheetTitle className="text-base">{selected?.name ?? "Report"}</SheetTitle>
           </SheetHeader>
           <ScrollArea className="flex-1 px-6 py-4">
-            <article className="report-html" dangerouslySetInnerHTML={{ __html: selectedReportHtml }} />
+            <iframe title={selected?.name || "Report preview"} className="h-[72vh] w-full border-0" srcDoc={selectedReportHtml} />
           </ScrollArea>
           {selected && (
             <div className="px-6 py-4 border-t border-border shrink-0">

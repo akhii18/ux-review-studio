@@ -121,10 +121,31 @@ export declare const TriageFindingSchema: z.ZodObject<{
     }[] | undefined;
 }>;
 export declare const EscalateFindingSchema: z.ZodObject<{
+    emails: z.ZodArray<z.ZodString, "many">;
+    recipients: z.ZodOptional<z.ZodArray<z.ZodObject<{
+        label: z.ZodString;
+        email: z.ZodOptional<z.ZodString>;
+    }, "strip", z.ZodTypeAny, {
+        label: string;
+        email?: string | undefined;
+    }, {
+        label: string;
+        email?: string | undefined;
+    }>, "many">>;
     reason: z.ZodString;
 }, "strip", z.ZodTypeAny, {
+    emails: string[];
+    recipients?: {
+        label: string;
+        email?: string | undefined;
+    }[] | undefined;
     reason: string;
 }, {
+    emails: string[];
+    recipients?: {
+        label: string;
+        email?: string | undefined;
+    }[] | undefined;
     reason: string;
 }>;
 export declare const FindingsQuerySchema: z.ZodObject<{
