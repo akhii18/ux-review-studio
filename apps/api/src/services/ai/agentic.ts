@@ -8,6 +8,7 @@ import { config } from "../../config";
 import { getSignedStorageReadUrl } from "../supabaseStorage";
 import { captureFigmaPrototype, persistCapturedFigmaScreens } from "../figmaCapture.service";
 import { captureWebsiteReference, persistCapturedWebsiteScreens } from "../websiteCapture.service";
+import { refreshReviewUxScore } from "../uxScore.service";
 
 async function createReportWithRetry(data: {
   reviewId: string;
@@ -1392,7 +1393,6 @@ export async function runReviewPipeline(reviewId: string, options?: RunReviewPip
     const p0 = findings.filter((finding) => finding.severity === "P0").length;
     const p1 = findings.filter((finding) => finding.severity === "P1").length;
     const p2 = findings.filter((finding) => finding.severity === "P2").length;
-    const uxScore = Math.max(0, 100 - (p0 * 8) - (p1 * 3) - p2);
 
     logPipeline("info", reviewId, "findings_synthesized", {
       findingCount: findings.length,
@@ -1400,7 +1400,6 @@ export async function runReviewPipeline(reviewId: string, options?: RunReviewPip
       p0,
       p1,
       p2,
-      uxScore,
     });
 
     const newCandidates = buildPersistableFindingCandidates({
@@ -1467,6 +1466,13 @@ export async function runReviewPipeline(reviewId: string, options?: RunReviewPip
     logPipeline("info", reviewId, "findings_persisted", {
       persistedFindings,
       mergedCount,
+      mode,
+    });
+
+    const uxScore = await refreshReviewUxScore(reviewId);
+
+    logPipeline("info", reviewId, "ux_score_recalculated", {
+      uxScore,
       mode,
     });
 

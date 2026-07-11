@@ -1,6 +1,7 @@
 import { FindingsRepository } from "../repositories/findings.repository";
 import { AppError } from "../middleware/errorHandler";
 import { prisma } from "../config/prisma";
+import { refreshReviewUxScore } from "./uxScore.service";
 import type { FindingsQuery, UpdateFinding, TriageFinding } from "@uxm/shared";
 import { EmailService } from "./email.service";
 import { getSignedStorageReadUrl } from "./supabaseStorage";
@@ -52,14 +53,18 @@ export const FindingsService = {
       ...(payload.reviewBasis !== undefined && { reviewBasis: payload.reviewBasis }),
     };
 
-    return FindingsRepository.update(id, updateData);
+    const updatedFinding = await FindingsRepository.update(id, updateData);
+    await refreshReviewUxScore(finding.reviewId);
+    return updatedFinding;
 
   },
 
   async update(id: string, userId: string, data: UpdateFinding) {
     const finding = await FindingsRepository.findById(id, userId);
     if (!finding) throw new AppError(404, "Finding not found");
-    return FindingsRepository.update(id, data);
+    const updatedFinding = await FindingsRepository.update(id, data);
+    await refreshReviewUxScore(finding.reviewId);
+    return updatedFinding;
   },
 
   async escalate(
@@ -158,6 +163,7 @@ export const FindingsService = {
       ...existingAiMetadata,
       escalationRecipients: recipientLabels,
     });
+    await refreshReviewUxScore(finding.reviewId);
 
     return updatedFinding;
   },
@@ -270,7 +276,9 @@ export const FindingsService = {
         status: "PROPOSED" as const,
       };
 
-      return FindingsRepository.update(findingId, updateData);
+      const updatedFinding = await FindingsRepository.update(findingId, updateData);
+      await refreshReviewUxScore(finding.reviewId);
+      return updatedFinding;
     } catch (error) {
       console.error("Regeneration failed for finding", findingId, error);
       throw new AppError(500, "AI regeneration failed. Please try again.");
