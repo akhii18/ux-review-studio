@@ -56,6 +56,13 @@ function toTitleCase(value?: string | null) {
     .replace(/\bPrd\b/g, "PRD");
 }
 
+function formatReviewType(value?: string | null) {
+  const normalized = value?.trim().toLowerCase();
+  if (!normalized) return "—";
+  if (normalized === "partial") return "Custom";
+  return toTitleCase(normalized);
+}
+
 function formatReviewDate(value?: string | null) {
   if (!value) return "—";
   const date = new Date(value);
@@ -390,7 +397,7 @@ export default function HistoryPage() {
                   </td>
                   <td className="hidden px-4 py-3 align-middle text-sm md:table-cell">{r.product}</td>
                   <td className="hidden px-4 py-3 align-middle text-xs text-muted-foreground lg:table-cell">{toTitleCase(r.domain) || "—"}</td>
-                  <td className="hidden px-4 py-3 align-middle text-xs text-muted-foreground lg:table-cell">{toTitleCase(r.reviewType)}</td>
+                  <td className="hidden px-4 py-3 align-middle text-xs text-muted-foreground lg:table-cell">{formatReviewType(r.reviewType)}</td>
                   <td className="px-4 py-3 align-middle text-right font-medium tabular-nums">
                     {r.uxScore ?? <span className="text-muted-foreground">—</span>}
                   </td>

@@ -13,9 +13,9 @@ type BBoxRef = {
 };
 
 const SEVERITY_PENALTY: Record<Severity, number> = {
-  P0: 8,
-  P1: 3,
-  P2: 1,
+  P0: 10,
+  P1: 5,
+  P2: 2,
 };
 
 function normalizeBBoxRefsInput(value: unknown): unknown[] {
@@ -40,7 +40,7 @@ function normalizeBBoxRefsInput(value: unknown): unknown[] {
 }
 
 function normalizeBBoxRefs(value: unknown, totalScreens: number): BBoxRef[] {
-  const refs = normalizeBBoxRefsInput(value)
+  return normalizeBBoxRefsInput(value)
     .map((item): BBoxRef | null => {
       if (!item || typeof item !== "object") return null;
       const screenIndex = Number((item as Record<string, unknown>).screenIndex);
@@ -48,16 +48,6 @@ function normalizeBBoxRefs(value: unknown, totalScreens: number): BBoxRef[] {
       return { screenIndex: Math.max(0, Math.floor(screenIndex)) };
     })
     .filter((item): item is BBoxRef => Boolean(item));
-
-  if (refs.length === 0 || totalScreens <= 1) return refs;
-
-  const minIndex = Math.min(...refs.map((ref) => ref.screenIndex));
-  const maxIndex = Math.max(...refs.map((ref) => ref.screenIndex));
-  const looksOneBased = minIndex >= 1 && maxIndex <= totalScreens;
-
-  return looksOneBased
-    ? refs.map((ref) => ({ screenIndex: ref.screenIndex - 1 }))
-    : refs;
 }
 
 function normalizeScreenName(value: string | null): string | null {

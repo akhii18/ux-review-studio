@@ -38,7 +38,7 @@ interface EscalateDialogProps {
   onOpenChange: (open: boolean) => void;
   findingId: string;
   findingTitle: string;
-  onEscalated?: () => void;
+  onEscalated?: (finding: any) => void;
 }
 
 export function EscalateDialog({
@@ -95,7 +95,7 @@ export function EscalateDialog({
     }
 
     try {
-      await escalateFinding({
+      const escalatedFinding = await escalateFinding({
         id: findingId,
         payload: {
           emails,
@@ -113,7 +113,7 @@ export function EscalateDialog({
       toast.success("Finding escalated successfully");
       onOpenChange(false);
       if (onEscalated) {
-        onEscalated();
+        onEscalated(escalatedFinding);
       }
     } catch (error: any) {
       toast.error(error?.data?.error ?? "Failed to escalate finding");

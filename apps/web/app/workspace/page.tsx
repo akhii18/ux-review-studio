@@ -141,6 +141,14 @@ const severityRank: Record<"P0" | "P1" | "P2", number> = {
   P2: 2,
 };
 
+const findingActionMessages: Partial<Record<TriageStatus, string>> = {
+  ACCEPTED: "Great, this finding will be included in the final report.",
+  EDITED: "Updated and accepted, this finding will be included in the final report.",
+  DISMISSED: "Finding dismissed, it won't be included in the final report.",
+  ESCALATED: "Finding escalated for follow-up.",
+  FALSE_POSITIVE: "Thanks, it will help us improve future reviews.",
+};
+
 const PIN_CLUSTER_CENTER_DISTANCE = 0.035;
 const PIN_CLUSTER_INTERSECTION_RATIO = 0.15;
 
@@ -270,24 +278,9 @@ function getBboxRefForScreen(finding: Finding, screenIndex?: number): BoundingBo
   if (typeof screenIndex !== "number") return null;
 
   const refs = getValidBBoxRefs(finding);
-  const exact = refs.find((ref) => ref.screenIndex === screenIndex);
-  if (exact) return exact;
-
   if (refs.length === 0) return null;
 
-  const minIndex = Math.min(...refs.map((ref) => ref.screenIndex));
-  const maxIndex = Math.max(...refs.map((ref) => ref.screenIndex));
-
-  if (minIndex === 1) {
-    const oneBased = refs.find((ref) => ref.screenIndex === screenIndex + 1);
-    if (oneBased) return oneBased;
-  }
-
-  if (screenIndex === 0 && minIndex > 0 && maxIndex > 0) {
-    return refs.find((ref) => ref.screenIndex === minIndex) ?? null;
-  }
-
-  return null;
+  return refs.find((ref) => ref.screenIndex === screenIndex) ?? null;
 }
 
 function getBboxCenter(ref: BoundingBoxRef): { x: number; y: number } {
@@ -386,7 +379,7 @@ function getClusterSeverity(cluster: PinCluster): "P0" | "P1" | "P2" {
 function findingMatchesScreenContext(finding: Finding, screenName?: string, screenIndex?: number): boolean {
   const hasCoordinateRefs = getValidBBoxRefs(finding).length > 0;
   if (hasCoordinateRefs && typeof screenIndex === "number") {
-    return Boolean(getBboxRefForScreen(finding, screenIndex)) || findingMatchesScreen(finding.screen, screenName);
+    return Boolean(getBboxRefForScreen(finding, screenIndex));
   }
   return findingMatchesScreen(finding.screen, screenName);
 }
@@ -644,7 +637,6 @@ function WorkspaceContent() {
     if (typeof screen?.screenIndex !== "number") return [];
 
     return screenFindings
-      .filter((finding) => finding.status !== "DISMISSED")
       .map((finding) => ({ finding, ref: getBboxRefForScreen(finding, screen.screenIndex) }))
       .filter((placement): placement is PinPlacement => Boolean(placement.ref));
   }, [screenFindings, screen, imageLoadFailed]);
@@ -655,16 +647,14 @@ function WorkspaceContent() {
 
   const unplacedFindings = useMemo(() => {
     if (imageLoadFailed) {
-      return screenFindings.filter((finding) => finding.status !== "DISMISSED");
+      return screenFindings;
     }
 
     if (typeof screen?.screenIndex !== "number") {
-      return screenFindings.filter((finding) => finding.status !== "DISMISSED");
+      return screenFindings;
     }
 
-    return screenFindings
-      .filter((finding) => finding.status !== "DISMISSED")
-      .filter((finding) => !getBboxRefForScreen(finding, screen.screenIndex));
+    return screenFindings.filter((finding) => !getBboxRefForScreen(finding, screen.screenIndex));
   }, [screenFindings, screen, imageLoadFailed]);
 
   const unplacedFindingGroups = useMemo(() => {
@@ -681,7 +671,7 @@ function WorkspaceContent() {
   }, [unplacedFindings, screen?.flowName]);
 
   const visibleScreenFindingCount = useMemo(
-    () => screenFindings.filter((finding) => finding.status !== "DISMISSED").length,
+    () => screenFindings.length,
     [screenFindings],
   );
 
@@ -774,11 +764,12 @@ function WorkspaceContent() {
       edited: allFindings.filter((f) => f.status === "EDITED").length,
       dismissed: allFindings.filter((f) => f.status === "DISMISSED").length,
       escalated: allFindings.filter((f) => f.status === "ESCALATED").length,
+      falsePositive: allFindings.filter((f) => f.status === "FALSE_POSITIVE").length,
       proposed: allFindings.filter((f) => f.status === "PROPOSED").length,
     };
   }, [allFindings]);
 
-  const triagedCount = triage.accepted + triage.edited + triage.dismissed + triage.escalated;
+  const triagedCount = triage.accepted + triage.edited + triage.dismissed + triage.escalated + triage.falsePositive;
   const allAcceptedHaveBasis = useMemo(() => {
     return allFindings
       .filter((f) => f.status === "ACCEPTED" || f.status === "EDITED")
@@ -786,6 +777,18 @@ function WorkspaceContent() {
   }, [allFindings]);
 
   const exportable = triage.proposed === 0 && allAcceptedHaveBasis && (triage.accepted + triage.edited > 0);
+  const exportBlockedMessage = useMemo(() => {
+    if (!allAcceptedHaveBasis) {
+      return "Add review basis to every accepted or edited finding before exporting.";
+    }
+    if (triage.proposed > 0) {
+      return `Triage all findings across all pages to enable export. ${triage.proposed} still need a decision.`;
+    }
+    if (triage.accepted + triage.edited === 0) {
+      return "Accept or edit at least one finding to create the final report.";
+    }
+    return "";
+  }, [allAcceptedHaveBasis, triage.accepted, triage.edited, triage.proposed]);
 
   const handleDownload = useCallback((report: any, format: "pdf" | "word" | "html") => {
     downloadReport(report, format);
@@ -881,21 +884,39 @@ function WorkspaceContent() {
     }
   }, [fetchReview, reviewId, runAgainPending]);
 
+  const closeFindingSheet = useCallback(() => {
+    setOpen(null);
+    setOpenCluster(null);
+    setClusterViewMode("list");
+  }, []);
+
+  const patchFindingInReviewData = useCallback((findingId: string, patch: Partial<Finding>) => {
+    setReviewData((prev: any) => {
+      if (!prev?.findings) return prev;
+      return {
+        ...prev,
+        findings: prev.findings.map((finding: any) =>
+          finding.id === findingId ? { ...finding, ...patch } : finding
+        ),
+      };
+    });
+  }, []);
+
   const handleFindingAction = useCallback(
     (findingId: string, actionStatus: TriageStatus) => {
       updateFinding(findingId, { status: actionStatus })
         .then(() => {
-          toast.success(`Finding status set to ${actionStatus.toLowerCase()}`);
+          toast.success(findingActionMessages[actionStatus] ?? `Finding status set to ${actionStatus.toLowerCase()}`);
+          patchFindingInReviewData(findingId, { status: actionStatus });
+          closeFindingSheet();
           fetchReview();
-          // Update details sheet finding if open
-          setOpen((prev) => prev && prev.id === findingId ? { ...prev, status: actionStatus } : prev);
         })
         .catch((err) => {
           toast.error("Failed to update finding");
           console.error(err);
         });
     },
-    [fetchReview]
+    [closeFindingSheet, fetchReview, patchFindingInReviewData]
   );
 
   const handleBasisChange = useCallback(
@@ -929,11 +950,15 @@ function WorkspaceContent() {
 
   const escalationFinding = open ?? activeClusterFinding;
 
-  const closeFindingSheet = useCallback(() => {
-    setOpen(null);
-    setOpenCluster(null);
-    setClusterViewMode("list");
-  }, []);
+  const getFindingScreenImageUrl = useCallback((finding: Finding) => {
+    const coordinateScreen = screens.find((candidate) =>
+      typeof candidate.screenIndex === "number" && Boolean(getBboxRefForScreen(finding, candidate.screenIndex))
+    );
+
+    return coordinateScreen?.imageUrl
+      ?? screens.find((candidate) => findingMatchesScreen(finding.screen, candidate.name))?.imageUrl
+      ?? screen?.imageUrl;
+  }, [screen?.imageUrl, screens]);
 
   if (!reviewId) {
     return (
@@ -978,40 +1003,50 @@ function WorkspaceContent() {
           <Badge variant="outline" className="gap-1 text-[10px]"><Edit3 className="h-3 w-3 text-blue-600" />Edited {triage.edited}</Badge>
           <Badge variant="outline" className="gap-1 text-[10px]"><X className="h-3 w-3" />Dismissed {triage.dismissed}</Badge>
           <Badge variant="outline" className="gap-1 text-[10px]"><ArrowUpRight className="h-3 w-3 text-destructive" />Escalated {triage.escalated}</Badge>
+          <Badge variant="outline" className="gap-1 text-[10px]"><AlertCircle className="h-3 w-3 text-muted-foreground" />False positive {triage.falsePositive}</Badge>
         </div>
         <div className="flex w-full items-center gap-2 sm:ml-auto sm:w-auto">
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                variant="outline"
-                size="sm"
-                className="min-h-11 w-full sm:w-auto"
-                disabled={!exportable}
-                aria-describedby={!exportable ? "export-help" : undefined}
-              >
-                <Download className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />Export
-                <ChevronDown className="ml-1.5 h-3.5 w-3.5" aria-hidden="true" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onSelect={() => { void handleExport("pdf"); }}>
-                Export as PDF
-              </DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => { void handleExport("word"); }}>
-                Export as Word
-              </DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => { void handleExport("html"); }}>
-                Export as HTML
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <TooltipProvider delayDuration={100}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="inline-flex w-full sm:w-auto">
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="min-h-11 w-full sm:w-auto"
+                        disabled={!exportable}
+                        aria-describedby={!exportable ? "export-help" : undefined}
+                      >
+                        <Download className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />Export
+                        <ChevronDown className="ml-1.5 h-3.5 w-3.5" aria-hidden="true" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem onSelect={() => { void handleExport("pdf"); }}>
+                        Export as PDF
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onSelect={() => { void handleExport("word"); }}>
+                        Export as Word
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onSelect={() => { void handleExport("html"); }}>
+                        Export as HTML
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </span>
+              </TooltipTrigger>
+              {!exportable && (
+                <TooltipContent className="max-w-xs text-left">
+                  {exportBlockedMessage}
+                </TooltipContent>
+              )}
+            </Tooltip>
+          </TooltipProvider>
           {!exportable && (
             <p id="export-help" className="sr-only">
-              {!allAcceptedHaveBasis
-                ? "Ensure all accepted or edited findings have at least one review basis item."
-                : triage.proposed > 0
-                ? `Triage the remaining ${triage.proposed} findings to enable export.`
-                : "Accept at least one finding to enable export."}
+              {exportBlockedMessage}
             </p>
           )}
           <Button
@@ -1215,7 +1250,7 @@ function WorkspaceContent() {
                         </div>
                         <Badge variant="outline" className="shrink-0 text-[10px]">{unplacedFindings.length}</Badge>
                       </div>
-                      <ScrollArea className="mt-2 max-h-36">
+                      <ScrollArea className="mt-2 h-36">
                         <div className="space-y-2 pr-2">
                           {unplacedFindingGroups.map((group) => (
                             <div key={group.flowName} className="space-y-1">
@@ -1262,7 +1297,7 @@ function WorkspaceContent() {
           {open ? (
             <FindingDetail
               finding={open}
-              screenImageUrl={screen?.imageUrl}
+              screenImageUrl={getFindingScreenImageUrl(open)}
               findingMetadataOptions={findingMetadataOptions}
               onAction={(status) => handleFindingAction(open.id, status)}
               onBasisChange={(basis) => handleBasisChange(open.id, basis)}
@@ -1283,7 +1318,7 @@ function WorkspaceContent() {
               <div className="flex-1 overflow-y-auto">
                 <FindingDetail
                   finding={activeClusterFinding}
-                  screenImageUrl={screen?.imageUrl}
+                  screenImageUrl={getFindingScreenImageUrl(activeClusterFinding)}
                   findingMetadataOptions={findingMetadataOptions}
                   onAction={(status) => handleFindingAction(activeClusterFinding.id, status)}
                   onBasisChange={(basis) => handleBasisChange(activeClusterFinding.id, basis)}
@@ -1312,9 +1347,11 @@ function WorkspaceContent() {
           onOpenChange={setShowEscalate}
           findingId={escalationFinding.id}
           findingTitle={escalationFinding.title}
-          onEscalated={() => {
+          onEscalated={(updatedFinding) => {
+            const nextFinding = { ...escalationFinding, ...updatedFinding, status: "ESCALATED" as TriageStatus };
+            patchFindingInReviewData(escalationFinding.id, nextFinding);
+            setOpen((prev) => prev && prev.id === escalationFinding.id ? nextFinding : prev);
             fetchReview();
-            setOpen((prev) => prev ? { ...prev, status: "ESCALATED" } : prev);
           }}
         />
       )}

@@ -218,30 +218,15 @@ function getBboxRefForScreen(finding: ExportVisualFinding, screenIndex?: number)
   if (typeof screenIndex !== "number") return null;
 
   const refs = getValidBBoxRefs(finding);
-  const exact = refs.find((ref) => ref.screenIndex === screenIndex);
-  if (exact) return exact;
-
   if (refs.length === 0) return null;
 
-  const minIndex = Math.min(...refs.map((ref) => ref.screenIndex));
-  const maxIndex = Math.max(...refs.map((ref) => ref.screenIndex));
-
-  if (minIndex === 1) {
-    const oneBased = refs.find((ref) => ref.screenIndex === screenIndex + 1);
-    if (oneBased) return oneBased;
-  }
-
-  if (screenIndex === 0 && minIndex > 0 && maxIndex > 0) {
-    return refs.find((ref) => ref.screenIndex === minIndex) ?? null;
-  }
-
-  return null;
+  return refs.find((ref) => ref.screenIndex === screenIndex) ?? null;
 }
 
 function findingMatchesScreenContext(finding: ExportVisualFinding, screenName?: string, screenIndex?: number): boolean {
   const refs = getValidBBoxRefs(finding);
   if (refs.length > 0 && typeof screenIndex === "number") {
-    return Boolean(getBboxRefForScreen(finding, screenIndex)) || findingMatchesScreen(finding.screen, screenName);
+    return Boolean(getBboxRefForScreen(finding, screenIndex));
   }
   return findingMatchesScreen(finding.screen, screenName);
 }
@@ -506,6 +491,12 @@ function buildStandaloneHtmlDocument(params: {
     .inline-image-block { margin: 18px 0 10px; page-break-inside: avoid; }
     .inline-image-label { font-size: 0.9em; font-weight: 600; color: #374151; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.02em; }
     .inline-image { display: block; width: 100%; max-width: 940px; height: auto; border: 1px solid #d1d5db; border-radius: 8px; margin: 0 0 8px; }
+    .screenshot-group { margin: 18px 0 24px; page-break-inside: avoid; }
+    .screenshot-image { display: block; width: 100%; max-width: 940px; height: auto; border: 1px solid #d1d5db; border-radius: 8px; margin: 0 0 12px; }
+    .screenshot-findings { margin-top: 8px; padding-left: 22px; }
+    .screenshot-findings li { margin: 0 0 10px; }
+    .screenshot-finding-title { margin-bottom: 3px; }
+    .screenshot-finding-meta { color: #4b5563; font-size: 0.92em; }
   </style>
 </head>
 <body>
@@ -520,6 +511,11 @@ async function buildReportBodyHtml(report: ExportableReport): Promise<string> {
   const baseHtml = markdownToSafeHtml(String(report.contentMd ?? ""));
   const doc = new DOMParser().parseFromString(baseHtml || "<p>No content</p>", "text/html");
   const groupedSections = await buildGroupedScreenshotSections(report);
+
+  if (groupedSections.length > 0) {
+    const narrativeHtml = stripIncludedFindingsSection(doc.body.innerHTML);
+    return [narrativeHtml, buildVisualSectionHtml(groupedSections)].filter(Boolean).join("\n");
+  }
 
   for (const section of groupedSections) {
     if (!section.imageDataUrl || section.findings.length === 0) continue;
