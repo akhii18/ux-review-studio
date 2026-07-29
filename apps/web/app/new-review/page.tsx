@@ -416,6 +416,7 @@ export default function NewReviewPage() {
   const dispatch = useAppDispatch();
   const searchParams = useSearchParams();
   const initialReviewId = searchParams.get("reviewId");
+  const isEditMode = searchParams.get("edit") === "true";
   const [draftReviewId, setDraftReviewId] = useState<string | null>(initialReviewId);
   const [isLoadingDraft, setIsLoadingDraft] = useState(Boolean(initialReviewId));
   const [isSavingDraft, setIsSavingDraft] = useState(false);
@@ -610,7 +611,7 @@ export default function NewReviewPage() {
           setStep(Math.max(0, Math.min(steps.length - 1, Number(stepMatch[1]) - 1)));
         }
 
-        if (review.status === "completed") {
+        if (review.status === "completed" && !isEditMode) {
           dispatch(addNotification({
             type: "review_completed",
             title: "Review completed",
@@ -693,7 +694,7 @@ export default function NewReviewPage() {
     return () => {
       cancelled = true;
     };
-  }, [dispatch, initialReviewId, router]);
+  }, [dispatch, initialReviewId, isEditMode, router]);
 
   useEffect(() => {
     return () => {

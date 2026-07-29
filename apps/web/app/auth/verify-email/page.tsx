@@ -4,8 +4,16 @@ import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { CheckCircle2, Loader2, XCircle } from "lucide-react";
 import { verifyEmail } from "@/lib/api";
+import { toast } from "@/lib/toast";
 
 const verifiedTokens = new Set<string>();
+const toastedVerifiedTokens = new Set<string>();
+
+function showVerifiedToast(token: string, successMessage: string) {
+  if (toastedVerifiedTokens.has(token)) return;
+  toastedVerifiedTokens.add(token);
+  toast.success(successMessage);
+}
 
 function VerifyEmailContent() {
   const router = useRouter();
@@ -25,8 +33,10 @@ function VerifyEmailContent() {
       }
 
       if (verifiedTokens.has(token)) {
+        const successMessage = "Email verified successfully. You can now sign in.";
         setStatus("success");
-        setMessage("Email verified successfully. You can now sign in.");
+        setMessage(successMessage);
+        showVerifiedToast(token, successMessage);
         return;
       }
 
@@ -34,8 +44,10 @@ function VerifyEmailContent() {
         const result = await verifyEmail(token);
         if (!isMounted) return;
         verifiedTokens.add(token);
+        const successMessage = result.message || "Email verified successfully. You can now sign in.";
         setStatus("success");
-        setMessage(result.message || "Email verified successfully. You can now sign in.");
+        setMessage(successMessage);
+        showVerifiedToast(token, successMessage);
       } catch (err: any) {
         if (!isMounted) return;
         setStatus("error");

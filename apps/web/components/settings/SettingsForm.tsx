@@ -41,17 +41,41 @@ const integrations = [
 const roles = ["Admin", "UX Lead", "UX Reviewer", "Designer", "Product Owner", "Viewer"] as const;
 const MAX_AVATAR_BYTES = 1_000_000;
 const ALLOWED_AVATAR_TYPES = ["image/png", "image/jpeg", "image/webp", "image/gif"];
+const PROFILE_DETAILS_STORAGE_KEY = "uxm_profile_details";
+const ORGANIZATION_STORAGE_KEY = "uxm_organization_settings";
+const DEFAULT_PROFILE_DETAILS = {
+  role: "UX Lead",
+  team: "Enterprise UX",
+};
+const DEFAULT_ORGANIZATION = {
+  name: "Acme Enterprise",
+  industry: "Banking & Financial Services",
+  workspaceUrl: "acme.uxreview.studio",
+  seats: "48 of 100",
+};
 
 export function SettingsForm() {
   const dispatch = useDispatch();
   const { data: settings, isLoading } = useGetSettingsQuery();
   const [profileName, setProfileName] = useState("");
-  const [savedProfileName, setSavedProfileName] = useState("");
   const [profileEmail, setProfileEmail] = useState("");
+  const [profileRole, setProfileRole] = useState(DEFAULT_PROFILE_DETAILS.role);
+  const [savedProfileRole, setSavedProfileRole] = useState(DEFAULT_PROFILE_DETAILS.role);
+  const [profileTeam, setProfileTeam] = useState(DEFAULT_PROFILE_DETAILS.team);
+  const [savedProfileTeam, setSavedProfileTeam] = useState(DEFAULT_PROFILE_DETAILS.team);
   const [profileAvatarDataUrl, setProfileAvatarDataUrl] = useState<string | null>(null);
   const [profileLoading, setProfileLoading] = useState(true);
-  const [profileSaving, setProfileSaving] = useState(false);
+  const [profileDetailsSaving, setProfileDetailsSaving] = useState(false);
   const [profilePhotoSaving, setProfilePhotoSaving] = useState(false);
+  const [organizationName, setOrganizationName] = useState(DEFAULT_ORGANIZATION.name);
+  const [savedOrganizationName, setSavedOrganizationName] = useState(DEFAULT_ORGANIZATION.name);
+  const [organizationIndustry, setOrganizationIndustry] = useState(DEFAULT_ORGANIZATION.industry);
+  const [savedOrganizationIndustry, setSavedOrganizationIndustry] = useState(DEFAULT_ORGANIZATION.industry);
+  const [organizationWorkspaceUrl, setOrganizationWorkspaceUrl] = useState(DEFAULT_ORGANIZATION.workspaceUrl);
+  const [savedOrganizationWorkspaceUrl, setSavedOrganizationWorkspaceUrl] = useState(DEFAULT_ORGANIZATION.workspaceUrl);
+  const [organizationSeats, setOrganizationSeats] = useState(DEFAULT_ORGANIZATION.seats);
+  const [savedOrganizationSeats, setSavedOrganizationSeats] = useState(DEFAULT_ORGANIZATION.seats);
+  const [organizationSaving, setOrganizationSaving] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleteConfirmation, setDeleteConfirmation] = useState("");
   const [deletePassword, setDeletePassword] = useState("");
@@ -62,11 +86,46 @@ export function SettingsForm() {
   useEffect(() => {
     let active = true;
 
+    const storedProfileDetails = localStorage.getItem(PROFILE_DETAILS_STORAGE_KEY);
+    if (storedProfileDetails) {
+      try {
+        const parsed = JSON.parse(storedProfileDetails) as Partial<typeof DEFAULT_PROFILE_DETAILS>;
+        const role = typeof parsed.role === "string" ? parsed.role : DEFAULT_PROFILE_DETAILS.role;
+        const team = typeof parsed.team === "string" ? parsed.team : DEFAULT_PROFILE_DETAILS.team;
+        setProfileRole(role);
+        setSavedProfileRole(role);
+        setProfileTeam(team);
+        setSavedProfileTeam(team);
+      } catch {
+        localStorage.removeItem(PROFILE_DETAILS_STORAGE_KEY);
+      }
+    }
+
+    const storedOrganization = localStorage.getItem(ORGANIZATION_STORAGE_KEY);
+    if (storedOrganization) {
+      try {
+        const parsed = JSON.parse(storedOrganization) as Partial<typeof DEFAULT_ORGANIZATION>;
+        const name = typeof parsed.name === "string" ? parsed.name : DEFAULT_ORGANIZATION.name;
+        const industry = typeof parsed.industry === "string" ? parsed.industry : DEFAULT_ORGANIZATION.industry;
+        const workspaceUrl = typeof parsed.workspaceUrl === "string" ? parsed.workspaceUrl : DEFAULT_ORGANIZATION.workspaceUrl;
+        const seats = typeof parsed.seats === "string" ? parsed.seats : DEFAULT_ORGANIZATION.seats;
+        setOrganizationName(name);
+        setSavedOrganizationName(name);
+        setOrganizationIndustry(industry);
+        setSavedOrganizationIndustry(industry);
+        setOrganizationWorkspaceUrl(workspaceUrl);
+        setSavedOrganizationWorkspaceUrl(workspaceUrl);
+        setOrganizationSeats(seats);
+        setSavedOrganizationSeats(seats);
+      } catch {
+        localStorage.removeItem(ORGANIZATION_STORAGE_KEY);
+      }
+    }
+
     apiMe()
       .then((user) => {
         if (!active) return;
         setProfileName(user.name ?? "");
-        setSavedProfileName(user.name ?? "");
         setProfileEmail(user.email ?? "");
         setProfileAvatarDataUrl(user.avatarDataUrl ?? null);
       })
@@ -92,11 +151,27 @@ export function SettingsForm() {
     .map((part) => part.charAt(0).toUpperCase())
     .join("") || "US";
 
-  const normalizedProfileName = profileName.trim().replace(/\s+/g, " ");
-  const canSaveProfile =
-    normalizedProfileName.length > 0 &&
-    normalizedProfileName !== savedProfileName &&
-    !profileSaving;
+  const normalizedProfileRole = profileRole.trim().replace(/\s+/g, " ");
+  const normalizedProfileTeam = profileTeam.trim().replace(/\s+/g, " ");
+  const canSaveProfileDetails =
+    normalizedProfileRole.length > 0 &&
+    normalizedProfileTeam.length > 0 &&
+    (normalizedProfileRole !== savedProfileRole || normalizedProfileTeam !== savedProfileTeam) &&
+    !profileDetailsSaving;
+  const normalizedOrganizationName = organizationName.trim().replace(/\s+/g, " ");
+  const normalizedOrganizationIndustry = organizationIndustry.trim().replace(/\s+/g, " ");
+  const normalizedOrganizationWorkspaceUrl = organizationWorkspaceUrl.trim().replace(/\s+/g, " ");
+  const normalizedOrganizationSeats = organizationSeats.trim().replace(/\s+/g, " ");
+  const canSaveOrganization =
+    normalizedOrganizationName.length > 0 &&
+    normalizedOrganizationIndustry.length > 0 &&
+    normalizedOrganizationWorkspaceUrl.length > 0 &&
+    normalizedOrganizationSeats.length > 0 &&
+    (normalizedOrganizationName !== savedOrganizationName ||
+      normalizedOrganizationIndustry !== savedOrganizationIndustry ||
+      normalizedOrganizationWorkspaceUrl !== savedOrganizationWorkspaceUrl ||
+      normalizedOrganizationSeats !== savedOrganizationSeats) &&
+    !organizationSaving;
   const isDeleteConfirmed = deleteConfirmation.trim().toLowerCase() === "delete";
 
   const syncCurrentUser = (user: { name?: string | null; email?: string | null; avatarDataUrl?: string | null }) => {
@@ -107,24 +182,47 @@ export function SettingsForm() {
     window.dispatchEvent(new Event("uxm:user-updated"));
   };
 
-  const handleSaveProfile = async () => {
-    if (!canSaveProfile) return;
+  const handleSaveProfileDetails = () => {
+    if (!canSaveProfileDetails) return;
 
-    try {
-      setProfileSaving(true);
-      const result = await apiUpdateMe({ name: normalizedProfileName });
-      localStorage.setItem("token", result.token);
-      syncCurrentUser(result.user);
-      document.cookie = `token=${result.token}; Path=/; Max-Age=${result.expiresInSeconds}; SameSite=Lax`;
-      setProfileName(result.user.name ?? "");
-      setSavedProfileName(result.user.name ?? "");
-      setProfileEmail(result.user.email ?? "");
-      toast.success("Profile updated");
-    } catch (err: any) {
-      toast.error(err?.message ?? "Failed to update profile");
-    } finally {
-      setProfileSaving(false);
-    }
+    setProfileDetailsSaving(true);
+    localStorage.setItem(
+      PROFILE_DETAILS_STORAGE_KEY,
+      JSON.stringify({ role: normalizedProfileRole, team: normalizedProfileTeam })
+    );
+    setProfileRole(normalizedProfileRole);
+    setSavedProfileRole(normalizedProfileRole);
+    setProfileTeam(normalizedProfileTeam);
+    setSavedProfileTeam(normalizedProfileTeam);
+    dispatch(markSaved(new Date().toISOString()));
+    toast.success("Profile details saved");
+    setProfileDetailsSaving(false);
+  };
+
+  const handleSaveOrganization = () => {
+    if (!canSaveOrganization) return;
+
+    setOrganizationSaving(true);
+    localStorage.setItem(
+      ORGANIZATION_STORAGE_KEY,
+      JSON.stringify({
+        name: normalizedOrganizationName,
+        industry: normalizedOrganizationIndustry,
+        workspaceUrl: normalizedOrganizationWorkspaceUrl,
+        seats: normalizedOrganizationSeats,
+      })
+    );
+    setOrganizationName(normalizedOrganizationName);
+    setSavedOrganizationName(normalizedOrganizationName);
+    setOrganizationIndustry(normalizedOrganizationIndustry);
+    setSavedOrganizationIndustry(normalizedOrganizationIndustry);
+    setOrganizationWorkspaceUrl(normalizedOrganizationWorkspaceUrl);
+    setSavedOrganizationWorkspaceUrl(normalizedOrganizationWorkspaceUrl);
+    setOrganizationSeats(normalizedOrganizationSeats);
+    setSavedOrganizationSeats(normalizedOrganizationSeats);
+    dispatch(markSaved(new Date().toISOString()));
+    toast.success("Organization saved");
+    setOrganizationSaving(false);
   };
 
   const handleProfilePhotoChange = (event: ChangeEvent<HTMLInputElement>) => {
@@ -248,36 +346,41 @@ export function SettingsForm() {
             ) : (
               <>
                 <Field label="Full name">
-                  <Input
-                    value={profileName}
-                    onChange={(event) => setProfileName(event.target.value.replace(/^\s+/, ""))}
-                    autoComplete="name"
-                    disabled={profileSaving}
-                  />
+                  <p className="px-0.5 -mt-2 text-sm font-medium text-foreground">
+                    {profileName || "—"}
+                  </p>
                 </Field>
                 <Field label="Email" readOnly>
                   <p className="text-sm font-medium text-foreground px-0.5 -mt-2">
                     {profileEmail || "—"}
                   </p>
                 </Field>
-                <div className="md:col-span-2 flex justify-end border-t border-border pt-4">
-                  <Button
-                    type="button"
-                    onClick={handleSaveProfile}
-                    disabled={!canSaveProfile}
-                    className="min-w-24"
-                  >
-                    {profileSaving ? "Saving..." : "Save"}
-                  </Button>
-                </div>
               </>
             )}
             <Field label="Role">
-              <Input defaultValue="UX Lead" className="border-transparent bg-transparent shadow-none px-0.5 -mt-3 h-auto focus-visible:ring-0 focus-visible:outline-none" />
+              <Input
+                value={profileRole}
+                onChange={(event) => setProfileRole(event.target.value.replace(/^\s+/, ""))}
+                disabled={profileDetailsSaving}
+              />
             </Field>
             <Field label="Team">
-              <Input defaultValue="Enterprise UX" className="border-transparent bg-transparent shadow-none px-0.5 -mt-3 h-auto focus-visible:ring-0 focus-visible:outline-none" />
+              <Input
+                value={profileTeam}
+                onChange={(event) => setProfileTeam(event.target.value.replace(/^\s+/, ""))}
+                disabled={profileDetailsSaving}
+              />
             </Field>
+            <div className="md:col-span-2 flex justify-end border-t border-border pt-4">
+              <Button
+                type="button"
+                onClick={handleSaveProfileDetails}
+                disabled={!canSaveProfileDetails}
+                className="min-w-24"
+              >
+                {profileDetailsSaving ? "Saving..." : "Save"}
+              </Button>
+            </div>
           </CardContent>
         </Card>
         <Card className="mt-4 border border-red-200 border-l-4 border-l-destructive bg-red-50/50 shadow-card">
@@ -377,17 +480,43 @@ export function SettingsForm() {
           </CardHeader>
           <CardContent className="grid gap-4 md:grid-cols-2">
             <Field label="Organization name">
-              <Input defaultValue="Acme Enterprise" />
+              <Input
+                value={organizationName}
+                onChange={(event) => setOrganizationName(event.target.value.replace(/^\s+/, ""))}
+                disabled={organizationSaving}
+              />
             </Field>
             <Field label="Industry">
-              <Input defaultValue="Banking & Financial Services" />
+              <Input
+                value={organizationIndustry}
+                onChange={(event) => setOrganizationIndustry(event.target.value.replace(/^\s+/, ""))}
+                disabled={organizationSaving}
+              />
             </Field>
             <Field label="Workspace URL">
-              <Input defaultValue="acme.uxreview.studio" />
+              <Input
+                value={organizationWorkspaceUrl}
+                onChange={(event) => setOrganizationWorkspaceUrl(event.target.value.replace(/^\s+/, ""))}
+                disabled={organizationSaving}
+              />
             </Field>
             <Field label="Seats">
-              <Input defaultValue="48 of 100" />
+              <Input
+                value={organizationSeats}
+                onChange={(event) => setOrganizationSeats(event.target.value.replace(/^\s+/, ""))}
+                disabled={organizationSaving}
+              />
             </Field>
+            <div className="md:col-span-2 flex justify-end border-t border-border pt-4">
+              <Button
+                type="button"
+                onClick={handleSaveOrganization}
+                disabled={!canSaveOrganization}
+                className="min-w-24"
+              >
+                {organizationSaving ? "Saving..." : "Save"}
+              </Button>
+            </div>
           </CardContent>
         </Card>
       </TabsContent>

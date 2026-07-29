@@ -15,6 +15,7 @@ const Toaster = ({ position = "top-right", ...props }: ToasterProps) => {
         duration: Infinity,
         classNames: {
           toast: "group toast pointer-events-auto group-[.toaster]:shadow-lg [&_[data-close-button]]:!opacity-100 [&_[data-close-button]]:!pointer-events-auto [&_[data-close-button]]:!text-foreground [&_[data-close-button]]:!bg-background [&_[data-close-button]]:!border-border [&_[data-close-button]]:!rounded-md [&_[data-close-button]]:!p-1",
+          success: "!bg-green-600 !text-white !border-green-700 [&_[data-close-button]]:!text-white [&_[data-close-button]]:!bg-green-700 [&_[data-close-button]]:!border-green-500 [&_[data-close-button]]:!pointer-events-auto",
           error: "!bg-red-600 !text-white !border-red-700 [&_[data-close-button]]:!text-white [&_[data-close-button]]:!bg-red-700 [&_[data-close-button]]:!border-red-500 [&_[data-close-button]]:!pointer-events-auto",
           description: "group-[.toast]:text-muted-foreground",
           closeButton: "!opacity-100 !pointer-events-auto",

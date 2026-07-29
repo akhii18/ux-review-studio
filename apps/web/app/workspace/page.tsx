@@ -622,7 +622,7 @@ function WorkspaceContent() {
 
   useEffect(() => {
     toast.dismiss();
-  }, [clusterFindingIndex, open, openCluster, selectedScreen]);
+  }, [clusterFindingIndex, selectedScreen]);
 
   const screen = screens.find((s) => s.id === selectedScreen) ?? screens[0] ?? null;
   const idx = screen ? screens.findIndex((s) => s.id === screen.id) : -1;
@@ -906,7 +906,12 @@ function WorkspaceContent() {
     (findingId: string, actionStatus: TriageStatus, options?: { returnToCluster: boolean }) => {
       updateFinding(findingId, { status: actionStatus })
         .then(() => {
-          toast.success(findingActionMessages[actionStatus] ?? `Finding status set to ${actionStatus.toLowerCase()}`);
+          const message = findingActionMessages[actionStatus] ?? `Finding status set to ${actionStatus.toLowerCase()}`;
+          if (actionStatus === "DISMISSED") {
+            toast.error(message);
+          } else {
+            toast.success(message);
+          }
           patchFindingInReviewData(findingId, { status: actionStatus });
           if (options?.returnToCluster) {
             setClusterViewMode("list");
@@ -1768,17 +1773,17 @@ function FindingDetail({ finding, screenImageUrl, findingMetadataOptions, onActi
           </div>
         )}
 
-        <div className="rounded-lg border border-accent/30 bg-accent/5 p-3">
-          <div className="flex items-center gap-2 text-xs font-medium text-accent">
+        <div className="rounded-[1.125rem] border border-red-300 bg-red-50/70 p-4">
+          <div className="flex items-center gap-2 text-sm font-semibold text-red-600">
             {isRegenerating ? (
               <><Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />Regenerating with AI…</>
             ) : (
-              <><Sparkles className="h-3.5 w-3.5" aria-hidden="true" />AI confidence · {finding.confidence}%</>
+              <><Sparkles className="h-4 w-4" aria-hidden="true" />AI confidence · {finding.confidence}%</>
             )}
           </div>
           {!isRegenerating && (
-            <p className="mt-1 text-xs text-muted-foreground">
-              You decide the final outcome.
+            <p className="mt-2 text-sm leading-relaxed text-foreground/75">
+              Based on the selected checklist and 12 prior reviews. You decide the final outcome.
             </p>
           )}
         </div>

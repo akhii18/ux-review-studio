@@ -52,7 +52,12 @@ export function FindingCard({ finding, open, onClose }: FindingCardProps) {
     if (action === "ESCALATE") { setShowEscalate(true); return; }
     try {
       await triage({ id: finding.id, payload: { action } }).unwrap();
-      toast.success(`Finding ${action.toLowerCase().replace("_", " ")}d`);
+      const message = `Finding ${action.toLowerCase().replace("_", " ")}d`;
+      if (action === "DISMISS") {
+        toast.error(message);
+      } else {
+        toast.success(message);
+      }
       onClose();
     } catch {
       toast.error("Action failed. Please try again.");
